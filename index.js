@@ -14,10 +14,30 @@ const PORT = Number(process.env.PORT) || 5090;
 const app = express();
 const server = createServer(app);
 
+const corsOrigins = String(
+  process.env.CORS_ORIGINS ||
+    "http://localhost:5173,https://yamaha-mini-app.vercel.app",
+)
+  .split(",")
+  .map((item) => item.trim())
+  .filter(Boolean);
+
 const corsOptions = {
-  origin: ["http://localhost:5173", "https://yamaha-mini-app.vercel.app"],
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (corsOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error("Not allowed by CORS"));
+  },
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
   credentials: true,
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "X-TG-User-Id",
+    "X-TG-Username",
+    "X-TG-First-Name",
+    "X-TG-Last-Name",
+  ],
 };
 
 app.use(cors(corsOptions));
