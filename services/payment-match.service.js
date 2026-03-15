@@ -1,0 +1,168 @@
+const Order = require("../model/order.model");
+const PaymentLog = require("../model/payment-log.model");
+const User = require("../model/user.model");
+const { autoFulfillOrder } = require("./avtoBuy.service");
+const { getIO } = require("../socket");
+const { notifyUcPaid } = require("./notify.service");
+
+function parseAmountFromText(text) {
+  const raw = String(text || "");
+  const lines = raw.split(/\r?\n/).map((line) => line.trim());
+  const plusLine = lines.find((line) => /^(\+|➕)/.test(line));
+  if (plusLine) {
+    const match = plusLine.match(/(\+|➕)\s*([\d\s.,]+)\s*UZS/i);
+    if (match && match[2]) {
+      const rawAmount = match[2].trim();
+      const normalized = rawAmount.replace(/\s+/g, "");
+      const value = normalized.includes(".")
+        ? Number(normalized.replace(/,/g, ""))
+        : Number(normalized.replace(/[^\d]/g, ""));
+      if (Number.isFinite(value) && value > 0) return Math.round(value);
+    }
+  }
+
+  return null;
+}
+
+async function expirePendingOrders() {
+  const now = new Date();
+  await Order.updateMany(
+    { status: "pending_payment", expiresAt: { $lt: now } },
+    { $set: { status: "cancelled" } },
+  );
+}
+
+async function processIncomingPayment({
+  rawText = "",
+  amount = null,
+  externalMessageId = null,
+  source = "cardxabar",
+}) {
+  await expirePendingOrders();
+
+  const parsedAmount = Number(amount || parseAmountFromText(rawText) || 0);
+  if (!parsedAmount) {
+    await PaymentLog.create({
+      source,
+      externalMessageId,
+      amount: 0,
+      rawText,
+      status: "invalid",
+    });
+    return { matched: false, reason: "amount_not_found", amount: 0 };
+  }
+
+  if (externalMessageId) {
+    const exists = await PaymentLog.findOne({
+      source,
+      externalMessageId,
+    }).lean();
+    if (exists) {
+      return {
+        matched: false,
+        duplicate: true,
+        reason: "duplicate_message",
+        amount: parsedAmount,
+      };
+    }
+  }
+
+  const now = new Date();
+  const pending = await Order.findOneAndUpdate(
+    {
+      status: "pending_payment",
+      expectedAmount: parsedAmount,
+      expiresAt: { $gt: now },
+    },
+    {
+      $set: {
+        status: "paid_auto_processed",
+        paidAmount: parsedAmount,
+        paidAt: now,
+      },
+    },
+    {
+      sort: { createdAt: 1 },
+      new: true,
+    },
+  ).lean();
+
+  if (!pending) {
+    await PaymentLog.create({
+      source,
+      externalMessageId,
+      amount: parsedAmount,
+      rawText,
+      status: "unmatched",
+    });
+    return {
+      matched: false,
+      reason: "pending_not_found",
+      amount: parsedAmount,
+    };
+  }
+
+  await PaymentLog.create({
+    source,
+    externalMessageId,
+    amount: parsedAmount,
+    rawText,
+    status: "matched",
+    matchedOrderId: pending._id,
+  });
+
+  if (pending.product === "balance" && pending.tgUserId) {
+    await User.findOneAndUpdate(
+      { tgUserId: pending.tgUserId },
+      { $inc: { balance: parsedAmount } },
+      { upsert: true, new: true },
+    );
+    await Order.findByIdAndUpdate(pending._id, {
+      status: "completed",
+      fulfillmentStatus: "success",
+      fulfilledAt: new Date(),
+      fulfillmentError: "",
+    });
+  }
+
+  if (pending.product === "uc") {
+    const io = getIO();
+    if (io) {
+      io.emit("admin-uc-paid", {
+        orderId: pending._id,
+        orderCode: pending.orderId,
+        username: pending.username,
+        planCode: pending.planCode,
+        expectedAmount: pending.expectedAmount,
+        paidAmount: pending.paidAmount,
+        paidAt: pending.paidAt,
+      });
+    }
+    notifyUcPaid({
+      orderId: pending._id,
+      orderCode: pending.orderId,
+      username: pending.username,
+      planCode: pending.planCode,
+      expectedAmount: pending.expectedAmount,
+    });
+  }
+
+  let fulfillment = null;
+  try {
+    fulfillment = await autoFulfillOrder(pending);
+  } catch (error) {
+    fulfillment = { ok: false, error: error.message || "auto_fulfill_failed" };
+  }
+
+  return {
+    matched: true,
+    amount: parsedAmount,
+    order: pending,
+    fulfillment,
+  };
+}
+
+module.exports = {
+  parseAmountFromText,
+  processIncomingPayment,
+};
