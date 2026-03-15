@@ -32,7 +32,7 @@ const io = socket.connect(server);
 app.set("socket", io);
 
 app.get("/", (_, res) => {
-  return response.success(res, "Backend ishlayapti test", {
+  return response.success(res, "Backend ishlayapti test1", {
     service: "yamaha-miniapp-backend",
     date: new Date().toISOString(),
   });
