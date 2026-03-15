@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
 const response = require("../utils/response");
 const Plan = require("../model/plan.model");
+const { getStarPricing, updateStarPricing } = require("../services/settings.service");
 // const { ensureDefaultPlans } = require("./public.controller");
 
 const login = async (req, res) => {
@@ -85,10 +86,33 @@ const deletePlan = async (req, res) => {
   }
 };
 
+const getSettings = async (_, res) => {
+  try {
+    const starPricing = await getStarPricing();
+    return response.success(res, "Settings", { starPricing });
+  } catch (error) {
+    return response.serverError(res, "Settings xatolik", error.message);
+  }
+};
+
+const updateSettings = async (req, res) => {
+  try {
+    const { starPricing } = req.body || {};
+    if (!starPricing) return response.error(res, "starPricing required");
+
+    const updated = await updateStarPricing(starPricing);
+    return response.success(res, "Settings yangilandi", { starPricing: updated });
+  } catch (error) {
+    return response.serverError(res, "Settings yangilashda xatolik", error.message);
+  }
+};
+
 module.exports = {
   login,
   getPlans,
   createPlan,
   updatePlan,
   deletePlan,
+  getSettings,
+  updateSettings,
 };

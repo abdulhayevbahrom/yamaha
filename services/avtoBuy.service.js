@@ -227,6 +227,52 @@ async function autoFulfillOrder(orderOrId) {
     category: order.product,
     code: order.planCode,
   }).lean();
+  if (!plan && order.product === "star" && order.planCode === "custom") {
+    // custom amount for stars
+    const amount = Number(order.customAmount || 0);
+    if (!amount) {
+      await Order.findByIdAndUpdate(order._id, {
+        fulfillmentStatus: "failed",
+        fulfillmentError: "Custom star miqdori topilmadi",
+      });
+      return { ok: false, error: "Custom star miqdori topilmadi" };
+    }
+
+    await Order.findByIdAndUpdate(order._id, {
+      fulfillmentStatus: "processing",
+      fulfillmentStartedAt: new Date(),
+      fulfillmentError: "",
+    });
+
+    const recipient = String(order.username || "").replace(/^@/, "").trim();
+    const transactionId = String(order.orderId || order._id);
+
+    try {
+      const result = await buyStars(recipient, amount, transactionId, {
+        payTon: FRAGMENT_PAY_TON,
+        isTest: FRAGMENT_TEST_MODE,
+      });
+
+      await Order.findByIdAndUpdate(order._id, {
+        fulfillmentStatus: "success",
+        fulfilledAt: new Date(),
+        tonAmount: result.tonAmount || 0,
+        fragmentTx: result.fragment || result,
+        fulfillmentError: "",
+      });
+
+      return { ok: true, result };
+    } catch (error) {
+      await Order.findByIdAndUpdate(order._id, {
+        fulfillmentStatus: "failed",
+        fulfillmentError: error.message || "Auto buy xatolik",
+        fragmentTx: error.response?.data || null,
+      });
+
+      return { ok: false, error: error.message || "Auto buy xatolik" };
+    }
+  }
+
   if (!plan) {
     await Order.findByIdAndUpdate(order._id, {
       fulfillmentStatus: "failed",
@@ -242,7 +288,7 @@ async function autoFulfillOrder(orderOrId) {
   });
 
   const recipient = String(order.username || "").replace(/^@/, "").trim();
-  const transactionId = order.orderId || String(order._id);
+  const transactionId = String(order.orderId || order._id);
 
   try {
     let result;

@@ -1,10 +1,15 @@
 const response = require("../utils/response");
 const Plan = require("../model/plan.model");
 const Order = require("../model/order.model");
+const User = require("../model/user.model");
+const { getNextOrderId } = require("../services/order-id.service");
 // const { ensureDefaultPlans } = require("../services/plan.service");
 const { processIncomingPayment } = require("../services/payment-match.service");
 const { autoFulfillOrder } = require("../services/avtoBuy.service");
 const { confirmUcOrderById } = require("../services/uc-fulfillment.service");
+const { notifyUcPaid } = require("../services/notify.service");
+const { getIO } = require("../socket");
+const { getStarPricing } = require("../services/settings.service");
 
 let sequence = 1;
 const PENDING_TTL_MS = 10 * 60 * 1000;
@@ -83,9 +88,35 @@ async function getReport(period) {
 
 const calculatePrice = async (req, res) => {
   try {
-    const { product, planCode } = req.body;
+    const { product, planCode, customAmount } = req.body;
     // await ensureDefaultPlans();
     await expirePendingOrders();
+
+    if (product === "star") {
+      const isCustom =
+        planCode === "custom" || Number(customAmount || 0) > 0;
+      if (isCustom) {
+        const pricing = await getStarPricing();
+        const qty = Number(customAmount || 0);
+        if (!qty || qty < pricing.min || qty > pricing.max) {
+          return response.error(res, "custom amount noto'g'ri");
+        }
+        const basePrice = qty * Number(pricing.pricePerStar || 0);
+        const amount = await getUniquePendingAmount({
+          product,
+          planCode: "custom",
+          basePrice,
+        });
+        return response.success(res, "Narx hisoblandi", {
+          product,
+          planCode: "custom",
+          amount,
+          baseAmount: basePrice,
+          expiresInSeconds: 600,
+          currency: "UZS",
+        });
+      }
+    }
 
     const plan = await Plan.findOne({
       category: product,
@@ -119,6 +150,7 @@ const createOrder = async (req, res) => {
       planCode,
       username,
       profileName = "",
+      customAmount,
       expectedAmount,
       paidAmount = 0,
       paymentMethod = "card",
@@ -135,19 +167,57 @@ const createOrder = async (req, res) => {
     await expirePendingOrders();
     await syncSequence();
 
-    const plan = await Plan.findOne({
-      category: product,
-      code: planCode,
-      isActive: true,
-    }).lean();
-    if (!plan) return response.error(res, "invalid plan");
+    let plan = null;
+    let resolvedAmount = 0;
+    let resolvedBasePrice = 0;
 
-    const paid = Number(paidAmount || 0);
+    const isCustomStar =
+      product === "star" &&
+      (planCode === "custom" ||
+        Number(customAmount || 0) > 0 ||
+        /^[0-9]+$/.test(String(planCode || "")));
+
+    if (isCustomStar) {
+      const pricing = await getStarPricing();
+      const qty = Number(customAmount || planCode || 0);
+      if (!qty || qty < pricing.min || qty > pricing.max) {
+        return response.error(res, "custom amount noto'g'ri");
+      }
+      resolvedAmount = qty;
+      resolvedBasePrice = qty * Number(pricing.pricePerStar || 0);
+      plan = { basePrice: resolvedBasePrice, amount: qty };
+    } else {
+      plan = await Plan.findOne({
+        category: product,
+        code: planCode,
+        isActive: true,
+      }).lean();
+      if (!plan) return response.error(res, "invalid plan");
+      resolvedAmount = plan.amount;
+      resolvedBasePrice = plan.basePrice;
+    }
+
+    let paid = Number(paidAmount || 0);
     let expected = Number(expectedAmount || 0);
     let expiresAt = null;
     let finalStatus = status;
+    let paidAt = null;
 
-    if (!finalStatus) {
+    if (paymentMethod === "balance") {
+      if (!tgUserId) return response.error(res, "tg_user_id required");
+      expected = Number(resolvedBasePrice || 0);
+      const user = await User.findOneAndUpdate(
+        { tgUserId, balance: { $gte: expected } },
+        { $inc: { balance: -expected } },
+        { new: true },
+      ).lean();
+      if (!user) return response.error(res, "Balans yetarli emas");
+
+      paid = expected;
+      paidAt = new Date();
+      finalStatus = "paid_auto_processed";
+      expiresAt = null;
+    } else if (!finalStatus) {
       finalStatus =
         paid >= expected && expected > 0
           ? "paid_auto_processed"
@@ -158,26 +228,57 @@ const createOrder = async (req, res) => {
       expected = await getUniquePendingAmount({
         product,
         planCode,
-        basePrice: plan.basePrice,
+        basePrice: resolvedBasePrice,
       });
       expiresAt = new Date(Date.now() + PENDING_TTL_MS);
     }
 
+    const nextOrderId = await getNextOrderId();
     const order = await Order.create({
-      orderId: `ORD-${Date.now()}-${sequence}`,
+      orderId: nextOrderId,
       product,
       planCode,
+      customAmount: Number(customAmount || 0),
       username,
       profileName,
       paymentMethod,
       expectedAmount: expected,
       paidAmount: paid,
+      paidAt,
       status: finalStatus,
       expiresAt,
       sequence,
       tgUserId,
       tgUsername,
     });
+
+    if (finalStatus === "paid_auto_processed") {
+      if (product === "uc") {
+        const io = getIO();
+        if (io) {
+          io.emit("admin-uc-paid", {
+            orderId: order._id,
+            orderCode: order.orderId,
+            username: order.username,
+            planCode: order.planCode,
+            expectedAmount: order.expectedAmount,
+            paidAmount: order.paidAmount,
+            paidAt: order.paidAt,
+          });
+        }
+        notifyUcPaid({
+          orderId: order._id,
+          orderCode: order.orderId,
+          username: order.username,
+          planCode: order.planCode,
+          expectedAmount: order.expectedAmount,
+        });
+      }
+
+      if (product === "star" || product === "premium") {
+        await autoFulfillOrder(order);
+      }
+    }
 
     sequence += 1;
     return response.created(res, "Buyurtma yaratildi", order);

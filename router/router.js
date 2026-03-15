@@ -13,6 +13,7 @@ const {
 
 router.get("/health", publicController.health);
 router.get("/catalog", publicController.getCatalog);
+router.get("/settings", publicController.getSettings);
 router.get("/lookup-profile", publicController.lookupProfile);
 router.post("/calculate-price", orderController.calculatePrice);
 router.post("/orders", orderController.createOrder);
@@ -37,6 +38,8 @@ router.patch(
   adminController.updatePlan
 );
 router.delete("/admin/plans/:id", authMiddleware, adminController.deletePlan);
+router.get("/admin/settings", authMiddleware, adminController.getSettings);
+router.put("/admin/settings", authMiddleware, adminController.updateSettings);
 router.post("/admin/orders/process-payment", authMiddleware, orderController.processCardPayment);
 router.post(
   "/admin/orders/:id/retry-fulfill",

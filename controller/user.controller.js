@@ -1,6 +1,7 @@
 const response = require("../utils/response");
 const User = require("../model/user.model");
 const Order = require("../model/order.model");
+const { getNextOrderId } = require("../services/order-id.service");
 
 const PENDING_TTL_MS = 10 * 60 * 1000;
 
@@ -44,6 +45,12 @@ async function getMyOrders(req, res) {
     const tgUser = getTgUser(req);
     if (!tgUser.tgUserId) return response.error(res, "tg_user_id required");
 
+    const now = new Date();
+    await Order.updateMany(
+      { status: "pending_payment", expiresAt: { $lt: now } },
+      { $set: { status: "cancelled" } },
+    );
+
     const orders = await Order.find({ tgUserId: tgUser.tgUserId })
       .sort({ createdAt: -1 })
       .limit(200)
@@ -73,8 +80,9 @@ async function createBalanceTopup(req, res) {
     });
     const expectedAmount = Number(amount) + Number(pendingCount);
 
+    const nextOrderId = await getNextOrderId();
     const order = await Order.create({
-      orderId: `TOPUP-${Date.now()}-${pendingCount + 1}`,
+      orderId: nextOrderId,
       product: "balance",
       planCode: String(amount),
       username: tgUser.username || tgUser.tgUserId,

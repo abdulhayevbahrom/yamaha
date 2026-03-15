@@ -5,7 +5,7 @@ const { Schema } = mongoose;
 const orderSchema = new Schema(
   {
     orderId: {
-      type: String,
+      type: Number,
       required: true,
       unique: true
     },
@@ -17,6 +17,10 @@ const orderSchema = new Schema(
     planCode: {
       type: String,
       required: true
+    },
+    customAmount: {
+      type: Number,
+      default: 0
     },
     username: {
       type: String,
@@ -36,7 +40,7 @@ const orderSchema = new Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ["card", "uzumbank", "paynet", "click"],
+      enum: ["card", "uzumbank", "paynet", "click", "balance"],
       default: "card"
     },
     expectedAmount: {

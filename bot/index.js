@@ -92,7 +92,7 @@ function startBot({ strict = false } = {}) {
         });
         const updatedMessage = [
           "💬 UC to'lov tushdi",
-          `🧾 Order: <code>${result.order.orderId}</code>`,
+          `🧾 Order: <code>${String(result.order.orderId)}</code>`,
           `🆔 ID: <code>${result.order.username}</code>`,
           `🎮 Plan: <code>${result.order.planCode}</code>`,
           `💵 Summa: <b>${result.order.expectedAmount} UZS</b>`,
@@ -171,7 +171,7 @@ function startBot({ strict = false } = {}) {
       try {
         const message = [
           "💬 UC to'lov tushdi",
-          `🧾 Order: <code>${payload.orderCode}</code>`,
+          `🧾 Order: <code>${String(payload.orderCode)}</code>`,
           `🆔 ID: <code>${payload.username}</code>`,
           `🎮 Plan: <code>${payload.planCode}</code>`,
           `💵 Summa: <b>${payload.expectedAmount} UZS</b>`,

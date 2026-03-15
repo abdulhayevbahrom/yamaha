@@ -1,5 +1,6 @@
 const response = require("../utils/response");
 const Plan = require("../model/plan.model");
+const { getStarPricing } = require("../services/settings.service");
 // const { ensureDefaultPlans } = require("../services/plan.service");
 
 const categoryNames = {
@@ -41,6 +42,15 @@ const getCatalog = async (_, res) => {
   }
 };
 
+const getSettings = async (_, res) => {
+  try {
+    const starPricing = await getStarPricing();
+    return response.success(res, "Settings", { starPricing });
+  } catch (error) {
+    return response.serverError(res, "Settings olishda xatolik", error.message);
+  }
+};
+
 const lookupProfile = async (req, res) => {
   const { username } = req.query;
   if (!username) return response.error(res, "username required");
@@ -73,5 +83,6 @@ const lookupProfile = async (req, res) => {
 module.exports = {
   health,
   getCatalog,
+  getSettings,
   lookupProfile,
 };
