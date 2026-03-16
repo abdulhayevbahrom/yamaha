@@ -6,10 +6,29 @@ const { getNextOrderId } = require("../services/order-id.service");
 const PENDING_TTL_MS = 10 * 60 * 1000;
 
 function getTgUser(req) {
-  const tgUserId = String(req.headers["x-tg-user-id"] || "").trim();
-  const username = String(req.headers["x-tg-username"] || "").trim();
-  const firstName = String(req.headers["x-tg-first-name"] || "").trim();
-  const lastName = String(req.headers["x-tg-last-name"] || "").trim();
+  let tgUserId = String(req.headers["x-tg-user-id"] || "").trim();
+  let username = String(req.headers["x-tg-username"] || "").trim();
+  let firstName = String(req.headers["x-tg-first-name"] || "").trim();
+  let lastName = String(req.headers["x-tg-last-name"] || "").trim();
+
+  if (!tgUserId) {
+    const initData = String(req.headers["x-tg-init-data"] || "");
+    if (initData) {
+      try {
+        const params = new URLSearchParams(initData);
+        const userRaw = params.get("user");
+        if (userRaw) {
+          const user = JSON.parse(userRaw);
+          tgUserId = String(user?.id || "").trim();
+          username = String(user?.username || "").trim();
+          firstName = String(user?.first_name || "").trim();
+          lastName = String(user?.last_name || "").trim();
+        }
+      } catch (_) {
+        // ignore
+      }
+    }
+  }
   return { tgUserId, username, firstName, lastName };
 }
 
