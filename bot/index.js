@@ -4,6 +4,9 @@ const { processIncomingPayment } = require("../services/payment-match.service");
 const { onUcPaid } = require("../services/notify.service");
 const { confirmUcOrderById } = require("../services/uc-fulfillment.service");
 const Order = require("../model/order.model");
+const User = require("../model/user.model");
+const Broadcast = require("../model/broadcast.model");
+const BroadcastDelivery = require("../model/broadcastDelivery.model");
 
 const initialText =
   "Assalomu alaykum. StarShop botiga xush kelibsiz.\n\nBoshlash tugmasini bosing.";
@@ -32,10 +35,66 @@ function startBot({ strict = false } = {}) {
 
   const bot = new TelegramBot(token, { polling: true });
   const firstSeen = new Set();
+  const adminIds = adminNotifyChatId
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean);
+
+  const isAdmin = (chatId) => adminIds.includes(String(chatId));
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const ensureUser = async (msg) => {
+    const tgUserId = String(msg?.from?.id || "");
+    if (!tgUserId) return;
+    const username = String(msg?.from?.username || "");
+    const firstName = String(msg?.from?.first_name || "");
+    const lastName = String(msg?.from?.last_name || "");
+    await User.findOneAndUpdate(
+      { tgUserId },
+      {
+        $set: {
+          username,
+          firstName,
+          lastName,
+        },
+      },
+      { upsert: true, new: true },
+    ).lean();
+  };
+
+  const getAllUsers = async () => {
+    const users = await User.find({ tgUserId: { $exists: true, $ne: "" } })
+      .select({ tgUserId: 1 })
+      .lean();
+    return users.map((u) => String(u.tgUserId));
+  };
+
+  const sendBroadcastToUsers = async (users, sendFn) => {
+    let sent = 0;
+    let failed = 0;
+    for (const tgUserId of users) {
+      try {
+        const message = await sendFn(tgUserId);
+        sent += 1;
+        if (sent % 20 === 0) await sleep(300);
+        if (message?.message_id) {
+          await BroadcastDelivery.create({
+            broadcastId: sendFn.broadcastId,
+            tgUserId,
+            messageId: message.message_id,
+          });
+        }
+      } catch (_) {
+        failed += 1;
+      }
+    }
+    return { sent, failed };
+  };
 
   bot.onText(/^\/start$/, async (msg) => {
     const chatId = msg.chat.id;
     const seen = firstSeen.has(chatId);
+    await ensureUser(msg);
 
     if (!seen) {
       firstSeen.add(chatId);
@@ -57,6 +116,155 @@ function startBot({ strict = false } = {}) {
         ],
       },
     });
+  });
+
+  bot.on("message", async (msg) => {
+    try {
+      if (!isAdmin(msg.chat?.id)) return;
+
+      const text = String(msg.text || "").trim();
+
+      if (text.startsWith("/broadcast_edit")) {
+        const [, idRaw, ...rest] = text.split(" ");
+        const newText = rest.join(" ").trim();
+        if (!idRaw || !newText) {
+          await bot.sendMessage(
+            msg.chat.id,
+            "❗ Format: /broadcast_edit <id> <yangi matn>",
+          );
+          return;
+        }
+        const broadcast = await Broadcast.findById(idRaw).lean();
+        if (!broadcast) {
+          await bot.sendMessage(msg.chat.id, "❗ Broadcast topilmadi");
+          return;
+        }
+        if (broadcast.type === "forward") {
+          await bot.sendMessage(msg.chat.id, "❗ Forward xabarni edit qilib bo'lmaydi");
+          return;
+        }
+        await Broadcast.findByIdAndUpdate(idRaw, { text: newText });
+        const deliveries = await BroadcastDelivery.find({ broadcastId: idRaw }).lean();
+        let updated = 0;
+        for (const delivery of deliveries) {
+          try {
+            if (broadcast.type === "photo") {
+              await bot.editMessageCaption(newText, {
+                chat_id: delivery.tgUserId,
+                message_id: delivery.messageId,
+              });
+            } else {
+              await bot.editMessageText(newText, {
+                chat_id: delivery.tgUserId,
+                message_id: delivery.messageId,
+              });
+            }
+            updated += 1;
+          } catch (_) {
+            // ignore
+          }
+        }
+        await bot.sendMessage(
+          msg.chat.id,
+          `✅ Broadcast yangilandi. ID: ${idRaw} (update: ${updated})`,
+        );
+        return;
+      }
+
+      if (text.startsWith("/broadcast_delete")) {
+        const [, idRaw] = text.split(" ");
+        if (!idRaw) {
+          await bot.sendMessage(msg.chat.id, "❗ Format: /broadcast_delete <id>");
+          return;
+        }
+        const deliveries = await BroadcastDelivery.find({ broadcastId: idRaw }).lean();
+        let removed = 0;
+        for (const delivery of deliveries) {
+          try {
+            await bot.deleteMessage(delivery.tgUserId, delivery.messageId);
+            removed += 1;
+          } catch (_) {
+            // ignore
+          }
+        }
+        await Broadcast.deleteOne({ _id: idRaw });
+        await BroadcastDelivery.deleteMany({ broadcastId: idRaw });
+        await bot.sendMessage(
+          msg.chat.id,
+          `✅ Broadcast o'chirildi. ID: ${idRaw} (delete: ${removed})`,
+        );
+        return;
+      }
+
+      if (text.startsWith("/broadcast") || text.startsWith("/reklama")) {
+        const payload = text.replace(/^\/(broadcast|reklama)\s*/i, "").trim();
+        if (!payload) {
+          await bot.sendMessage(
+            msg.chat.id,
+            "❗ Matn kiriting: /broadcast <xabar>",
+          );
+          return;
+        }
+
+        const broadcast = await Broadcast.create({
+          adminChatId: String(msg.chat.id),
+          type: "text",
+          text: payload,
+        });
+        const users = await getAllUsers();
+        const sendFn = async (tgUserId) => bot.sendMessage(tgUserId, payload);
+        sendFn.broadcastId = broadcast._id;
+
+        const { sent, failed } = await sendBroadcastToUsers(users, sendFn);
+        await bot.sendMessage(
+          msg.chat.id,
+          `✅ Broadcast yakunlandi. ID: ${broadcast._id}\nYuborildi: ${sent}, xatolik: ${failed}`,
+        );
+        return;
+      }
+
+      if (msg.photo?.length) {
+        const fileId = msg.photo[msg.photo.length - 1]?.file_id;
+        if (!fileId) return;
+        const caption = String(msg.caption || "").trim();
+        const broadcast = await Broadcast.create({
+          adminChatId: String(msg.chat.id),
+          type: "photo",
+          text: caption,
+          photoFileId: fileId,
+        });
+        const users = await getAllUsers();
+        const sendFn = async (tgUserId) =>
+          bot.sendPhoto(tgUserId, fileId, caption ? { caption } : undefined);
+        sendFn.broadcastId = broadcast._id;
+        const { sent, failed } = await sendBroadcastToUsers(users, sendFn);
+        await bot.sendMessage(
+          msg.chat.id,
+          `✅ Broadcast yakunlandi. ID: ${broadcast._id}\nYuborildi: ${sent}, xatolik: ${failed}`,
+        );
+        return;
+      }
+
+      if (msg.forward_date) {
+        const broadcast = await Broadcast.create({
+          adminChatId: String(msg.chat.id),
+          type: "forward",
+          sourceChatId: String(msg.chat.id),
+          sourceMessageId: msg.message_id,
+        });
+        const users = await getAllUsers();
+        const sendFn = async (tgUserId) =>
+          bot.forwardMessage(tgUserId, msg.chat.id, msg.message_id);
+        sendFn.broadcastId = broadcast._id;
+        const { sent, failed } = await sendBroadcastToUsers(users, sendFn);
+        await bot.sendMessage(
+          msg.chat.id,
+          `✅ Broadcast yakunlandi. ID: ${broadcast._id}\nYuborildi: ${sent}, xatolik: ${failed}`,
+        );
+      }
+    } catch (err) {
+      console.error("Broadcast error:", err.message);
+    }
   });
 
   bot.on("callback_query", async (query) => {
