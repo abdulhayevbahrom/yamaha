@@ -4,10 +4,36 @@ const Plan = require("../model/plan.model");
 const { getStarPricing, updateStarPricing } = require("../services/settings.service");
 // const { ensureDefaultPlans } = require("./public.controller");
 
+const parseAllowlist = () => {
+  const raw = process.env.ADMIN_NOTIFY_CHAT_ID || "";
+  return raw
+    .split(",")
+    .map((id) => String(id).trim())
+    .filter(Boolean);
+};
+
+const isAllowedAdmin = (req) => {
+  const allowlist = parseAllowlist();
+  if (allowlist.length === 0) return true;
+  const userId = String(req.headers["x-tg-user-id"] || "");
+  return allowlist.includes(userId);
+};
+
+const checkAccess = async (req, res) => {
+  if (!isAllowedAdmin(req)) {
+    return response.unauthorized(res, "Admin ruxsat yo'q");
+  }
+  return response.success(res, "Admin ruxsat bor", { allowed: true });
+};
+
 const login = async (req, res) => {
   const { username, password } = req.validated;
   const adminLogin = process.env.ADMIN_LOGIN || "admin";
   const adminPassword = process.env.ADMIN_PASSWORD || "admin12345";
+
+  if (!isAllowedAdmin(req)) {
+    return response.unauthorized(res, "Admin ruxsat yo'q");
+  }
 
   if (username !== adminLogin || password !== adminPassword) {
     return response.unauthorized(res, "Login yoki parol noto'g'ri");
@@ -108,6 +134,7 @@ const updateSettings = async (req, res) => {
 };
 
 module.exports = {
+  checkAccess,
   login,
   getPlans,
   createPlan,

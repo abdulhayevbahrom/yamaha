@@ -156,8 +156,24 @@ const createOrder = async (req, res) => {
       paymentMethod = "card",
       status,
     } = req.body;
-    const tgUserId = String(req.headers["x-tg-user-id"] || "").trim();
-    const tgUsername = String(req.headers["x-tg-username"] || "").trim();
+    let tgUserId = String(req.headers["x-tg-user-id"] || "").trim();
+    let tgUsername = String(req.headers["x-tg-username"] || "").trim();
+    if (!tgUserId) {
+      const initData = String(req.headers["x-tg-init-data"] || "");
+      if (initData) {
+        try {
+          const params = new URLSearchParams(initData);
+          const userRaw = params.get("user");
+          if (userRaw) {
+            const user = JSON.parse(userRaw);
+            tgUserId = String(user?.id || "").trim();
+            tgUsername = String(user?.username || "").trim();
+          }
+        } catch (_) {
+          // ignore
+        }
+      }
+    }
 
     if (!["star", "premium", "uc"].includes(product))
       return response.error(res, "invalid product");

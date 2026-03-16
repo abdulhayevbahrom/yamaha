@@ -37,6 +37,7 @@ const corsOptions = {
     "X-TG-Username",
     "X-TG-First-Name",
     "X-TG-Last-Name",
+    "X-TG-Init-Data",
   ],
 };
 

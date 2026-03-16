@@ -1,4 +1,5 @@
 require("dotenv").config();
+const path = require("node:path");
 const TelegramBot = require("node-telegram-bot-api");
 const { processIncomingPayment } = require("../services/payment-match.service");
 const { onUcPaid } = require("../services/notify.service");
@@ -7,7 +8,6 @@ const Order = require("../model/order.model");
 const User = require("../model/user.model");
 const Broadcast = require("../model/broadcast.model");
 const BroadcastDelivery = require("../model/broadcastDelivery.model");
-const path = require("node:path");
 
 const startCaption =
   "Star, Premium va PUBG UC ni xavfsiz sotib oling.\n\nDo'konga kirish uchun tugmani bosing.";
@@ -20,8 +20,7 @@ function startBot({ strict = false } = {}) {
     process.env.CARDXABAR_NOTIFY_CHAT_ID || cardxabarSourceChatId || "";
   const adminNotifyChatId = process.env.ADMIN_NOTIFY_CHAT_ID || "";
   const startPhotoPath =
-    process.env.START_PHOTO_PATH ||
-    path.join(__dirname, "..", "home.jpg");
+    process.env.START_PHOTO_PATH || path.join(__dirname, "..", "home.jpg");
 
   if (!token || !webAppUrl) {
     const message =
@@ -41,6 +40,7 @@ function startBot({ strict = false } = {}) {
 
   const isAdmin = (chatId) => adminIds.includes(String(chatId));
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
   const ensureUser = async (msg) => {
     const tgUserId = String(msg?.from?.id || "");
     if (!tgUserId) return;
@@ -53,6 +53,7 @@ function startBot({ strict = false } = {}) {
       { upsert: true, new: true },
     ).lean();
   };
+
   const getAllUsers = async () => {
     const users = await User.find({ tgUserId: { $exists: true, $ne: "" } })
       .select({ tgUserId: 1 })
@@ -64,15 +65,14 @@ function startBot({ strict = false } = {}) {
     const chatId = msg.chat.id;
     await ensureUser(msg);
     if (!firstSeen.has(chatId)) firstSeen.add(chatId);
-    const replyMarkup = {
-      inline_keyboard: [
-        [{ text: "Do'konga", web_app: { url: webAppUrl } }],
-      ],
-    };
+
     await bot.sendPhoto(chatId, startPhotoPath, {
       caption: startCaption,
-      reply_markup: replyMarkup,
+      reply_markup: {
+        inline_keyboard: [[{ text: "Do'konga", web_app: { url: webAppUrl } }]],
+      },
     });
+
     if (isAdmin(chatId)) {
       await bot.sendMessage(
         chatId,
@@ -183,9 +183,7 @@ function startBot({ strict = false } = {}) {
         return;
       }
       const broadcastId = query.data.replace("AD_DEL:", "").trim();
-      const deliveries = await BroadcastDelivery.find({
-        broadcastId,
-      }).lean();
+      const deliveries = await BroadcastDelivery.find({ broadcastId }).lean();
       let removed = 0;
       for (const delivery of deliveries) {
         try {
@@ -241,35 +239,25 @@ function startBot({ strict = false } = {}) {
           pendingByAdmin.delete(String(chatId));
           return;
         }
-        if (broadcast.type === "photo") {
-          await Broadcast.findByIdAndUpdate(broadcast._id, { text: newText });
-          const deliveries = await BroadcastDelivery.find({
-            broadcastId: broadcast._id,
-          }).lean();
-          for (const delivery of deliveries) {
-            try {
+        await Broadcast.findByIdAndUpdate(broadcast._id, { text: newText });
+        const deliveries = await BroadcastDelivery.find({
+          broadcastId: broadcast._id,
+        }).lean();
+        for (const delivery of deliveries) {
+          try {
+            if (broadcast.type === "photo") {
               await bot.editMessageCaption(newText, {
                 chat_id: delivery.tgUserId,
                 message_id: delivery.messageId,
               });
-            } catch (_) {
-              // ignore
-            }
-          }
-        } else {
-          await Broadcast.findByIdAndUpdate(broadcast._id, { text: newText });
-          const deliveries = await BroadcastDelivery.find({
-            broadcastId: broadcast._id,
-          }).lean();
-          for (const delivery of deliveries) {
-            try {
+            } else {
               await bot.editMessageText(newText, {
                 chat_id: delivery.tgUserId,
                 message_id: delivery.messageId,
               });
-            } catch (_) {
-              // ignore
             }
+          } catch (_) {
+            // ignore
           }
         }
         pendingByAdmin.delete(String(chatId));
@@ -280,6 +268,7 @@ function startBot({ strict = false } = {}) {
       if (pending.mode === "create") {
         const users = await getAllUsers();
         let sentCount = 0;
+
         if (msg.photo?.length) {
           const fileId = msg.photo[msg.photo.length - 1]?.file_id;
           const caption = String(msg.caption || "").trim();
@@ -314,8 +303,14 @@ function startBot({ strict = false } = {}) {
               reply_markup: {
                 inline_keyboard: [
                   [
-                    { text: "✏️ Tahrirlash", callback_data: `AD_EDIT:${broadcast._id}` },
-                    { text: "🗑 O'chirish", callback_data: `AD_DEL:${broadcast._id}` },
+                    {
+                      text: "✏️ Tahrirlash",
+                      callback_data: `AD_EDIT:${broadcast._id}`,
+                    },
+                    {
+                      text: "🗑 O'chirish",
+                      callback_data: `AD_DEL:${broadcast._id}`,
+                    },
                   ],
                 ],
               },
@@ -353,8 +348,14 @@ function startBot({ strict = false } = {}) {
               reply_markup: {
                 inline_keyboard: [
                   [
-                    { text: "✏️ Tahrirlash", callback_data: `AD_EDIT:${broadcast._id}` },
-                    { text: "🗑 O'chirish", callback_data: `AD_DEL:${broadcast._id}` },
+                    {
+                      text: "✏️ Tahrirlash",
+                      callback_data: `AD_EDIT:${broadcast._id}`,
+                    },
+                    {
+                      text: "🗑 O'chirish",
+                      callback_data: `AD_DEL:${broadcast._id}`,
+                    },
                   ],
                 ],
               },

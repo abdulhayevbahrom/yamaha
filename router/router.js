@@ -23,6 +23,7 @@ router.get("/me", userController.getMe);
 router.get("/my-orders", userController.getMyOrders);
 router.post("/balance/topup", userController.createBalanceTopup);
 
+router.get("/admin/access", adminController.checkAccess);
 router.post("/admin/login", validate(loginValidation), adminController.login);
 router.get("/admin/plans", authMiddleware, adminController.getPlans);
 router.post(
