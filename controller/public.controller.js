@@ -1,6 +1,7 @@
 const response = require("../utils/response");
 const Plan = require("../model/plan.model");
-const { getStarPricing } = require("../services/settings.service");
+const { getStarPricing, getForceJoin } = require("../services/settings.service");
+const { checkForceJoinMembership } = require("../services/force-join.service");
 // const { ensureDefaultPlans } = require("../services/plan.service");
 
 const categoryNames = {
@@ -34,7 +35,6 @@ const health = async (_, res) => response.success(res, "API ishlayapti");
 
 const getCatalog = async (_, res) => {
   try {
-    // await ensureDefaultPlans();
     const plans = await Plan.find({ isActive: true }).lean();
     return response.success(res, "Catalog", mapCatalog(plans));
   } catch (error) {
@@ -45,9 +45,24 @@ const getCatalog = async (_, res) => {
 const getSettings = async (_, res) => {
   try {
     const starPricing = await getStarPricing();
-    return response.success(res, "Settings", { starPricing });
+    const forceJoin = await getForceJoin();
+    return response.success(res, "Settings", { starPricing, forceJoin });
   } catch (error) {
     return response.serverError(res, "Settings olishda xatolik", error.message);
+  }
+};
+
+const checkForceJoin = async (req, res) => {
+  try {
+    const tgUserId = String(req.headers["x-tg-user-id"] || "").trim();
+    const result = await checkForceJoinMembership(tgUserId);
+    return response.success(res, "Force join status", result);
+  } catch (error) {
+    return response.serverError(
+      res,
+      "Force join tekshirishda xatolik",
+      error.message,
+    );
   }
 };
 
@@ -84,5 +99,6 @@ module.exports = {
   health,
   getCatalog,
   getSettings,
+  checkForceJoin,
   lookupProfile,
 };

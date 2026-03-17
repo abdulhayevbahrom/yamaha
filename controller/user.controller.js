@@ -2,6 +2,7 @@ const response = require("../utils/response");
 const User = require("../model/user.model");
 const Order = require("../model/order.model");
 const { getNextOrderId } = require("../services/order-id.service");
+const { checkForceJoinMembership } = require("../services/force-join.service");
 
 const PENDING_TTL_MS = 10 * 60 * 1000;
 
@@ -84,9 +85,20 @@ async function createBalanceTopup(req, res) {
   try {
     const tgUser = getTgUser(req);
     if (!tgUser.tgUserId) return response.error(res, "tg_user_id required");
+
+    const forceJoin = await checkForceJoinMembership(tgUser.tgUserId);
+    if (!forceJoin.canProceed) {
+      return response.forbidden(
+        res,
+        "Avval majburiy kanalga a'zo bo'ling",
+        forceJoin,
+      );
+    }
+
     const amount = Number(req.body?.amount || 0);
-    if (!amount || amount <= 0)
+    if (!amount || amount <= 0) {
       return response.error(res, "amount required");
+    }
 
     await ensureUser(tgUser);
 

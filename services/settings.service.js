@@ -6,6 +6,12 @@ const DEFAULT_STAR_PRICING = {
   max: 10000,
 };
 
+const DEFAULT_FORCE_JOIN = {
+  enabled: false,
+  channelId: "",
+  joinUrl: "",
+};
+
 async function getStarPricing() {
   const doc = await Settings.findOne({ key: "star_pricing" }).lean();
   if (!doc?.value) return DEFAULT_STAR_PRICING;
@@ -13,6 +19,16 @@ async function getStarPricing() {
     pricePerStar: Number(doc.value.pricePerStar || DEFAULT_STAR_PRICING.pricePerStar),
     min: Number(doc.value.min || DEFAULT_STAR_PRICING.min),
     max: Number(doc.value.max || DEFAULT_STAR_PRICING.max),
+  };
+}
+
+async function getForceJoin() {
+  const doc = await Settings.findOne({ key: "force_join" }).lean();
+  if (!doc?.value) return DEFAULT_FORCE_JOIN;
+  return {
+    enabled: Boolean(doc.value.enabled),
+    channelId: String(doc.value.channelId || "").trim(),
+    joinUrl: String(doc.value.joinUrl || "").trim(),
   };
 }
 
@@ -40,4 +56,27 @@ async function updateStarPricing(payload) {
   return doc.value;
 }
 
-module.exports = { getStarPricing, updateStarPricing };
+async function updateForceJoin(payload) {
+  const enabled = Boolean(payload.enabled);
+  const channelId = String(payload.channelId || "").trim();
+  const joinUrl = String(payload.joinUrl || "").trim();
+
+  const doc = await Settings.findOneAndUpdate(
+    { key: "force_join" },
+    { value: { enabled, channelId, joinUrl } },
+    { new: true, upsert: true },
+  ).lean();
+
+  return {
+    enabled: Boolean(doc?.value?.enabled),
+    channelId: String(doc?.value?.channelId || "").trim(),
+    joinUrl: String(doc?.value?.joinUrl || "").trim(),
+  };
+}
+
+module.exports = {
+  getStarPricing,
+  getForceJoin,
+  updateStarPricing,
+  updateForceJoin,
+};

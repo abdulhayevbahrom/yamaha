@@ -1,8 +1,12 @@
 const jwt = require("jsonwebtoken");
 const response = require("../utils/response");
 const Plan = require("../model/plan.model");
-const { getStarPricing, updateStarPricing } = require("../services/settings.service");
-// const { ensureDefaultPlans } = require("./public.controller");
+const {
+  getStarPricing,
+  getForceJoin,
+  updateStarPricing,
+  updateForceJoin,
+} = require("../services/settings.service");
 
 const parseAllowlist = () => {
   const raw = process.env.ADMIN_NOTIFY_CHAT_ID || "";
@@ -55,7 +59,6 @@ const login = async (req, res) => {
 
 const getPlans = async (_, res) => {
   try {
-    // await ensureDefaultPlans();
     const plans = await Plan.find().sort({ category: 1, amount: 1 }).lean();
     return response.success(res, "Plans", plans);
   } catch (error) {
@@ -74,8 +77,9 @@ const createPlan = async (req, res) => {
       category: payload.category,
       code: payload.code,
     }).lean();
-    if (exists)
+    if (exists) {
       return response.error(res, "Bu category+code allaqachon mavjud");
+    }
 
     const plan = await Plan.create(payload);
     return response.created(res, "Yangi plan qo'shildi", plan);
@@ -115,7 +119,8 @@ const deletePlan = async (req, res) => {
 const getSettings = async (_, res) => {
   try {
     const starPricing = await getStarPricing();
-    return response.success(res, "Settings", { starPricing });
+    const forceJoin = await getForceJoin();
+    return response.success(res, "Settings", { starPricing, forceJoin });
   } catch (error) {
     return response.serverError(res, "Settings xatolik", error.message);
   }
@@ -123,11 +128,15 @@ const getSettings = async (_, res) => {
 
 const updateSettings = async (req, res) => {
   try {
-    const { starPricing } = req.body || {};
-    if (!starPricing) return response.error(res, "starPricing required");
+    const { starPricing, forceJoin } = req.body || {};
+    if (!starPricing && !forceJoin) {
+      return response.error(res, "starPricing yoki forceJoin required");
+    }
 
-    const updated = await updateStarPricing(starPricing);
-    return response.success(res, "Settings yangilandi", { starPricing: updated });
+    const out = {};
+    if (starPricing) out.starPricing = await updateStarPricing(starPricing);
+    if (forceJoin) out.forceJoin = await updateForceJoin(forceJoin);
+    return response.success(res, "Settings yangilandi", out);
   } catch (error) {
     return response.serverError(res, "Settings yangilashda xatolik", error.message);
   }

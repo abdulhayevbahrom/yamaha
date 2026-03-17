@@ -8,12 +8,13 @@ const validate = require("../middleware/validate.middleware");
 const {
   loginValidation,
   createPlanValidation,
-  updatePlanValidation
+  updatePlanValidation,
 } = require("../validations/admin.validation");
 
 router.get("/health", publicController.health);
 router.get("/catalog", publicController.getCatalog);
 router.get("/settings", publicController.getSettings);
+router.get("/force-join/check", publicController.checkForceJoin);
 router.get("/lookup-profile", publicController.lookupProfile);
 router.post("/calculate-price", orderController.calculatePrice);
 router.post("/orders", orderController.createOrder);
@@ -30,18 +31,22 @@ router.post(
   "/admin/plans",
   authMiddleware,
   validate(createPlanValidation),
-  adminController.createPlan
+  adminController.createPlan,
 );
 router.patch(
   "/admin/plans/:id",
   authMiddleware,
   validate(updatePlanValidation),
-  adminController.updatePlan
+  adminController.updatePlan,
 );
 router.delete("/admin/plans/:id", authMiddleware, adminController.deletePlan);
 router.get("/admin/settings", authMiddleware, adminController.getSettings);
 router.put("/admin/settings", authMiddleware, adminController.updateSettings);
-router.post("/admin/orders/process-payment", authMiddleware, orderController.processCardPayment);
+router.post(
+  "/admin/orders/process-payment",
+  authMiddleware,
+  orderController.processCardPayment,
+);
 router.post(
   "/admin/orders/:id/retry-fulfill",
   authMiddleware,
@@ -51,6 +56,16 @@ router.post(
   "/admin/orders/:id/confirm-uc",
   authMiddleware,
   orderController.confirmUcOrder,
+);
+router.post(
+  "/admin/orders/:id/cancel-uc",
+  authMiddleware,
+  orderController.cancelUcOrder,
+);
+router.post(
+  "/admin/orders/:id/cancel",
+  authMiddleware,
+  orderController.cancelOrder,
 );
 
 module.exports = router;

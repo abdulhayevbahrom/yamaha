@@ -3,13 +3,17 @@ const Plan = require("../model/plan.model");
 const Order = require("../model/order.model");
 const User = require("../model/user.model");
 const { getNextOrderId } = require("../services/order-id.service");
-// const { ensureDefaultPlans } = require("../services/plan.service");
 const { processIncomingPayment } = require("../services/payment-match.service");
 const { autoFulfillOrder } = require("../services/avtoBuy.service");
-const { confirmUcOrderById } = require("../services/uc-fulfillment.service");
+const {
+  confirmUcOrderById,
+  cancelUcOrderById,
+} = require("../services/uc-fulfillment.service");
+const { cancelPaidOrderById } = require("../services/order-cancel.service");
 const { notifyUcPaid } = require("../services/notify.service");
 const { getIO } = require("../socket");
 const { getStarPricing } = require("../services/settings.service");
+const { checkForceJoinMembership } = require("../services/force-join.service");
 
 let sequence = 1;
 const PENDING_TTL_MS = 10 * 60 * 1000;
@@ -89,7 +93,6 @@ async function getReport(period) {
 const calculatePrice = async (req, res) => {
   try {
     const { product, planCode, customAmount } = req.body;
-    // await ensureDefaultPlans();
     await expirePendingOrders();
 
     if (product === "star") {
@@ -175,11 +178,22 @@ const createOrder = async (req, res) => {
       }
     }
 
-    if (!["star", "premium", "uc"].includes(product))
+    if (!tgUserId) return response.error(res, "tg_user_id required");
+
+    const forceJoin = await checkForceJoinMembership(tgUserId);
+    if (!forceJoin.canProceed) {
+      return response.forbidden(
+        res,
+        "Avval majburiy kanalga a'zo bo'ling",
+        forceJoin,
+      );
+    }
+
+    if (!["star", "premium", "uc"].includes(product)) {
       return response.error(res, "invalid product");
+    }
     if (!username) return response.error(res, "username required");
 
-    // await ensureDefaultPlans();
     await expirePendingOrders();
     await syncSequence();
 
@@ -220,7 +234,6 @@ const createOrder = async (req, res) => {
     let paidAt = null;
 
     if (paymentMethod === "balance") {
-      if (!tgUserId) return response.error(res, "tg_user_id required");
       expected = Number(resolvedBasePrice || 0);
       const user = await User.findOneAndUpdate(
         { tgUserId, balance: { $gte: expected } },
@@ -368,18 +381,70 @@ const confirmUcOrder = async (req, res) => {
     const { id } = req.params;
     const result = await confirmUcOrderById(id);
     if (!result.ok) {
-      if (result.reason === "not_found")
+      if (result.reason === "not_found") {
         return response.notFound(res, "Order topilmadi");
-      if (result.reason === "not_uc")
+      }
+      if (result.reason === "not_uc") {
         return response.error(res, "Bu order UC emas");
-      if (result.reason === "not_paid")
+      }
+      if (result.reason === "not_paid") {
         return response.error(res, "Order hali to'lanmagan");
+      }
       return response.error(res, "UC tasdiqlashda xatolik");
     }
 
     return response.success(res, "UC order yakunlandi", result.order);
   } catch (error) {
     return response.serverError(res, "UC tasdiqlashda xatolik", error.message);
+  }
+};
+
+const cancelUcOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await cancelUcOrderById(id);
+    if (!result.ok) {
+      if (result.reason === "not_found") {
+        return response.notFound(res, "Order topilmadi");
+      }
+      if (result.reason === "not_uc") {
+        return response.error(res, "Bu order UC emas");
+      }
+      if (result.reason === "not_paid") {
+        return response.error(res, "Order hali bekor qilib bo'lmaydigan holatda");
+      }
+      if (result.reason === "refund_not_available") {
+        return response.error(res, "Balansga qaytarish uchun tgUserId yoki paidAmount topilmadi");
+      }
+      return response.error(res, "UC orderni bekor qilishda xatolik");
+    }
+
+    return response.success(res, "UC order bekor qilindi", result.order);
+  } catch (error) {
+    return response.serverError(res, "UC bekor qilishda xatolik", error.message);
+  }
+};
+
+const cancelOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await cancelPaidOrderById(id);
+    if (!result.ok) {
+      if (result.reason === "not_found") {
+        return response.notFound(res, "Order topilmadi");
+      }
+      if (result.reason === "not_cancellable") {
+        return response.error(res, "Bu orderni hozir bekor qilib bo'lmaydi");
+      }
+      if (result.reason === "refund_not_available") {
+        return response.error(res, "Balansga qaytarish uchun tgUserId yoki paidAmount topilmadi");
+      }
+      return response.error(res, "Orderni bekor qilishda xatolik");
+    }
+
+    return response.success(res, "Order bekor qilindi", result.order);
+  } catch (error) {
+    return response.serverError(res, "Orderni bekor qilishda xatolik", error.message);
   }
 };
 
@@ -411,4 +476,6 @@ module.exports = {
   processCardPayment,
   retryFulfillment,
   confirmUcOrder,
+  cancelUcOrder,
+  cancelOrder,
 };
