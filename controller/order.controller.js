@@ -13,7 +13,6 @@ const { cancelPaidOrderById } = require("../services/order-cancel.service");
 const { notifyUcPaid } = require("../services/notify.service");
 const { getIO } = require("../socket");
 const { getStarPricing } = require("../services/settings.service");
-const { checkForceJoinMembership } = require("../services/force-join.service");
 
 let sequence = 1;
 const PENDING_TTL_MS = 10 * 60 * 1000;
@@ -179,16 +178,6 @@ const createOrder = async (req, res) => {
     }
 
     if (!tgUserId) return response.error(res, "tg_user_id required");
-
-    const forceJoin = await checkForceJoinMembership(tgUserId);
-    if (!forceJoin.canProceed) {
-      return response.forbidden(
-        res,
-        "Avval majburiy kanalga a'zo bo'ling",
-        forceJoin,
-      );
-    }
-
     if (!["star", "premium", "uc"].includes(product)) {
       return response.error(res, "invalid product");
     }
@@ -479,3 +468,5 @@ module.exports = {
   cancelUcOrder,
   cancelOrder,
 };
+
+
