@@ -4,6 +4,7 @@ const TelegramBot = require("node-telegram-bot-api");
 const { processIncomingPayment } = require("../services/payment-match.service");
 const { onUcPaid } = require("../services/notify.service");
 const { confirmUcOrderById } = require("../services/uc-fulfillment.service");
+const { checkForceJoinMembership, buildJoinUrl } = require("../services/force-join.service");
 const Order = require("../model/order.model");
 const User = require("../model/user.model");
 const Broadcast = require("../model/broadcast.model");
@@ -32,6 +33,7 @@ function startBot({ strict = false } = {}) {
 
   const bot = new TelegramBot(token, { polling: true });
   const firstSeen = new Set();
+  const forceJoinPassedUsers = new Set();
   const adminIds = adminNotifyChatId
     .split(",")
     .map((id) => id.trim())
@@ -61,11 +63,7 @@ function startBot({ strict = false } = {}) {
     return users.map((u) => String(u.tgUserId));
   };
 
-  bot.onText(/^\/start$/, async (msg) => {
-    const chatId = msg.chat.id;
-    await ensureUser(msg);
-    if (!firstSeen.has(chatId)) firstSeen.add(chatId);
-
+  const sendStartFlow = async (chatId) => {
     await bot.sendPhoto(chatId, startPhotoPath, {
       caption: startCaption,
       reply_markup: {
@@ -85,11 +83,100 @@ function startBot({ strict = false } = {}) {
         },
       );
     }
+  };
+
+  const sendForceJoinPrompt = async (chatId, userId, reason = "") => {
+    const forceJoin = await checkForceJoinMembership(userId);
+    const channelId = String(forceJoin.channelId || "").trim();
+    const joinUrl = buildJoinUrl(channelId, forceJoin.joinUrl);
+
+    await bot.sendMessage(
+      chatId,
+      reason ||
+        "Davom etish uchun kanalga a'zo bo'ling, so'ng A'zo bo'ldim tugmasini bosing.",
+      {
+        reply_markup: {
+          inline_keyboard: [
+            ...(joinUrl ? [[{ text: "Kanalga o'tish", url: joinUrl }]] : []),
+            [{ text: "A'zo bo'ldim", callback_data: `CHECK_JOIN:${userId}` }],
+          ],
+        },
+      },
+    );
+  };
+
+  bot.onText(/^\/start$/, async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = String(msg?.from?.id || "");
+    await ensureUser(msg);
+    if (!firstSeen.has(chatId)) firstSeen.add(chatId);
+
+    if (!userId) {
+      await sendStartFlow(chatId);
+      return;
+    }
+
+    const forceJoin = await checkForceJoinMembership(userId);
+    if (!forceJoin.enabled) {
+      await sendStartFlow(chatId);
+      return;
+    }
+
+    if (forceJoinPassedUsers.has(userId)) {
+      await sendStartFlow(chatId);
+      return;
+    }
+
+    if (forceJoin.canProceed) {
+      forceJoinPassedUsers.add(userId);
+      await sendStartFlow(chatId);
+      return;
+    }
+
+    await sendForceJoinPrompt(
+      chatId,
+      userId,
+      "Avval majburiy kanalga a'zo bo'ling. A'zo bo'lgach, A'zo bo'ldim tugmasini bosing.",
+    );
   });
 
   bot.on("callback_query", async (query) => {
     const chatId = query.message?.chat?.id;
     if (!chatId) return;
+
+    if (query.data?.startsWith("CHECK_JOIN:")) {
+      const userId = String(query.from?.id || "");
+      if (!userId) {
+        await bot.answerCallbackQuery(query.id, {
+          text: "Foydalanuvchi topilmadi",
+          show_alert: true,
+        });
+        return;
+      }
+
+      const forceJoin = await checkForceJoinMembership(userId);
+      if (!forceJoin.enabled) {
+        forceJoinPassedUsers.add(userId);
+        await bot.answerCallbackQuery(query.id, { text: "Davom etamiz" });
+        await sendStartFlow(chatId);
+        return;
+      }
+
+      if (!forceJoin.canProceed) {
+        await bot.answerCallbackQuery(query.id, {
+          text: "Hali kanalga a'zo emassiz",
+          show_alert: true,
+        });
+        return;
+      }
+
+      forceJoinPassedUsers.add(userId);
+      await bot.answerCallbackQuery(query.id, {
+        text: "Tasdiqlandi. Davom etamiz.",
+      });
+      await sendStartFlow(chatId);
+      return;
+    }
 
     if (query.data?.startsWith("CONFIRM_UC:")) {
       if (!isAdmin(chatId)) {
@@ -108,11 +195,11 @@ function startBot({ strict = false } = {}) {
         });
         const updatedMessage = [
           "💬 UC to'lov tushdi",
-          `🧾 Order: <code>${String(result.order.orderId)}</code>`,
+          `🧾 Buyurtma: <code>${String(result.order.orderId)}</code>`,
           `🆔 ID: <code>${result.order.username}</code>`,
-          `🎮 Plan: <code>${result.order.planCode}</code>`,
+          `🎮 Miqdor: <code>${result.order.planCode}</code>`,
           `💵 Summa: <b>${result.order.expectedAmount} UZS</b>`,
-          "✅ Status: <b>Tasdiqlandi</b>",
+          "✅ Holat: <b>Tasdiqlandi</b>",
         ].join("\n");
 
         if (query.message?.message_id) {
@@ -144,7 +231,7 @@ function startBot({ strict = false } = {}) {
       const order = await Order.findById(orderId).lean();
       if (!order) {
         await bot.answerCallbackQuery(query.id, {
-          text: "Order topilmadi",
+          text: "Buyurtma topilmadi",
           show_alert: true,
         });
         return;
@@ -198,7 +285,7 @@ function startBot({ strict = false } = {}) {
       await bot.answerCallbackQuery(query.id, { text: "O'chirildi" });
       await bot.sendMessage(
         chatId,
-        `✅ Reklama o'chirildi. ID: ${broadcastId} (delete: ${removed})`,
+        `✅ Reklama o'chirildi. ID: ${broadcastId} (o'chirildi: ${removed})`,
       );
     }
   });
@@ -387,7 +474,7 @@ function startBot({ strict = false } = {}) {
         if (result.matched) {
           await bot.sendMessage(
             cardxabarNotifyChatId,
-            `✅ To'lov matched\nOrder: ${result.order.orderId}\nSumma: ${result.amount}`,
+            `✅ To'lov mos tushdi\nBuyurtma: ${result.order.orderId}\nSumma: ${result.amount}`,
           );
         }
       } catch (err) {
@@ -401,9 +488,9 @@ function startBot({ strict = false } = {}) {
       try {
         const message = [
           "💬 UC to'lov tushdi",
-          `🧾 Order: <code>${String(payload.orderCode)}</code>`,
+          `🧾 Buyurtma: <code>${String(payload.orderCode)}</code>`,
           `🆔 ID: <code>${payload.username}</code>`,
-          `🎮 Plan: <code>${payload.planCode}</code>`,
+          `🎮 Miqdor: <code>${payload.planCode}</code>`,
           `💵 Summa: <b>${payload.expectedAmount} UZS</b>`,
         ].join("\n");
 
