@@ -1,5 +1,6 @@
 const Order = require("../model/order.model");
 const { refundToBalance } = require("./order-cancel.service");
+const { sendTelegramText } = require("./telegram-notify.service");
 
 async function confirmUcOrderById(orderId) {
   const order = await Order.findById(orderId);
@@ -36,6 +37,13 @@ async function cancelUcOrderById(orderId) {
   order.fulfillmentError = "UC order cancelled by admin. Balance refunded.";
   order.fulfilledAt = new Date();
   await order.save();
+
+  if (order.tgUserId) {
+    await sendTelegramText(
+      order.tgUserId,
+      "Xatolik tufayli buyurtma bekor qilindi. To'lovingiz botdagi profilingizga qaytarildi.",
+    );
+  }
 
   return { ok: true, order, refundedAmount: Number(order.paidAmount || 0) };
 }

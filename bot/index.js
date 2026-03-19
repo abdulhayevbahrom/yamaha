@@ -42,6 +42,15 @@ function startBot({ strict = false } = {}) {
 
   const isAdmin = (chatId) => adminIds.includes(String(chatId));
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const sendToAdmins = async (text, extra = {}) => {
+    for (const adminId of adminIds) {
+      try {
+        await bot.sendMessage(adminId, text, extra);
+      } catch (error) {
+        console.error("Admin notify error:", adminId, error.message);
+      }
+    }
+  };
 
   const ensureUser = async (msg) => {
     const tgUserId = String(msg?.from?.id || "");
@@ -494,7 +503,7 @@ function startBot({ strict = false } = {}) {
           `💵 Summa: <b>${payload.expectedAmount} UZS</b>`,
         ].join("\n");
 
-        await bot.sendMessage(adminNotifyChatId, message, {
+        await sendToAdmins(message, {
           parse_mode: "HTML",
           reply_markup: {
             inline_keyboard: [
