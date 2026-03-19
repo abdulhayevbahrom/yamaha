@@ -213,7 +213,9 @@ function startBot({ strict = false } = {}) {
       const result = await confirmUcOrderById(orderId);
       if (result.ok) {
         await bot.answerCallbackQuery(query.id, {
-          text: "UC order yakunlandi",
+          text: result.alreadyCompleted
+            ? "UC order avval tasdiqlangan"
+            : "UC order yakunlandi",
         });
         const updatedMessage = [
           "💬 UC to'lov tushdi",
@@ -221,7 +223,9 @@ function startBot({ strict = false } = {}) {
           `🆔 ID: <code>${result.order.username}</code>`,
           `🎮 Miqdor: <code>${result.order.planCode}</code>`,
           `💵 Summa: <b>${result.order.expectedAmount} UZS</b>`,
-          "✅ Holat: <b>Tasdiqlandi</b>",
+          result.alreadyCompleted
+            ? "✅ Holat: <b>Avval tasdiqlangan</b>"
+            : "✅ Holat: <b>Tasdiqlandi</b>",
         ].join("\n");
 
         if (query.message?.message_id) {

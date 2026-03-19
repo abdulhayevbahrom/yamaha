@@ -6,6 +6,9 @@ async function confirmUcOrderById(orderId) {
   const order = await Order.findById(orderId);
   if (!order) return { ok: false, reason: "not_found" };
   if (order.product !== "uc") return { ok: false, reason: "not_uc" };
+  if (order.status === "completed") {
+    return { ok: true, order, alreadyCompleted: true };
+  }
   if (order.status !== "paid_auto_processed") {
     return { ok: false, reason: "not_paid" };
   }

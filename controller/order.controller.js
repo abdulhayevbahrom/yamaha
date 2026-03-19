@@ -322,7 +322,7 @@ const getReports = async (req, res) => {
 const getHistory = async (_, res) => {
   try {
     await expirePendingOrders();
-    const orders = await Order.find().sort({ createdAt: -1 }).limit(100).lean();
+    const orders = await Order.find().sort({ createdAt: -1 }).limit(1000).lean();
     return response.success(res, "Tarix", orders);
   } catch (error) {
     return response.serverError(res, "Tarix olishda xatolik", error.message);
