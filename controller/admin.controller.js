@@ -4,9 +4,12 @@ const Plan = require("../model/plan.model");
 const {
   getStarPricing,
   getForceJoin,
+  getBotStatus,
   updateStarPricing,
   updateForceJoin,
+  updateBotStatus,
 } = require("../services/settings.service");
+const { broadcastBotResumed } = require("../services/bot-broadcast.service");
 
 const parseAllowlist = () => {
   const raw = process.env.ADMIN_NOTIFY_CHAT_ID || "";
@@ -120,7 +123,8 @@ const getSettings = async (_, res) => {
   try {
     const starPricing = await getStarPricing();
     const forceJoin = await getForceJoin();
-    return response.success(res, "Settings", { starPricing, forceJoin });
+    const botStatus = await getBotStatus();
+    return response.success(res, "Settings", { starPricing, forceJoin, botStatus });
   } catch (error) {
     return response.serverError(res, "Settings xatolik", error.message);
   }
@@ -128,14 +132,19 @@ const getSettings = async (_, res) => {
 
 const updateSettings = async (req, res) => {
   try {
-    const { starPricing, forceJoin } = req.body || {};
-    if (!starPricing && !forceJoin) {
-      return response.error(res, "starPricing yoki forceJoin required");
+    const { starPricing, forceJoin, botStatus } = req.body || {};
+    if (!starPricing && !forceJoin && !botStatus) {
+      return response.error(res, "starPricing yoki forceJoin yoki botStatus required");
     }
 
     const out = {};
+    const prevBotStatus = botStatus ? await getBotStatus() : null;
     if (starPricing) out.starPricing = await updateStarPricing(starPricing);
     if (forceJoin) out.forceJoin = await updateForceJoin(forceJoin);
+    if (botStatus) out.botStatus = await updateBotStatus(botStatus);
+    if (botStatus && prevBotStatus && !prevBotStatus.enabled && out.botStatus?.enabled) {
+      out.broadcast = await broadcastBotResumed();
+    }
     return response.success(res, "Settings yangilandi", out);
   } catch (error) {
     return response.serverError(res, "Settings yangilashda xatolik", error.message);

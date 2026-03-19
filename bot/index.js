@@ -5,6 +5,7 @@ const { processIncomingPayment } = require("../services/payment-match.service");
 const { onUcPaid } = require("../services/notify.service");
 const { confirmUcOrderById } = require("../services/uc-fulfillment.service");
 const { checkForceJoinMembership, buildJoinUrl } = require("../services/force-join.service");
+const { getBotStatus } = require("../services/settings.service");
 const Order = require("../model/order.model");
 const User = require("../model/user.model");
 const Broadcast = require("../model/broadcast.model");
@@ -55,6 +56,17 @@ function startBot({ strict = false } = {}) {
 
   const isAdmin = (chatId) => adminIds.includes(String(chatId));
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const ensureBotActive = async (chatId, { silent = false } = {}) => {
+    const botStatus = await getBotStatus();
+    if (botStatus.enabled) return true;
+    if (!silent) {
+      await bot.sendMessage(
+        chatId,
+        "Hozirda bot ish faoliyatida emas. Birozdan keyin qayta urinib ko'ring.",
+      );
+    }
+    return false;
+  };
   const sendToAdmins = async (text, extra = {}) => {
     for (const adminId of adminIds) {
       try {
@@ -133,6 +145,10 @@ function startBot({ strict = false } = {}) {
     await ensureUser(msg);
     if (!firstSeen.has(chatId)) firstSeen.add(chatId);
 
+    if (!(await ensureBotActive(chatId))) {
+      return;
+    }
+
     if (!userId) {
       await sendStartFlow(chatId);
       return;
@@ -165,6 +181,14 @@ function startBot({ strict = false } = {}) {
   bot.on("callback_query", async (query) => {
     const chatId = query.message?.chat?.id;
     if (!chatId) return;
+
+    if (!(await ensureBotActive(chatId, { silent: true }))) {
+      await bot.answerCallbackQuery(query.id, {
+        text: "Bot hozir faol emas",
+        show_alert: true,
+      });
+      return;
+    }
 
     if (query.data?.startsWith("CHECK_JOIN:")) {
       const userId = String(query.from?.id || "");
@@ -320,6 +344,12 @@ function startBot({ strict = false } = {}) {
     try {
       if (!msg?.chat?.id) return;
       const chatId = msg.chat.id;
+      if (msg.text === "/start") return;
+
+      if (!(await ensureBotActive(chatId))) {
+        return;
+      }
+
       if (!isAdmin(chatId)) return;
 
       if (msg.text === "📣 Reklama yuborish") {

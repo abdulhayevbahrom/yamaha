@@ -12,6 +12,10 @@ const DEFAULT_FORCE_JOIN = {
   joinUrl: "",
 };
 
+const DEFAULT_BOT_STATUS = {
+  enabled: true,
+};
+
 async function getStarPricing() {
   const doc = await Settings.findOne({ key: "star_pricing" }).lean();
   if (!doc?.value) return DEFAULT_STAR_PRICING;
@@ -29,6 +33,17 @@ async function getForceJoin() {
     enabled: Boolean(doc.value.enabled),
     channelId: String(doc.value.channelId || "").trim(),
     joinUrl: String(doc.value.joinUrl || "").trim(),
+  };
+}
+
+async function getBotStatus() {
+  const doc = await Settings.findOne({ key: "bot_status" }).lean();
+  if (!doc?.value) return DEFAULT_BOT_STATUS;
+  return {
+    enabled:
+      typeof doc.value.enabled === "boolean"
+        ? doc.value.enabled
+        : DEFAULT_BOT_STATUS.enabled,
   };
 }
 
@@ -74,9 +89,28 @@ async function updateForceJoin(payload) {
   };
 }
 
+async function updateBotStatus(payload) {
+  const enabled = Boolean(payload.enabled);
+
+  const doc = await Settings.findOneAndUpdate(
+    { key: "bot_status" },
+    { value: { enabled } },
+    { new: true, upsert: true },
+  ).lean();
+
+  return {
+    enabled:
+      typeof doc?.value?.enabled === "boolean"
+        ? doc.value.enabled
+        : DEFAULT_BOT_STATUS.enabled,
+  };
+}
+
 module.exports = {
   getStarPricing,
   getForceJoin,
+  getBotStatus,
   updateStarPricing,
   updateForceJoin,
+  updateBotStatus,
 };
