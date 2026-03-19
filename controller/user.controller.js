@@ -55,6 +55,8 @@ async function getMe(req, res) {
     const user = await ensureUser(tgUser);
     return response.success(res, "Profile", user);
   } catch (error) {
+    console.log(">>>>", error);
+
     return response.serverError(res, "Profile olishda xatolik", error.message);
   }
 }
@@ -76,7 +78,11 @@ async function getMyOrders(req, res) {
       .lean();
     return response.success(res, "My orders", orders);
   } catch (error) {
-    return response.serverError(res, "Orderlarni olishda xatolik", error.message);
+    return response.serverError(
+      res,
+      "Orderlarni olishda xatolik",
+      error.message,
+    );
   }
 }
 
@@ -84,7 +90,6 @@ async function createBalanceTopup(req, res) {
   try {
     const tgUser = getTgUser(req);
     if (!tgUser.tgUserId) return response.error(res, "tg_user_id required");
-
 
     const amount = Number(req.body?.amount || 0);
     if (!amount || amount <= 0) {
@@ -108,7 +113,9 @@ async function createBalanceTopup(req, res) {
       product: "balance",
       planCode: String(amount),
       username: tgUser.username || tgUser.tgUserId,
-      profileName: [tgUser.firstName, tgUser.lastName].filter(Boolean).join(" "),
+      profileName: [tgUser.firstName, tgUser.lastName]
+        .filter(Boolean)
+        .join(" "),
       paymentMethod: "card",
       expectedAmount,
       paidAmount: 0,
@@ -130,4 +137,3 @@ module.exports = {
   getMyOrders,
   createBalanceTopup,
 };
-
