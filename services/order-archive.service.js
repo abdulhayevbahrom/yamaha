@@ -36,7 +36,7 @@ async function sendOrderArchive(orderOrId, options = {}) {
     "✅ Muvaffaqiyatli buyurtma",
     `🧾 Buyurtma: <code>${order.orderId}</code>`,
     `📦 Mahsulot: <b>${productLabels[order.product] || order.product}</b>`,
-    `👤 Mijoz: <code>${order.username || order.tgUsername || "-"}</code>`,
+    `👤 Mijoz: <code>${order.profileName || "-"}</code>`,
     `🎮 Miqdor: <code>${amountValue}</code>`,
     `💵 Summa: <b>${Number(order.paidAmount || order.expectedAmount || 0)} UZS</b>`,
     `💳 To'lov: <b>${order.paymentMethod || "-"}</b>`,
