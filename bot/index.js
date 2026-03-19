@@ -13,12 +13,25 @@ const BroadcastDelivery = require("../model/broadcastDelivery.model");
 const startCaption =
   "Star, Premium va PUBG UC ni xavfsiz sotib oling.\n\nDo'konga kirish uchun tugmani bosing.";
 
+const normalizeOptionalId = (value) => {
+  const cleaned = String(value || "").trim();
+  if (!cleaned) return "";
+  if (["shartmas", "none", "null", "undefined", "-"].includes(cleaned.toLowerCase())) {
+    return "";
+  }
+  return cleaned;
+};
+
 function startBot({ strict = false } = {}) {
   const token = process.env.BOT_TOKEN;
   const webAppUrl = process.env.WEB_APP_URL;
-  const cardxabarSourceChatId = process.env.CARDXABAR_SOURCE_CHAT_ID || "";
+  const cardxabarSourceChatId = normalizeOptionalId(
+    process.env.CARDXABAR_SOURCE_CHAT_ID,
+  );
   const cardxabarNotifyChatId =
-    process.env.CARDXABAR_NOTIFY_CHAT_ID || cardxabarSourceChatId || "";
+    normalizeOptionalId(process.env.CARDXABAR_NOTIFY_CHAT_ID) ||
+    cardxabarSourceChatId ||
+    "";
   const adminNotifyChatId = process.env.ADMIN_NOTIFY_CHAT_ID || "";
   const startPhotoPath =
     process.env.START_PHOTO_PATH || path.join(__dirname, "..", "home.jpg");

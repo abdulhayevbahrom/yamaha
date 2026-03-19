@@ -10,8 +10,10 @@ const connectDB = require("../config/dbConfig");
 const apiId = Number(process.env.TG_API_ID || 0);
 const apiHash = process.env.TG_API_HASH || "";
 const stringSession = new StringSession(process.env.TG_USER_SESSION || "");
-const cardxabarChatId = process.env.CARDXABAR_CHAT_ID || "";
-const cardxabarUsername = process.env.CARDXABAR_USERNAME || "CardXabarBot";
+const cardxabarChatId = String(process.env.CARDXABAR_CHAT_ID || "").trim();
+const cardxabarUsername = String(
+  process.env.CARDXABAR_USERNAME || "CardXabarBot",
+).trim();
 const logMessages = process.env.TG_LOG_MESSAGES === "1";
 const adminNotifyChatId = process.env.ADMIN_NOTIFY_CHAT_ID || "";
 const botToken = process.env.BOT_TOKEN || "";
@@ -94,30 +96,60 @@ async function startUserClient({ strict = false } = {}) {
     await notifyAdminsAboutSessionIssue(error.message);
     throw error;
   }
-  console.log("User-client ishga tushdi.");
+  console.log(
+    `User-client ishga tushdi. CARDXABAR_CHAT_ID=${cardxabarChatId || "-"} CARDXABAR_USERNAME=${cardxabarUsername || "-"}`,
+  );
 
   client.addEventHandler(async (event) => {
     try {
       const message = event.message;
-      if (!message || !message.message) return;
+      if (!message) return;
 
-      const chatId = String(message.chatId || "");
-      const sender = message.sender;
-      const senderUsername = sender?.username || "";
-      if (cardxabarChatId && chatId !== String(cardxabarChatId)) return;
-      if (!cardxabarChatId && senderUsername !== cardxabarUsername) return;
+      const text = String(message.message || "").trim();
+      if (!text) return;
+
+      const chatId =
+        typeof message.chatId?.toString === "function"
+          ? message.chatId.toString()
+          : String(message.chatId || "").trim();
+      const sender =
+        message.sender || (typeof message.getSender === "function"
+          ? await message.getSender()
+          : null);
+      const senderUsername = String(sender?.username || "").trim();
+      const usernameMatch =
+        cardxabarUsername &&
+        senderUsername.toLowerCase() === cardxabarUsername.toLowerCase();
+      const chatMatch = cardxabarChatId && chatId === cardxabarChatId;
+
+      if (cardxabarChatId || cardxabarUsername) {
+        if (!chatMatch && !usernameMatch) {
+          if (logMessages) {
+            console.log(
+              `[TG] skip chatId=${chatId} sender=${senderUsername || "-"} msgId=${message.id}`,
+            );
+          }
+          return;
+        }
+      }
+
       if (logMessages) {
         console.log(
-          `[TG] chatId=${chatId} msgId=${message.id} text=${message.message}`,
+          `[TG] matched chatId=${chatId} sender=${senderUsername || "-"} msgId=${message.id} text=${text}`,
         );
       }
 
       const externalMessageId = `${chatId}:${message.id}`;
-      await processIncomingPayment({
-        rawText: message.message,
+      const result = await processIncomingPayment({
+        rawText: text,
         externalMessageId,
         source: "cardxabar-user",
       });
+      if (logMessages) {
+        console.log(
+          `[TG] payment result matched=${Boolean(result?.matched)} reason=${result?.reason || "-"} amount=${result?.amount || 0}`,
+        );
+      }
     } catch (err) {
       console.error("User-client message error:", err.message);
     }
