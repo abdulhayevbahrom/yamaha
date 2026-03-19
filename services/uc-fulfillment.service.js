@@ -1,6 +1,7 @@
 const Order = require("../model/order.model");
 const { refundToBalance } = require("./order-cancel.service");
 const { sendTelegramText } = require("./telegram-notify.service");
+const { sendOrderArchive } = require("./order-archive.service");
 
 async function confirmUcOrderById(orderId) {
   const order = await Order.findById(orderId);
@@ -18,6 +19,7 @@ async function confirmUcOrderById(orderId) {
   order.fulfilledAt = new Date();
   order.fulfillmentError = "";
   await order.save();
+  await sendOrderArchive(order, { statusLabel: "Tasdiqlandi" });
 
   return { ok: true, order };
 }

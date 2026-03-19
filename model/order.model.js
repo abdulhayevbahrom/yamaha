@@ -92,6 +92,10 @@ const orderSchema = new Schema(
       type: Date,
       default: null
     },
+    archiveSentAt: {
+      type: Date,
+      default: null
+    },
     expiresAt: {
       type: Date,
       default: null

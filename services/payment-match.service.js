@@ -4,6 +4,7 @@ const User = require("../model/user.model");
 const { autoFulfillOrder } = require("./avtoBuy.service");
 const { getIO } = require("../socket");
 const { notifyUcPaid } = require("./notify.service");
+const { sendOrderArchive } = require("./order-archive.service");
 
 function parseAmountFromText(text) {
   const raw = String(text || "");
@@ -122,6 +123,9 @@ async function processIncomingPayment({
       fulfillmentStatus: "success",
       fulfilledAt: new Date(),
       fulfillmentError: "",
+    });
+    await sendOrderArchive({ ...pending, status: "completed" }, {
+      statusLabel: "Balans to'ldirildi",
     });
   }
 

@@ -2,6 +2,7 @@ const axios = require("axios");
 const { getTonkeeperService } = require("./tonkeeper/tonkeeper.service");
 const Order = require("../model/order.model");
 const Plan = require("../model/plan.model");
+const { sendOrderArchive } = require("./order-archive.service");
 
 const API_KEY = process.env.ROBYNHOOD_API_KEY;
 const API_URL =
@@ -260,6 +261,7 @@ async function autoFulfillOrder(orderOrId) {
         fragmentTx: result.fragment || result,
         fulfillmentError: "",
       });
+      await sendOrderArchive(order);
 
       return { ok: true, result };
     } catch (error) {
@@ -311,6 +313,7 @@ async function autoFulfillOrder(orderOrId) {
       fragmentTx: result.fragment || result,
       fulfillmentError: "",
     });
+    await sendOrderArchive(order);
 
     return { ok: true, result };
   } catch (error) {
