@@ -55,8 +55,6 @@ async function getMe(req, res) {
     const user = await ensureUser(tgUser);
     return response.success(res, "Profile", user);
   } catch (error) {
-    console.log(">>>>", error);
-
     return response.serverError(res, "Profile olishda xatolik", error.message);
   }
 }
