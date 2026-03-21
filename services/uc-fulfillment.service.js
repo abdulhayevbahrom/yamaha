@@ -2,6 +2,7 @@ const Order = require("../model/order.model");
 const { refundToBalance } = require("./order-cancel.service");
 const { sendTelegramText } = require("./telegram-notify.service");
 const { sendOrderArchive } = require("./order-archive.service");
+const { emitUserUpdate } = require("../socket");
 
 async function confirmUcOrderById(orderId) {
   const order = await Order.findById(orderId);
@@ -20,6 +21,15 @@ async function confirmUcOrderById(orderId) {
   order.fulfillmentError = "";
   await order.save();
   await sendOrderArchive(order, { statusLabel: "Tasdiqlandi" });
+  if (order.tgUserId) {
+    emitUserUpdate(order.tgUserId, {
+      type: "uc_confirmed",
+      refreshOrders: true,
+      orderId: order._id,
+      status: order.status,
+      product: order.product,
+    });
+  }
 
   return { ok: true, order };
 }
@@ -48,6 +58,14 @@ async function cancelUcOrderById(orderId) {
       order.tgUserId,
       "Xatolik tufayli buyurtma bekor qilindi. To'lovingiz botdagi profilingizga qaytarildi.",
     );
+    emitUserUpdate(order.tgUserId, {
+      type: "uc_cancelled_refund",
+      refreshBalance: true,
+      refreshOrders: true,
+      orderId: order._id,
+      status: order.status,
+      product: order.product,
+    });
   }
 
   return { ok: true, order, refundedAmount: Number(order.paidAmount || 0) };

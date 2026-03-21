@@ -21,6 +21,7 @@ router.post("/orders", orderController.createOrder);
 router.get("/reports", orderController.getReports);
 router.get("/history", orderController.getHistory);
 router.get("/me", userController.getMe);
+router.get("/balance/:tgUserId", userController.getBalance);
 router.get("/my-orders", userController.getMyOrders);
 router.post("/balance/topup", userController.createBalanceTopup);
 

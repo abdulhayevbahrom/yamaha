@@ -2,7 +2,7 @@ const Order = require("../model/order.model");
 const PaymentLog = require("../model/payment-log.model");
 const User = require("../model/user.model");
 const { autoFulfillOrder } = require("./avtoBuy.service");
-const { getIO } = require("../socket");
+const { emitAdminUpdate, emitUserUpdate } = require("../socket");
 const { notifyUcPaid } = require("./notify.service");
 const { sendOrderArchive } = require("./order-archive.service");
 
@@ -130,24 +130,37 @@ async function processIncomingPayment({
   }
 
   if (pending.product === "uc") {
-    const io = getIO();
-    if (io) {
-      io.emit("admin-uc-paid", {
-        orderId: pending._id,
-        orderCode: pending.orderId,
-        username: pending.username,
-        planCode: pending.planCode,
-        expectedAmount: pending.expectedAmount,
-        paidAmount: pending.paidAmount,
-        paidAt: pending.paidAt,
-      });
-    }
+    emitAdminUpdate({
+      type: "uc_paid",
+      refreshHistory: true,
+      orderId: pending._id,
+      orderCode: pending.orderId,
+      username: pending.username,
+      planCode: pending.planCode,
+      expectedAmount: pending.expectedAmount,
+      paidAmount: pending.paidAmount,
+      paidAt: pending.paidAt,
+    });
     notifyUcPaid({
       orderId: pending._id,
       orderCode: pending.orderId,
       username: pending.username,
       planCode: pending.planCode,
       expectedAmount: pending.expectedAmount,
+    });
+  }
+
+  if (pending.tgUserId) {
+    emitUserUpdate(pending.tgUserId, {
+      type:
+        pending.product === "balance"
+          ? "balance_topup_completed"
+          : "payment_matched",
+      refreshBalance: pending.product === "balance",
+      refreshOrders: true,
+      orderId: pending._id,
+      status: pending.product === "balance" ? "completed" : "paid_auto_processed",
+      product: pending.product,
     });
   }
 

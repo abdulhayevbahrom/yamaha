@@ -1,6 +1,9 @@
 const response = require("../utils/response");
 const Plan = require("../model/plan.model");
-const { getStarPricing, getForceJoin } = require("../services/settings.service");
+const {
+  getStarPricing,
+  getForceJoin,
+} = require("../services/settings.service");
 const { checkForceJoinMembership } = require("../services/force-join.service");
 // const { ensureDefaultPlans } = require("../services/plan.service");
 
@@ -68,7 +71,7 @@ const checkForceJoin = async (req, res) => {
 
 const lookupProfile = async (req, res) => {
   const { username } = req.query;
-  if (!username) return response.error(res, "username required");
+  if (!username) return response.error(res, "Username kiriting");
 
   const cleaned = String(username).replace("@", "").trim();
 
@@ -77,8 +80,10 @@ const lookupProfile = async (req, res) => {
       cleaned,
     )}&quantity=50`;
     const headers = { "API-Key": process.env.API_KEY };
+
     const external = await fetch(url, { headers });
     const data = await external.json();
+
     const profileName = data?.name;
 
     if (!profileName) return response.error(res, "Profil topilmadi");

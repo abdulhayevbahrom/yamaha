@@ -5,6 +5,6 @@ module.exports = (validator) => (req, res, next) => {
     req.validated = validator(req);
     next();
   } catch (error) {
-    return response.error(res, error.message || "Validation error");
+    return response.error(res, error.message || "Kiritilgan ma'lumotlar noto'g'ri");
   }
 };

@@ -81,11 +81,17 @@ function startBot({ strict = false } = {}) {
     const tgUserId = String(msg?.from?.id || "");
     if (!tgUserId) return;
     const username = String(msg?.from?.username || "");
-    const firstName = String(msg?.from?.first_name || "");
-    const lastName = String(msg?.from?.last_name || "");
     await User.findOneAndUpdate(
       { tgUserId },
-      { $set: { username, firstName, lastName } },
+      {
+        $set: { username },
+        $unset: {
+          firstName: "",
+          lastName: "",
+          photoUrl: "",
+          photo_url: "",
+        },
+      },
       { upsert: true, new: true },
     ).lean();
   };

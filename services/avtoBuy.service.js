@@ -3,6 +3,7 @@ const { getTonkeeperService } = require("./tonkeeper/tonkeeper.service");
 const Order = require("../model/order.model");
 const Plan = require("../model/plan.model");
 const { sendOrderArchive } = require("./order-archive.service");
+const { emitUserUpdate } = require("../socket");
 
 const API_KEY = process.env.ROBYNHOOD_API_KEY;
 const API_URL =
@@ -262,6 +263,16 @@ async function autoFulfillOrder(orderOrId) {
         fulfillmentError: "",
       });
       await sendOrderArchive(order);
+      if (order.tgUserId) {
+        emitUserUpdate(order.tgUserId, {
+          type: "order_fulfilled",
+          refreshOrders: true,
+          orderId: order._id,
+          status: order.status,
+          fulfillmentStatus: "success",
+          product: order.product,
+        });
+      }
 
       return { ok: true, result };
     } catch (error) {
@@ -270,6 +281,16 @@ async function autoFulfillOrder(orderOrId) {
         fulfillmentError: error.message || "Auto buy xatolik",
         fragmentTx: error.response?.data || null,
       });
+      if (order.tgUserId) {
+        emitUserUpdate(order.tgUserId, {
+          type: "order_fulfillment_failed",
+          refreshOrders: true,
+          orderId: order._id,
+          status: order.status,
+          fulfillmentStatus: "failed",
+          product: order.product,
+        });
+      }
 
       return { ok: false, error: error.message || "Auto buy xatolik" };
     }
@@ -314,6 +335,16 @@ async function autoFulfillOrder(orderOrId) {
       fulfillmentError: "",
     });
     await sendOrderArchive(order);
+    if (order.tgUserId) {
+      emitUserUpdate(order.tgUserId, {
+        type: "order_fulfilled",
+        refreshOrders: true,
+        orderId: order._id,
+        status: order.status,
+        fulfillmentStatus: "success",
+        product: order.product,
+      });
+    }
 
     return { ok: true, result };
   } catch (error) {
@@ -322,6 +353,16 @@ async function autoFulfillOrder(orderOrId) {
       fulfillmentError: error.message || "Auto buy xatolik",
       fragmentTx: error.response?.data || null,
     });
+    if (order.tgUserId) {
+      emitUserUpdate(order.tgUserId, {
+        type: "order_fulfillment_failed",
+        refreshOrders: true,
+        orderId: order._id,
+        status: order.status,
+        fulfillmentStatus: "failed",
+        product: order.product,
+      });
+    }
 
     return { ok: false, error: error.message || "Auto buy xatolik" };
   }

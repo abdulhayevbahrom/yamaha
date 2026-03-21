@@ -11,8 +11,9 @@ const {
 } = require("../services/uc-fulfillment.service");
 const { cancelPaidOrderById } = require("../services/order-cancel.service");
 const { notifyUcPaid } = require("../services/notify.service");
-const { getIO } = require("../socket");
+const { emitAdminUpdate, emitUserUpdate } = require("../socket");
 const { getStarPricing } = require("../services/settings.service");
+const { getTelegramUserFromRequest } = require("../utils/tg-user");
 
 let sequence = 1;
 const PENDING_TTL_MS = 10 * 60 * 1000;
@@ -101,7 +102,7 @@ const calculatePrice = async (req, res) => {
         const pricing = await getStarPricing();
         const qty = Number(customAmount || 0);
         if (!qty || qty < pricing.min || qty > pricing.max) {
-          return response.error(res, "custom amount noto'g'ri");
+          return response.error(res, "Tanlangan miqdor noto'g'ri");
         }
         const basePrice = qty * Number(pricing.pricePerStar || 0);
         const amount = await getUniquePendingAmount({
@@ -125,7 +126,7 @@ const calculatePrice = async (req, res) => {
       code: planCode,
       isActive: true,
     }).lean();
-    if (!plan) return response.error(res, "invalid plan");
+    if (!plan) return response.error(res, "Tanlangan paket topilmadi");
 
     const amount = await getUniquePendingAmount({
       product,
@@ -158,30 +159,18 @@ const createOrder = async (req, res) => {
       paymentMethod = "card",
       status,
     } = req.body;
-    let tgUserId = String(req.headers["x-tg-user-id"] || "").trim();
-    let tgUsername = String(req.headers["x-tg-username"] || "").trim();
-    if (!tgUserId) {
-      const initData = String(req.headers["x-tg-init-data"] || "");
-      if (initData) {
-        try {
-          const params = new URLSearchParams(initData);
-          const userRaw = params.get("user");
-          if (userRaw) {
-            const user = JSON.parse(userRaw);
-            tgUserId = String(user?.id || "").trim();
-            tgUsername = String(user?.username || "").trim();
-          }
-        } catch (_) {
-          // ignore
-        }
-      }
-    }
+    const { tgUserId, username: tgUsername } = getTelegramUserFromRequest(req);
 
-    if (!tgUserId) return response.error(res, "tg_user_id required");
-    if (!["star", "premium", "uc"].includes(product)) {
-      return response.error(res, "invalid product");
+    if (!tgUserId) {
+      return response.error(
+        res,
+        "Telegram profilingiz aniqlanmadi. Ilovani qayta ochib ko'ring.",
+      );
     }
-    if (!username) return response.error(res, "username required");
+    if (!["star", "premium", "uc"].includes(product)) {
+      return response.error(res, "Tanlangan mahsulot noto'g'ri");
+    }
+    if (!username) return response.error(res, "Username kiriting");
 
     await expirePendingOrders();
     await syncSequence();
@@ -200,7 +189,7 @@ const createOrder = async (req, res) => {
       const pricing = await getStarPricing();
       const qty = Number(customAmount || planCode || 0);
       if (!qty || qty < pricing.min || qty > pricing.max) {
-        return response.error(res, "custom amount noto'g'ri");
+        return response.error(res, "Tanlangan miqdor noto'g'ri");
       }
       resolvedAmount = qty;
       resolvedBasePrice = qty * Number(pricing.pricePerStar || 0);
@@ -211,7 +200,7 @@ const createOrder = async (req, res) => {
         code: planCode,
         isActive: true,
       }).lean();
-      if (!plan) return response.error(res, "invalid plan");
+      if (!plan) return response.error(res, "Tanlangan paket topilmadi");
       resolvedAmount = plan.amount;
       resolvedBasePrice = plan.basePrice;
     }
@@ -272,18 +261,17 @@ const createOrder = async (req, res) => {
 
     if (finalStatus === "paid_auto_processed") {
       if (product === "uc") {
-        const io = getIO();
-        if (io) {
-          io.emit("admin-uc-paid", {
-            orderId: order._id,
-            orderCode: order.orderId,
-            username: order.username,
-            planCode: order.planCode,
-            expectedAmount: order.expectedAmount,
-            paidAmount: order.paidAmount,
-            paidAt: order.paidAt,
-          });
-        }
+        emitAdminUpdate({
+          type: "uc_paid",
+          refreshHistory: true,
+          orderId: order._id,
+          orderCode: order.orderId,
+          username: order.username,
+          planCode: order.planCode,
+          expectedAmount: order.expectedAmount,
+          paidAmount: order.paidAmount,
+          paidAt: order.paidAt,
+        });
         notifyUcPaid({
           orderId: order._id,
           orderCode: order.orderId,
@@ -297,6 +285,15 @@ const createOrder = async (req, res) => {
         await autoFulfillOrder(order);
       }
     }
+
+    emitUserUpdate(tgUserId, {
+      type: "order_created",
+      refreshOrders: true,
+      refreshBalance: paymentMethod === "balance",
+      orderId: order._id,
+      status: finalStatus,
+      product,
+    });
 
     sequence += 1;
     return response.created(res, "Buyurtma yaratildi", order);

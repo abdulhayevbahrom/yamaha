@@ -1,6 +1,7 @@
 const Order = require("../model/order.model");
 const User = require("../model/user.model");
 const { sendTelegramText } = require("./telegram-notify.service");
+const { emitUserUpdate } = require("../socket");
 
 async function refundToBalance(order) {
   if (!order?.tgUserId || Number(order.paidAmount || 0) <= 0) {
@@ -39,6 +40,14 @@ async function cancelPaidOrderById(orderId) {
       order.tgUserId,
       "Xatolik tufayli buyurtma bekor qilindi. To'lovingiz botdagi profilingizga qaytarildi.",
     );
+    emitUserUpdate(order.tgUserId, {
+      type: "order_cancelled_refund",
+      refreshBalance: true,
+      refreshOrders: true,
+      orderId: order._id,
+      status: order.status,
+      product: order.product,
+    });
   }
 
   return { ok: true, order, refundedAmount: Number(order.paidAmount || 0) };

@@ -11,14 +11,6 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
-    firstName: {
-      type: String,
-      default: "",
-    },
-    lastName: {
-      type: String,
-      default: "",
-    },
     balance: {
       type: Number,
       default: 0,
