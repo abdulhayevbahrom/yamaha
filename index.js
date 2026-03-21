@@ -12,6 +12,25 @@ const { startUserClient } = require("./user-client");
 
 //ads
 
+function isEnabled(value, fallback = true) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) return fallback;
+  return !["0", "false", "no", "off"].includes(normalized);
+}
+
+function shouldStartTelegramWorkers() {
+  if (!isEnabled(process.env.ENABLE_TELEGRAM_WORKERS, true)) {
+    return false;
+  }
+
+  const appInstance = String(process.env.NODE_APP_INSTANCE || "").trim();
+  if (appInstance && appInstance !== "0") {
+    return false;
+  }
+
+  return true;
+}
+
 const PORT = Number(process.env.PORT) || 4090;
 const app = express();
 const server = createServer(app);
@@ -50,6 +69,12 @@ app.use((_, res) => {
 
 server.listen(PORT, () => {
   console.log(`Server: http://localhost:${PORT}`);
-  startBot();
-  startUserClient();
+  if (shouldStartTelegramWorkers()) {
+    startBot();
+    startUserClient();
+  } else {
+    console.log(
+      "Telegram workerlar bu processda ishga tushirilmadi (PM2 instance yoki env cheklovi).",
+    );
+  }
 });
