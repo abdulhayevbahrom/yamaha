@@ -16,6 +16,9 @@ const cardxabarUsername = String(
 ).trim();
 const adminNotifyChatId = process.env.ADMIN_NOTIFY_CHAT_ID || "";
 const botToken = process.env.BOT_TOKEN || "";
+const statusPollIntervalMs = Number(
+  process.env.USER_CLIENT_STATUS_POLL_MS || 5000,
+);
 
 let sessionAlertSent = false;
 const runtimeStatus = {
@@ -34,6 +37,8 @@ const runtimeStatus = {
   lastPaymentProcessedAt: null,
   processedPayments: 0,
   matchedPayments: 0,
+  statusWatcherRunning: false,
+  lastSavedMessageId: 0,
   lastError: "",
   lastErrorAt: null,
 };
@@ -82,6 +87,8 @@ function buildStatusMessage() {
     `Monitoring chat ID: ${monitorChat}`,
     `Monitoring username: ${monitorUser}`,
     `Oxirgi tekshirilgan buyruq: ${formatStatusTime(runtimeStatus.lastCommandAt)}`,
+    `Saved Messages kuzatuvi: ${runtimeStatus.statusWatcherRunning ? "Yoqilgan" : "O'chirilgan"}`,
+    `Oxirgi Saved Messages ID: ${runtimeStatus.lastSavedMessageId || "-"}`,
     `Oxirgi kuzatilgan xabar: ${formatStatusTime(runtimeStatus.lastMonitoredMessageAt)}`,
     `Oxirgi qayta ishlangan to'lov: ${formatStatusTime(runtimeStatus.lastPaymentProcessedAt)}`,
     `Qayta ishlangan to'lovlar soni: ${runtimeStatus.processedPayments}`,
@@ -142,6 +149,70 @@ async function ensureDbReady() {
   runtimeStatus.dbReady = true;
 }
 
+async function startSavedMessagesStatusWatcher(client) {
+  let inFlight = false;
+  let lastSeenId = 0;
+
+  const readRecentMessages = async () => {
+    const recent = await client.getMessages("me", { limit: 5 });
+    return Array.isArray(recent) ? recent : Array.from(recent || []);
+  };
+
+  const checkSavedMessages = async () => {
+    if (inFlight || !runtimeStatus.running || !client.connected) return;
+
+    inFlight = true;
+    try {
+      const recent = await readRecentMessages();
+      const freshMessages = recent
+        .filter((message) => Number(message?.id || 0) > lastSeenId)
+        .sort((left, right) => Number(left.id || 0) - Number(right.id || 0));
+
+      for (const message of freshMessages) {
+        const messageId = Number(message?.id || 0);
+        if (messageId > lastSeenId) {
+          lastSeenId = messageId;
+          runtimeStatus.lastSavedMessageId = messageId;
+        }
+
+        const text = String(message?.message || message?.rawText || "").trim();
+        if (!isStatusCommand(text)) continue;
+
+        runtimeStatus.lastCommandAt = new Date().toISOString();
+        await client.sendMessage("me", {
+          message: buildStatusMessage(),
+          replyTo: message.id,
+        });
+      }
+    } catch (error) {
+      markRuntimeError(error.message);
+    } finally {
+      inFlight = false;
+    }
+  };
+
+  try {
+    const seedMessages = await readRecentMessages();
+    const latestMessage = seedMessages[0];
+    lastSeenId = Number(latestMessage?.id || 0);
+    runtimeStatus.lastSavedMessageId = lastSeenId;
+  } catch (error) {
+    markRuntimeError(error.message);
+  }
+
+  runtimeStatus.statusWatcherRunning = true;
+  const timer = setInterval(() => {
+    void checkSavedMessages();
+  }, Math.max(statusPollIntervalMs, 2000));
+
+  if (typeof timer.unref === "function") {
+    timer.unref();
+  }
+
+  void checkSavedMessages();
+  return timer;
+}
+
 async function startUserClient({ strict = false } = {}) {
   try {
     await ensureDbReady();
@@ -181,6 +252,7 @@ async function startUserClient({ strict = false } = {}) {
   runtimeStatus.running = true;
   runtimeStatus.selfId = String(me?.id || "");
   runtimeStatus.selfUsername = String(me?.username || "").trim();
+  await startSavedMessagesStatusWatcher(client);
   console.log("User-client ishga tushdi.");
 
   client.addEventHandler(async (event) => {
