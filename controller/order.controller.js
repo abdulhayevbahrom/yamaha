@@ -444,6 +444,13 @@ const retryFulfillment = async (req, res) => {
     if (result?.ok) {
       return response.success(res, "Auto buy qayta bajarildi", result);
     }
+    if (result?.duplicate) {
+      return response.success(
+        res,
+        "Fragment so'rovi oldin yuborilgan, natija tekshirilmoqda",
+        result,
+      );
+    }
     return response.warning(res, "Auto buy bajarilmadi", result);
   } catch (error) {
     return response.serverError(

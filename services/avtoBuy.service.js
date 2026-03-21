@@ -26,6 +26,62 @@ const tonkeeper = getTonkeeperService();
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const DUPLICATE_IDEMPOTENCY_MESSAGE =
+  "Fragment so'rovi oldin yuborilgan. Natija tekshirilmoqda.";
+
+function buildFragmentIdempotencyKey(productType, recipient, transactionId) {
+  return `${productType}_${String(recipient || "").replace(
+    /[@\W]/g,
+    "",
+  )}_${transactionId}`;
+}
+
+function getFragmentErrorPayload(error) {
+  const responseData = error?.response?.data;
+  if (
+    responseData &&
+    typeof responseData === "object" &&
+    !Array.isArray(responseData)
+  ) {
+    return responseData;
+  }
+  if (responseData) {
+    return { error: String(responseData) };
+  }
+  if (error?.message) {
+    return { error: String(error.message) };
+  }
+  return null;
+}
+
+function getFragmentErrorMessage(error) {
+  const payload = getFragmentErrorPayload(error);
+  return String(payload?.error || payload?.message || error?.message || "").trim();
+}
+
+function isDuplicateIdempotencyError(error) {
+  const normalized = getFragmentErrorMessage(error).toLowerCase();
+  return (
+    normalized.includes("transaction already exists with idempotency key") ||
+    (normalized.includes("idempotency key") &&
+      normalized.includes("already exists"))
+  );
+}
+
+function appendIdempotencyKey(payload, idempotencyKey) {
+  if (!idempotencyKey) return payload || null;
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    return {
+      ...payload,
+      idempotencyKey,
+    };
+  }
+  return {
+    data: payload || null,
+    idempotencyKey,
+  };
+}
+
 const retryOperation = async (operation, maxRetries = 3) => {
   let lastError;
   for (let i = 0; i < maxRetries; i += 1) {
@@ -33,6 +89,13 @@ const retryOperation = async (operation, maxRetries = 3) => {
       return await operation();
     } catch (error) {
       lastError = error;
+      if (isDuplicateIdempotencyError(error)) {
+        console.warn(
+          "Fragment duplicate idempotency aniqlandi:",
+          getFragmentErrorPayload(error) || error.message,
+        );
+        break;
+      }
       console.error(
         `Fragment urinish ${i + 1}/${maxRetries} muvaffaqiyatsiz:`,
         error.response?.data || error.message,
@@ -146,19 +209,24 @@ async function purchaseFragment({
   isTest = false,
 }) {
   const endpoint = isTest ? "/test/purchase" : "/api/purchase";
+  const idempotencyKey = buildFragmentIdempotencyKey(
+    productType,
+    recipient,
+    transactionId,
+  );
   const payload = {
     product_type: productType,
     recipient,
-    idempotency_key: `${productType}_${recipient.replace(
-      /[@\W]/g,
-      "",
-    )}_${transactionId}`,
+    idempotency_key: idempotencyKey,
   };
   if (quantity) payload.quantity = String(quantity);
   if (months) payload.months = String(months);
 
   const response = await api.post(endpoint, payload);
-  return response.data;
+  return {
+    data: response.data,
+    idempotencyKey,
+  };
 }
 
 async function buyStars(recipient, amount, transactionId, options = {}) {
@@ -170,7 +238,7 @@ async function buyStars(recipient, amount, transactionId, options = {}) {
     await ensureFragmentBalance(tonAmount);
   }
 
-  const fragment = await retryOperation(() =>
+  const { data: fragment, idempotencyKey } = await retryOperation(() =>
     purchaseFragment({
       productType: "stars",
       recipient,
@@ -180,7 +248,7 @@ async function buyStars(recipient, amount, transactionId, options = {}) {
     }),
   );
 
-  return { fragment, tonAmount };
+  return { fragment, tonAmount, idempotencyKey };
 }
 
 async function buyPremium(recipient, months, transactionId, options = {}) {
@@ -192,7 +260,7 @@ async function buyPremium(recipient, months, transactionId, options = {}) {
     await ensureFragmentBalance(tonAmount);
   }
 
-  const fragment = await retryOperation(() =>
+  const { data: fragment, idempotencyKey } = await retryOperation(() =>
     purchaseFragment({
       productType: "premium",
       recipient,
@@ -202,7 +270,98 @@ async function buyPremium(recipient, months, transactionId, options = {}) {
     }),
   );
 
-  return { fragment, tonAmount };
+  return { fragment, tonAmount, idempotencyKey };
+}
+
+function buildDuplicateFragmentTx(order, error, idempotencyKey) {
+  const previousTx =
+    order?.fragmentTx &&
+    typeof order.fragmentTx === "object" &&
+    !Array.isArray(order.fragmentTx)
+      ? order.fragmentTx
+      : {};
+
+  return {
+    ...previousTx,
+    duplicateIdempotency: true,
+    duplicateCount: Number(previousTx.duplicateCount || 0) + 1,
+    duplicateDetectedAt: new Date(),
+    lastError: getFragmentErrorPayload(error),
+    idempotencyKey: idempotencyKey || previousTx.idempotencyKey || "",
+  };
+}
+
+async function markFulfillmentSuccess(order, result) {
+  await Order.findByIdAndUpdate(order._id, {
+    fulfillmentStatus: "success",
+    fulfilledAt: new Date(),
+    tonAmount: result.tonAmount || 0,
+    fragmentTx: appendIdempotencyKey(result.fragment || result, result.idempotencyKey),
+    fulfillmentError: "",
+  });
+  await sendOrderArchive(order);
+  if (order.tgUserId) {
+    emitUserUpdate(order.tgUserId, {
+      type: "order_fulfilled",
+      refreshOrders: true,
+      orderId: order._id,
+      status: order.status,
+      fulfillmentStatus: "success",
+      product: order.product,
+    });
+  }
+
+  return { ok: true, result };
+}
+
+async function markDuplicateFulfillment(order, error, idempotencyKey) {
+  await Order.findByIdAndUpdate(order._id, {
+    fulfillmentStatus: "processing",
+    fulfillmentError: DUPLICATE_IDEMPOTENCY_MESSAGE,
+    fragmentTx: buildDuplicateFragmentTx(order, error, idempotencyKey),
+  });
+  if (order.tgUserId) {
+    emitUserUpdate(order.tgUserId, {
+      type: "order_fulfillment_processing",
+      refreshOrders: true,
+      orderId: order._id,
+      status: order.status,
+      fulfillmentStatus: "processing",
+      product: order.product,
+    });
+  }
+
+  return {
+    ok: false,
+    duplicate: true,
+    recoverable: true,
+    error: DUPLICATE_IDEMPOTENCY_MESSAGE,
+    idempotencyKey,
+  };
+}
+
+async function markFulfillmentFailure(order, error, idempotencyKey) {
+  const errorMessage = error.message || "Auto buy xatolik";
+  await Order.findByIdAndUpdate(order._id, {
+    fulfillmentStatus: "failed",
+    fulfillmentError: errorMessage,
+    fragmentTx: appendIdempotencyKey(
+      getFragmentErrorPayload(error),
+      idempotencyKey,
+    ),
+  });
+  if (order.tgUserId) {
+    emitUserUpdate(order.tgUserId, {
+      type: "order_fulfillment_failed",
+      refreshOrders: true,
+      orderId: order._id,
+      status: order.status,
+      fulfillmentStatus: "failed",
+      product: order.product,
+    });
+  }
+
+  return { ok: false, error: errorMessage, idempotencyKey };
 }
 
 async function autoFulfillOrder(orderOrId) {
@@ -255,44 +414,21 @@ async function autoFulfillOrder(orderOrId) {
         isTest: FRAGMENT_TEST_MODE,
       });
 
-      await Order.findByIdAndUpdate(order._id, {
-        fulfillmentStatus: "success",
-        fulfilledAt: new Date(),
-        tonAmount: result.tonAmount || 0,
-        fragmentTx: result.fragment || result,
-        fulfillmentError: "",
-      });
-      await sendOrderArchive(order);
-      if (order.tgUserId) {
-        emitUserUpdate(order.tgUserId, {
-          type: "order_fulfilled",
-          refreshOrders: true,
-          orderId: order._id,
-          status: order.status,
-          fulfillmentStatus: "success",
-          product: order.product,
-        });
-      }
-
-      return { ok: true, result };
+      return markFulfillmentSuccess(order, result);
     } catch (error) {
-      await Order.findByIdAndUpdate(order._id, {
-        fulfillmentStatus: "failed",
-        fulfillmentError: error.message || "Auto buy xatolik",
-        fragmentTx: error.response?.data || null,
-      });
-      if (order.tgUserId) {
-        emitUserUpdate(order.tgUserId, {
-          type: "order_fulfillment_failed",
-          refreshOrders: true,
-          orderId: order._id,
-          status: order.status,
-          fulfillmentStatus: "failed",
-          product: order.product,
-        });
+      if (isDuplicateIdempotencyError(error)) {
+        return markDuplicateFulfillment(
+          order,
+          error,
+          buildFragmentIdempotencyKey("stars", recipient, transactionId),
+        );
       }
 
-      return { ok: false, error: error.message || "Auto buy xatolik" };
+      return markFulfillmentFailure(
+        order,
+        error,
+        buildFragmentIdempotencyKey("stars", recipient, transactionId),
+      );
     }
   }
 
@@ -327,44 +463,22 @@ async function autoFulfillOrder(orderOrId) {
       });
     }
 
-    await Order.findByIdAndUpdate(order._id, {
-      fulfillmentStatus: "success",
-      fulfilledAt: new Date(),
-      tonAmount: result.tonAmount || 0,
-      fragmentTx: result.fragment || result,
-      fulfillmentError: "",
-    });
-    await sendOrderArchive(order);
-    if (order.tgUserId) {
-      emitUserUpdate(order.tgUserId, {
-        type: "order_fulfilled",
-        refreshOrders: true,
-        orderId: order._id,
-        status: order.status,
-        fulfillmentStatus: "success",
-        product: order.product,
-      });
-    }
-
-    return { ok: true, result };
+    return markFulfillmentSuccess(order, result);
   } catch (error) {
-    await Order.findByIdAndUpdate(order._id, {
-      fulfillmentStatus: "failed",
-      fulfillmentError: error.message || "Auto buy xatolik",
-      fragmentTx: error.response?.data || null,
-    });
-    if (order.tgUserId) {
-      emitUserUpdate(order.tgUserId, {
-        type: "order_fulfillment_failed",
-        refreshOrders: true,
-        orderId: order._id,
-        status: order.status,
-        fulfillmentStatus: "failed",
-        product: order.product,
-      });
+    const productType = order.product === "premium" ? "premium" : "stars";
+    if (isDuplicateIdempotencyError(error)) {
+      return markDuplicateFulfillment(
+        order,
+        error,
+        buildFragmentIdempotencyKey(productType, recipient, transactionId),
+      );
     }
 
-    return { ok: false, error: error.message || "Auto buy xatolik" };
+    return markFulfillmentFailure(
+      order,
+      error,
+      buildFragmentIdempotencyKey(productType, recipient, transactionId),
+    );
   }
 }
 
