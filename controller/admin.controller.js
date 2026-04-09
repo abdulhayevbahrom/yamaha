@@ -539,11 +539,19 @@ const topupUserBalance = async (req, res) => {
   try {
     const tgUserId = normalizeString(req.params.tgUserId);
     const amount = Number(req.body?.amount || 0);
+    const operation = normalizeString(req.body?.operation || "increase").toLowerCase();
+    const isDecrease = operation === "decrease";
+    const isIncrease = operation === "increase";
+    const roundedAmount = Math.round(amount);
+    const signedAmount = isDecrease ? -roundedAmount : roundedAmount;
 
     if (!tgUserId) {
       return response.error(res, "Foydalanuvchi topilmadi");
     }
-    if (!Number.isFinite(amount) || amount <= 0) {
+    if (!isIncrease && !isDecrease) {
+      return response.error(res, "operation noto'g'ri");
+    }
+    if (!Number.isFinite(amount) || roundedAmount <= 0) {
       return response.error(res, "Miqdor noto'g'ri");
     }
 
@@ -553,31 +561,39 @@ const topupUserBalance = async (req, res) => {
     }
 
     const updated = await User.findOneAndUpdate(
-      { tgUserId },
-      { $inc: { balance: Math.round(amount) } },
+      isDecrease ? { tgUserId, balance: { $gte: roundedAmount } } : { tgUserId },
+      { $inc: { balance: signedAmount } },
       { new: true },
     ).lean();
+    if (!updated) {
+      return response.error(res, "Balans yetarli emas");
+    }
 
     await UserBalanceAdjustment.create({
       tgUserId,
       username: String(updated?.username || user.username || ""),
-      amount: Math.round(amount),
+      amount: signedAmount,
       beforeBalance: Number(user.balance || 0),
       afterBalance: Number(updated?.balance || 0),
       adminTgUserId: normalizeString(req.headers["x-tg-user-id"]),
       adminUsername: normalizeString(req.admin?.username),
-      note: "Admin panel topup",
+      note: isDecrease ? "Admin panel decrement" : "Admin panel topup",
     });
 
     emitUserUpdate(tgUserId, {
       type: "admin_balance_adjusted",
       refreshBalance: true,
       refreshProfile: true,
-      amount: Math.round(amount),
+      amount: signedAmount,
+      operation: isDecrease ? "decrease" : "increase",
     });
 
     const [item] = await buildAdminUserList([updated]);
-    return response.success(res, "Balans to'ldirildi", item || updated);
+    return response.success(
+      res,
+      isDecrease ? "Balans kamaytirildi" : "Balans to'ldirildi",
+      item || updated,
+    );
   } catch (error) {
     return response.serverError(
       res,
