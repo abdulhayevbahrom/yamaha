@@ -3,8 +3,9 @@ const PaymentLog = require("../model/payment-log.model");
 const User = require("../model/user.model");
 const { autoFulfillOrder } = require("./avtoBuy.service");
 const { emitAdminUpdate, emitUserUpdate } = require("../socket");
-const { notifyUcPaid } = require("./notify.service");
+const { notifyGamePaid } = require("./notify.service");
 const { sendOrderArchive } = require("./order-archive.service");
+const { isManualGameProduct } = require("./uc-fulfillment.service");
 
 function parseAmountFromText(text) {
   const raw = String(text || "");
@@ -113,9 +114,12 @@ async function processIncomingPayment({
   });
 
   if (pending.product === "balance" && pending.tgUserId) {
+    const balanceIncrease = Number(
+      pending.balanceCreditAmount || parsedAmount || 0,
+    );
     await User.findOneAndUpdate(
       { tgUserId: pending.tgUserId },
-      { $inc: { balance: parsedAmount } },
+      { $inc: { balance: balanceIncrease } },
       { upsert: true, new: true },
     );
     await Order.findByIdAndUpdate(pending._id, {
@@ -129,22 +133,26 @@ async function processIncomingPayment({
     });
   }
 
-  if (pending.product === "uc") {
+  if (isManualGameProduct(pending.product)) {
     emitAdminUpdate({
-      type: "uc_paid",
+      type: "game_paid",
       refreshHistory: true,
       orderId: pending._id,
       orderCode: pending.orderId,
+      product: pending.product,
       username: pending.username,
       planCode: pending.planCode,
       expectedAmount: pending.expectedAmount,
       paidAmount: pending.paidAmount,
       paidAt: pending.paidAt,
     });
-    notifyUcPaid({
+    notifyGamePaid({
       orderId: pending._id,
       orderCode: pending.orderId,
+      product: pending.product,
       username: pending.username,
+      playerId: pending.playerId,
+      zoneId: pending.zoneId,
       planCode: pending.planCode,
       expectedAmount: pending.expectedAmount,
     });

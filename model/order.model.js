@@ -11,7 +11,7 @@ const orderSchema = new Schema(
     },
     product: {
       type: String,
-      enum: ["star", "premium", "uc", "balance"],
+      enum: ["star", "premium", "uc", "freefire", "mlbb", "balance"],
       required: true
     },
     planCode: {
@@ -26,6 +26,14 @@ const orderSchema = new Schema(
       type: String,
       required: true
     },
+    playerId: {
+      type: String,
+      default: ""
+    },
+    zoneId: {
+      type: String,
+      default: ""
+    },
     tgUserId: {
       type: String,
       default: ""
@@ -38,10 +46,60 @@ const orderSchema = new Schema(
       type: String,
       default: ""
     },
+    paymentCardId: {
+      type: Schema.Types.ObjectId,
+      ref: "PaymentCard",
+      default: null
+    },
+    paymentCardSnapshot: {
+      type: new Schema(
+        {
+          type: {
+            type: String,
+            enum: ["purchase", "balance_topup"],
+            default: "purchase"
+          },
+          label: {
+            type: String,
+            default: ""
+          },
+          cardNumber: {
+            type: String,
+            default: ""
+          },
+          cardHolder: {
+            type: String,
+            default: ""
+          },
+          notes: {
+            type: String,
+            default: ""
+          },
+          isFallback: {
+            type: Boolean,
+            default: false
+          }
+        },
+        { _id: false }
+      ),
+      default: null
+    },
     paymentMethod: {
       type: String,
-      enum: ["card", "uzumbank", "paynet", "click", "balance"],
+      enum: ["card", "bankomat", "uzumbank", "paynet", "click", "balance"],
       default: "card"
+    },
+    paymentGrossAmount: {
+      type: Number,
+      default: 0
+    },
+    balanceCreditAmount: {
+      type: Number,
+      default: 0
+    },
+    paymentFeePercent: {
+      type: Number,
+      default: 0
     },
     expectedAmount: {
       type: Number,
@@ -52,6 +110,22 @@ const orderSchema = new Schema(
       default: 0
     },
     paidAt: {
+      type: Date,
+      default: null
+    },
+    referralReferrerUserId: {
+      type: String,
+      default: ""
+    },
+    referralCommissionAmount: {
+      type: Number,
+      default: 0
+    },
+    referralCommissionPercent: {
+      type: Number,
+      default: 0
+    },
+    referralCommissionAwardedAt: {
       type: Date,
       default: null
     },
@@ -107,5 +181,12 @@ const orderSchema = new Schema(
   },
   { timestamps: true }
 );
+
+orderSchema.index({ paymentCardId: 1, createdAt: 1, status: 1 });
+orderSchema.index({ status: 1, expiresAt: 1 });
+orderSchema.index({ tgUserId: 1, createdAt: -1 });
+orderSchema.index({ status: 1, expectedAmount: 1, expiresAt: 1, createdAt: 1 });
+orderSchema.index({ product: 1, status: 1, paidAt: -1, createdAt: -1 });
+orderSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model("Order", orderSchema);

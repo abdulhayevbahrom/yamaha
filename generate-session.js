@@ -2,12 +2,20 @@ require("dotenv").config();
 const readline = require("node:readline");
 const { TelegramClient } = require("telegram");
 const { StringSession } = require("telegram/sessions");
+const { getTelegramCredentials } = require("./config/telegram-credentials");
 
-const apiId = Number(process.env.TG_API_ID || 0);
-const apiHash = String(process.env.TG_API_HASH || "").trim();
+const rawTarget = String(process.env.TG_SESSION_TARGET || process.argv[2] || "gift")
+  .trim()
+  .toLowerCase();
+const target = rawTarget === "cardxabar" ? "cardxabar" : "gift";
+const telegramCredentials = getTelegramCredentials(target);
+const apiId = telegramCredentials.apiId;
+const apiHash = telegramCredentials.apiHash;
 
 if (!apiId || !apiHash) {
-  console.error("TG_API_ID yoki TG_API_HASH topilmadi. backend/.env ni tekshiring.");
+  console.error(
+    `${target} session uchun API sozlanmagan. ${telegramCredentials.acceptedKeys.apiId.join(" yoki ")} va ${telegramCredentials.acceptedKeys.apiHash.join(" yoki ")} ni backend/.env da tekshiring.`,
+  );
   process.exit(1);
 }
 
@@ -38,10 +46,10 @@ async function main() {
     });
 
     const session = client.session.save();
-    console.log("\nTG_USER_SESSION:");
+    console.log(`\n${telegramCredentials.preferredKeys.session}:`);
     console.log(session);
     console.log("\nbackend/.env ichiga shu ko'rinishda yozing:");
-    console.log(`TG_USER_SESSION=${session}`);
+    console.log(`${telegramCredentials.preferredKeys.session}=${session}`);
   } finally {
     rl.close();
     await client.disconnect().catch(() => {});

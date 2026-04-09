@@ -12,8 +12,14 @@ const { startUserClient } = require("./user-client");
 
 //ads
 
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled promise rejection:", reason);
+});
+
 function isEnabled(value, fallback = true) {
-  const normalized = String(value ?? "").trim().toLowerCase();
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase();
   if (!normalized) return fallback;
   return !["0", "false", "no", "off"].includes(normalized);
 }
@@ -35,7 +41,11 @@ const PORT = Number(process.env.PORT) || 4090;
 const app = express();
 const server = createServer(app);
 
-let urls = ["http://localhost:5173", "https://yamaha-mini-app.vercel.app"];
+let urls = [
+  "http://localhost:5173",
+  "https://yamaha-mini-app.vercel.app",
+  "https://6vqq74qx-5173.euw.devtunnels.ms",
+];
 
 app.use(
   cors({

@@ -2,25 +2,78 @@ require("dotenv").config();
 const path = require("node:path");
 const TelegramBot = require("node-telegram-bot-api");
 const { processIncomingPayment } = require("../services/payment-match.service");
-const { onUcPaid } = require("../services/notify.service");
-const { confirmUcOrderById } = require("../services/uc-fulfillment.service");
-const { checkForceJoinMembership, buildJoinUrl } = require("../services/force-join.service");
+const { onGamePaid } = require("../services/notify.service");
+const { confirmGameOrderById } = require("../services/uc-fulfillment.service");
+const {
+  checkForceJoinMembership,
+  buildJoinUrl,
+} = require("../services/force-join.service");
 const { getBotStatus } = require("../services/settings.service");
 const Order = require("../model/order.model");
 const User = require("../model/user.model");
 const Broadcast = require("../model/broadcast.model");
 const BroadcastDelivery = require("../model/broadcastDelivery.model");
+const { bindReferralFromStart } = require("../services/referral.service");
 
 const startCaption =
-  "Star, Premium va PUBG UC ni xavfsiz sotib oling.\n\nDo'konga kirish uchun tugmani bosing.";
+  "Star, Premium, PUBG UC va MLBB Diamond ni xavfsiz sotib oling.\n\nDo'konga kirish uchun tugmani bosing.";
 
 const normalizeOptionalId = (value) => {
   const cleaned = String(value || "").trim();
   if (!cleaned) return "";
-  if (["shartmas", "none", "null", "undefined", "-"].includes(cleaned.toLowerCase())) {
+  if (
+    ["shartmas", "none", "null", "undefined", "-"].includes(
+      cleaned.toLowerCase(),
+    )
+  ) {
     return "";
   }
   return cleaned;
+};
+
+const getGameProductLabel = (product) => {
+  const key = String(product || "").trim().toLowerCase();
+  if (key === "mlbb") return "MLBB";
+  if (key === "freefire") return "Free Fire";
+  if (key === "uc") return "UC";
+  return "O'yin";
+};
+
+const splitMlbbAccount = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return { playerId: "", zoneId: "" };
+  const separatorIndex = raw.indexOf(":");
+  if (separatorIndex < 0) {
+    return { playerId: raw, zoneId: "" };
+  }
+  return {
+    playerId: raw.slice(0, separatorIndex).trim(),
+    zoneId: raw.slice(separatorIndex + 1).trim(),
+  };
+};
+
+const buildGameAccountLines = ({ product, username, playerId, zoneId }) => {
+  const key = String(product || "").trim().toLowerCase();
+  if (key !== "mlbb") {
+    return [`🆔 ID: <code>${String(username || "").trim() || "-"}</code>`];
+  }
+
+  let resolvedPlayerId = String(playerId || "").trim();
+  let resolvedZoneId = String(zoneId || "").trim();
+
+  if (!resolvedPlayerId || !resolvedZoneId) {
+    const parsed = splitMlbbAccount(username);
+    if (!resolvedPlayerId) resolvedPlayerId = parsed.playerId;
+    if (!resolvedZoneId) resolvedZoneId = parsed.zoneId;
+  }
+
+  const lines = [
+    `🆔 ID: <code>${resolvedPlayerId || String(username || "").trim() || "-"}</code>`,
+  ];
+  if (resolvedZoneId) {
+    lines.push(`🗺 Zone ID: <code>${resolvedZoneId}</code>`);
+  }
+  return lines;
 };
 
 function startBot({ strict = false } = {}) {
@@ -53,9 +106,37 @@ function startBot({ strict = false } = {}) {
     .map((id) => id.trim())
     .filter(Boolean);
   const pendingByAdmin = new Map();
+  const startPhotoExt = path.extname(startPhotoPath).toLowerCase();
+  const startPhotoContentType =
+    {
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".png": "image/png",
+      ".webp": "image/webp",
+    }[startPhotoExt] || "application/octet-stream";
 
   const isAdmin = (chatId) => adminIds.includes(String(chatId));
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const withSafeHandler = (scope, handler) => {
+    return async (...args) => {
+      try {
+        await handler(...args);
+      } catch (error) {
+        console.error(
+          `[telegram-bot:${scope}]`,
+          error?.message || "Unknown error",
+        );
+      }
+    };
+  };
+
+  bot.on("polling_error", (error) => {
+    console.error("Telegram polling error:", error?.message || error);
+  });
+  bot.on("webhook_error", (error) => {
+    console.error("Telegram webhook error:", error?.message || error);
+  });
+
   const ensureBotActive = async (chatId, { silent = false } = {}) => {
     const botStatus = await getBotStatus();
     if (botStatus.enabled) return true;
@@ -77,23 +158,15 @@ function startBot({ strict = false } = {}) {
     }
   };
 
-  const ensureUser = async (msg) => {
+  const ensureUser = async (msg, startPayload = "") => {
     const tgUserId = String(msg?.from?.id || "");
     if (!tgUserId) return;
     const username = String(msg?.from?.username || "");
-    await User.findOneAndUpdate(
-      { tgUserId },
-      {
-        $set: { username },
-        $unset: {
-          firstName: "",
-          lastName: "",
-          photoUrl: "",
-          photo_url: "",
-        },
-      },
-      { upsert: true, new: true },
-    ).lean();
+    await bindReferralFromStart({
+      tgUserId,
+      username,
+      startPayload,
+    });
   };
 
   const getAllUsers = async () => {
@@ -104,12 +177,17 @@ function startBot({ strict = false } = {}) {
   };
 
   const sendStartFlow = async (chatId) => {
-    await bot.sendPhoto(chatId, startPhotoPath, {
-      caption: startCaption,
-      reply_markup: {
-        inline_keyboard: [[{ text: "Do'konga", web_app: { url: webAppUrl } }]],
+    await bot.sendPhoto(
+      chatId,
+      startPhotoPath,
+      {
+        caption: startCaption,
+        reply_markup: {
+          inline_keyboard: [[{ text: "Do'konga", web_app: { url: webAppUrl } }]],
+        },
       },
-    });
+      { contentType: startPhotoContentType },
+    );
 
     if (isAdmin(chatId)) {
       await bot.sendMessage(
@@ -145,10 +223,13 @@ function startBot({ strict = false } = {}) {
     );
   };
 
-  bot.onText(/^\/start$/, async (msg) => {
+  bot.onText(
+    /^\/start(?:\s+(.+))?$/,
+    withSafeHandler("start", async (msg, match) => {
     const chatId = msg.chat.id;
     const userId = String(msg?.from?.id || "");
-    await ensureUser(msg);
+    const startPayload = String(match?.[1] || "").trim();
+    await ensureUser(msg, startPayload);
     if (!firstSeen.has(chatId)) firstSeen.add(chatId);
 
     if (!(await ensureBotActive(chatId))) {
@@ -182,9 +263,12 @@ function startBot({ strict = false } = {}) {
       userId,
       "Avval majburiy kanalga a'zo bo'ling. A'zo bo'lgach, A'zo bo'ldim tugmasini bosing.",
     );
-  });
+    }),
+  );
 
-  bot.on("callback_query", async (query) => {
+  bot.on(
+    "callback_query",
+    withSafeHandler("callback_query", async (query) => {
     const chatId = query.message?.chat?.id;
     if (!chatId) return;
 
@@ -230,7 +314,7 @@ function startBot({ strict = false } = {}) {
       return;
     }
 
-    if (query.data?.startsWith("CONFIRM_UC:")) {
+    if (query.data?.startsWith("CONFIRM_GAME:")) {
       if (!isAdmin(chatId)) {
         await bot.answerCallbackQuery(query.id, {
           text: "Ruxsat yo'q",
@@ -239,18 +323,24 @@ function startBot({ strict = false } = {}) {
         return;
       }
 
-      const orderId = query.data.replace("CONFIRM_UC:", "").trim();
-      const result = await confirmUcOrderById(orderId);
+      const orderId = query.data.replace("CONFIRM_GAME:", "").trim();
+      const result = await confirmGameOrderById(orderId);
+      const productLabel = getGameProductLabel(result?.order?.product);
       if (result.ok) {
         await bot.answerCallbackQuery(query.id, {
           text: result.alreadyCompleted
-            ? "UC order avval tasdiqlangan"
-            : "UC order yakunlandi",
+            ? `${productLabel} order avval tasdiqlangan`
+            : `${productLabel} order yakunlandi`,
         });
         const updatedMessage = [
-          "💬 UC to'lov tushdi",
+          `💬 ${productLabel} to'lov tushdi`,
           `🧾 Buyurtma: <code>${String(result.order.orderId)}</code>`,
-          `🆔 ID: <code>${result.order.username}</code>`,
+          ...buildGameAccountLines({
+            product: result?.order?.product,
+            username: result?.order?.username,
+            playerId: result?.order?.playerId,
+            zoneId: result?.order?.zoneId,
+          }),
           `🎮 Miqdor: <code>${result.order.planCode}</code>`,
           `💵 Summa: <b>${result.order.expectedAmount} UZS</b>`,
           result.alreadyCompleted
@@ -344,7 +434,8 @@ function startBot({ strict = false } = {}) {
         `✅ Reklama o'chirildi. ID: ${broadcastId} (o'chirildi: ${removed})`,
       );
     }
-  });
+    }),
+  );
 
   bot.on("message", async (msg) => {
     try {
@@ -546,12 +637,18 @@ function startBot({ strict = false } = {}) {
   }
 
   if (adminNotifyChatId) {
-    onUcPaid(async (payload) => {
+    onGamePaid(async (payload) => {
       try {
+        const productLabel = getGameProductLabel(payload?.product);
         const message = [
-          "💬 UC to'lov tushdi",
+          `💬 ${productLabel} to'lov tushdi`,
           `🧾 Buyurtma: <code>${String(payload.orderCode)}</code>`,
-          `🆔 ID: <code>${payload.username}</code>`,
+          ...buildGameAccountLines({
+            product: payload?.product,
+            username: payload?.username,
+            playerId: payload?.playerId,
+            zoneId: payload?.zoneId,
+          }),
           `🎮 Miqdor: <code>${payload.planCode}</code>`,
           `💵 Summa: <b>${payload.expectedAmount} UZS</b>`,
         ].join("\n");
@@ -563,7 +660,7 @@ function startBot({ strict = false } = {}) {
               [
                 {
                   text: "Tasdiqlash",
-                  callback_data: `CONFIRM_UC:${payload.orderId}`,
+                  callback_data: `CONFIRM_GAME:${payload.orderId}`,
                 },
               ],
             ],

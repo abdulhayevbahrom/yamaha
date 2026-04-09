@@ -11,7 +11,16 @@ function requireNumber(value, field) {
   return num;
 }
 
-const validCategories = ["star", "premium", "uc"];
+function normalizeCardNumber(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (digits.length !== 16) {
+    throw new Error("cardNumber 16 ta raqam bo'lishi kerak");
+  }
+  return digits;
+}
+
+const validCategories = ["star", "premium", "uc", "freefire", "mlbb"];
+const validPaymentCardTypes = ["purchase", "balance_topup"];
 
 const loginValidation = (req) => {
   const { username, password } = req.body || {};
@@ -51,8 +60,75 @@ const updatePlanValidation = (req) => {
   return payload;
 };
 
+const createPaymentCardValidation = (req) => {
+  const {
+    type,
+    label,
+    cardNumber,
+    cardHolder,
+    notes,
+    sortOrder,
+    isActive,
+  } = req.body || {};
+
+  if (!validPaymentCardTypes.includes(type)) {
+    throw new Error("type noto'g'ri");
+  }
+
+  return {
+    type,
+    label: requireText(label, "label"),
+    cardNumber: normalizeCardNumber(cardNumber),
+    cardHolder: requireText(cardHolder, "cardHolder"),
+    notes: typeof notes === "undefined" ? "" : String(notes).trim(),
+    sortOrder:
+      typeof sortOrder === "undefined" ? 0 : requireNumber(sortOrder, "sortOrder"),
+    isActive: typeof isActive === "boolean" ? isActive : true,
+  };
+};
+
+const updatePaymentCardValidation = (req) => {
+  const {
+    type,
+    label,
+    cardNumber,
+    cardHolder,
+    notes,
+    sortOrder,
+    isActive,
+  } = req.body || {};
+  const payload = {};
+
+  if (typeof type !== "undefined") {
+    if (!validPaymentCardTypes.includes(type)) {
+      throw new Error("type noto'g'ri");
+    }
+    payload.type = type;
+  }
+  if (typeof label !== "undefined") payload.label = requireText(label, "label");
+  if (typeof cardNumber !== "undefined") {
+    payload.cardNumber = normalizeCardNumber(cardNumber);
+  }
+  if (typeof cardHolder !== "undefined") {
+    payload.cardHolder = requireText(cardHolder, "cardHolder");
+  }
+  if (typeof notes !== "undefined") payload.notes = String(notes).trim();
+  if (typeof sortOrder !== "undefined") {
+    payload.sortOrder = requireNumber(sortOrder, "sortOrder");
+  }
+  if (typeof isActive !== "undefined") payload.isActive = Boolean(isActive);
+
+  if (Object.keys(payload).length === 0) {
+    throw new Error("Yangilash uchun kamida bitta field yuboring");
+  }
+
+  return payload;
+};
+
 module.exports = {
   loginValidation,
   createPlanValidation,
-  updatePlanValidation
+  updatePlanValidation,
+  createPaymentCardValidation,
+  updatePaymentCardValidation,
 };

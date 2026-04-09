@@ -6,10 +6,13 @@ const TelegramBot = require("node-telegram-bot-api");
 const mongoose = require("mongoose");
 const { processIncomingPayment } = require("../services/payment-match.service");
 const connectDB = require("../config/dbConfig");
+const { getTelegramCredentials } = require("../config/telegram-credentials");
 
-const apiId = Number(process.env.TG_API_ID || 0);
-const apiHash = process.env.TG_API_HASH || "";
-const stringSession = new StringSession(process.env.TG_USER_SESSION || "");
+const telegramCredentials = getTelegramCredentials("cardxabar");
+const apiId = telegramCredentials.apiId;
+const apiHash = telegramCredentials.apiHash;
+const sessionString = telegramCredentials.sessionString;
+const stringSession = new StringSession(sessionString || "");
 const cardxabarChatId = String(process.env.CARDXABAR_CHAT_ID || "").trim();
 const cardxabarUsername = String(
   process.env.CARDXABAR_USERNAME || "CardXabarBot",
@@ -24,7 +27,7 @@ let sessionAlertSent = false;
 const runtimeStatus = {
   running: false,
   dbReady: false,
-  sessionConfigured: Boolean(process.env.TG_USER_SESSION),
+  sessionConfigured: Boolean(sessionString),
   authorized: false,
   startedAt: null,
   connectedAt: null,
@@ -103,7 +106,7 @@ function isStatusCommand(text) {
 
 if (!apiId || !apiHash) {
   throw new Error(
-    "TG_API_ID yoki TG_API_HASH topilmadi. backend/.env ga kiriting.",
+    `Cardxabar Telegram account sozlanmagan. ${telegramCredentials.acceptedKeys.apiId.join(" yoki ")} va ${telegramCredentials.acceptedKeys.apiHash.join(" yoki ")} kerak.`,
   );
 }
 
@@ -128,9 +131,9 @@ async function notifyAdminsAboutSessionIssue(reason) {
   const bot = new TelegramBot(botToken, { polling: false });
   const message = [
     "User-client ishlamayapti.",
-    "Sabab: TG_USER_SESSION eskirgan yoki yaroqsiz.",
+    "Sabab: cardxabar session eskirgan yoki yaroqsiz.",
     `Xatolik: ${reason}`,
-    "Yechim: yangi session olib, backend/.env dagi TG_USER_SESSION ni yangilang.",
+    `Yechim: yangi session olib, backend/.env dagi ${telegramCredentials.preferredKeys.session} ni yangilang.`,
   ].join("\n");
 
   await Promise.allSettled(
@@ -226,9 +229,9 @@ async function startUserClient({ strict = false } = {}) {
     connectionRetries: 5,
   });
 
-  if (!process.env.TG_USER_SESSION) {
+  if (!sessionString) {
     const error = new Error(
-      "TG_USER_SESSION topilmadi. Avval session string yarating va backend/.env ga yozing.",
+      `${telegramCredentials.acceptedKeys.session.join(" yoki ")} topilmadi. Avval session string yarating va backend/.env ga yozing.`,
     );
     markRuntimeError(error.message);
     await notifyAdminsAboutSessionIssue(error.message);
@@ -241,7 +244,7 @@ async function startUserClient({ strict = false } = {}) {
   const isAuthorized = await client.checkAuthorization();
   if (!isAuthorized) {
     const error = new Error(
-      "TG_USER_SESSION yaroqsiz yoki eskirgan. Yangi session string yarating.",
+      `${telegramCredentials.resolvedKeys.session || telegramCredentials.preferredKeys.session} yaroqsiz yoki eskirgan. Yangi session string yarating.`,
     );
     markRuntimeError(error.message);
     await notifyAdminsAboutSessionIssue(error.message);
@@ -325,7 +328,8 @@ module.exports = { startUserClient, buildStatusMessage };
 if (require.main === module) {
   startUserClient({ strict: true }).catch(async (err) => {
     try {
-      if (String(err.message || "").includes("TG_USER_SESSION")) {
+      const rawError = String(err.message || "").toUpperCase();
+      if (rawError.includes("SESSION")) {
         await notifyAdminsAboutSessionIssue(err.message);
       }
     } catch (_) {

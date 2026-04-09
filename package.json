@@ -8,7 +8,8 @@
     "bot": "node bot/index.js",
     "bot:dev": "nodemon --legacy-watch bot/index.js",
     "user-client": "node user-client/index.js",
-    "user-client:dev": "nodemon --legacy-watch user-client/index.js"
+    "user-client:dev": "nodemon --legacy-watch user-client/index.js",
+    "inspect:nft-pattern": "node scripts/inspect-nft-pattern.js"
   },
   "dependencies": {
     "@ton/crypto": "^3.3.0",

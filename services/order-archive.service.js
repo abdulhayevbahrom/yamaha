@@ -9,6 +9,8 @@ const productLabels = {
   star: "Telegram Star",
   premium: "Telegram Premium",
   uc: "PUBG UC",
+  freefire: "Free Fire Diamond",
+  mlbb: "MLBB Diamond",
   balance: "Balans to'ldirish",
 };
 

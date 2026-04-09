@@ -4,6 +4,7 @@ const Order = require("../model/order.model");
 const Plan = require("../model/plan.model");
 const { sendOrderArchive } = require("./order-archive.service");
 const { emitUserUpdate } = require("../socket");
+const { awardReferralCommissionForOrder } = require("./referral.service");
 
 const API_KEY = process.env.ROBYNHOOD_API_KEY;
 const API_URL =
@@ -309,6 +310,16 @@ async function markFulfillmentSuccess(order, result) {
       fulfillmentStatus: "success",
       product: order.product,
     });
+  }
+
+  try {
+    await awardReferralCommissionForOrder(order);
+  } catch (error) {
+    console.error(
+      "Referral commission apply error:",
+      order._id?.toString?.() || order._id,
+      error.message,
+    );
   }
 
   return { ok: true, result };

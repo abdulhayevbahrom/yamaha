@@ -6,17 +6,27 @@ const { getNextOrderId } = require("../services/order-id.service");
 const { processIncomingPayment } = require("../services/payment-match.service");
 const { autoFulfillOrder } = require("../services/avtoBuy.service");
 const {
-  confirmUcOrderById,
-  cancelUcOrderById,
+  confirmGameOrderById,
+  cancelGameOrderById,
+  isManualGameProduct,
 } = require("../services/uc-fulfillment.service");
 const { cancelPaidOrderById } = require("../services/order-cancel.service");
-const { notifyUcPaid } = require("../services/notify.service");
+const { notifyGamePaid } = require("../services/notify.service");
 const { emitAdminUpdate, emitUserUpdate } = require("../socket");
 const { getStarPricing } = require("../services/settings.service");
 const { getTelegramUserFromRequest } = require("../utils/tg-user");
+const { selectPaymentCardForType } = require("../services/payment-card.service");
 
 let sequence = 1;
 const PENDING_TTL_MS = 10 * 60 * 1000;
+
+async function resolvePaymentCardSelection(type) {
+  const selected = await selectPaymentCardForType(type);
+  if (!selected?.paymentCardSnapshot) {
+    throw new Error("Hozircha to'lov kartasi mavjud emas");
+  }
+  return selected;
+}
 
 async function syncSequence() {
   const latest = await Order.findOne().sort({ createdAt: -1 }).lean();
@@ -66,6 +76,9 @@ async function getReport(period) {
       star: recent.filter((o) => o.product === "star").length,
       premium: recent.filter((o) => o.product === "premium").length,
       uc: recent.filter((o) => o.product === "uc").length,
+      freefire: recent.filter((o) => o.product === "freefire").length,
+      mlbb: recent.filter((o) => o.product === "mlbb").length,
+      balance: recent.filter((o) => o.product === "balance").length,
     },
     trend: Array.from({ length: 7 }).map((_, i) => {
       const dayStart = new Date(Date.now() - (6 - i) * 24 * 60 * 60 * 1000);
@@ -152,6 +165,8 @@ const createOrder = async (req, res) => {
       product,
       planCode,
       username,
+      playerId = "",
+      zoneId = "",
       profileName = "",
       customAmount,
       expectedAmount,
@@ -167,10 +182,26 @@ const createOrder = async (req, res) => {
         "Telegram profilingiz aniqlanmadi. Ilovani qayta ochib ko'ring.",
       );
     }
-    if (!["star", "premium", "uc"].includes(product)) {
+    const currentUser = await User.findOne({ tgUserId })
+      .select({ isBlocked: 1 })
+      .lean();
+    if (currentUser?.isBlocked) {
+      return response.error(res, "Foydalanuvchi bloklangan");
+    }
+    if (!["star", "premium", "uc", "freefire", "mlbb"].includes(product)) {
       return response.error(res, "Tanlangan mahsulot noto'g'ri");
     }
-    if (!username) return response.error(res, "Username kiriting");
+    const normalizedPlayerId = String(playerId || "").trim();
+    const normalizedZoneId = String(zoneId || "").trim();
+    const normalizedUsername = String(username || "").trim();
+
+    if (product === "mlbb") {
+      if (!normalizedPlayerId || !normalizedZoneId) {
+        return response.error(res, "Player ID va Zone ID kiriting");
+      }
+    } else if (!normalizedUsername) {
+      return response.error(res, "Username kiriting");
+    }
 
     await expirePendingOrders();
     await syncSequence();
@@ -210,6 +241,8 @@ const createOrder = async (req, res) => {
     let expiresAt = null;
     let finalStatus = status;
     let paidAt = null;
+    let paymentCardId = null;
+    let paymentCardSnapshot = null;
 
     if (paymentMethod === "balance") {
       expected = Number(resolvedBasePrice || 0);
@@ -240,14 +273,40 @@ const createOrder = async (req, res) => {
       expiresAt = new Date(Date.now() + PENDING_TTL_MS);
     }
 
+    if (paymentMethod !== "balance") {
+      let selectedCard;
+      try {
+        selectedCard = await resolvePaymentCardSelection("purchase");
+      } catch (selectionError) {
+        if (
+          selectionError?.message === "Hozircha to'lov kartasi mavjud emas"
+        ) {
+          return response.error(res, selectionError.message);
+        }
+        throw selectionError;
+      }
+      paymentCardId = selectedCard.paymentCardId;
+      paymentCardSnapshot = selectedCard.paymentCardSnapshot;
+    }
+
     const nextOrderId = await getNextOrderId();
     const order = await Order.create({
       orderId: nextOrderId,
       product,
       planCode,
       customAmount: Number(customAmount || 0),
-      username,
-      profileName,
+      username:
+        product === "mlbb"
+          ? `${normalizedPlayerId}:${normalizedZoneId}`
+          : normalizedUsername,
+      playerId: normalizedPlayerId,
+      zoneId: normalizedZoneId,
+      profileName:
+        product === "mlbb"
+          ? `Player ID: ${normalizedPlayerId} | Zone ID: ${normalizedZoneId}`
+          : profileName,
+      paymentCardId,
+      paymentCardSnapshot,
       paymentMethod,
       expectedAmount: expected,
       paidAmount: paid,
@@ -260,22 +319,26 @@ const createOrder = async (req, res) => {
     });
 
     if (finalStatus === "paid_auto_processed") {
-      if (product === "uc") {
+      if (isManualGameProduct(product)) {
         emitAdminUpdate({
-          type: "uc_paid",
+          type: "game_paid",
           refreshHistory: true,
           orderId: order._id,
           orderCode: order.orderId,
+          product,
           username: order.username,
           planCode: order.planCode,
           expectedAmount: order.expectedAmount,
           paidAmount: order.paidAmount,
           paidAt: order.paidAt,
         });
-        notifyUcPaid({
+        notifyGamePaid({
           orderId: order._id,
           orderCode: order.orderId,
+          product,
           username: order.username,
+          playerId: order.playerId,
+          zoneId: order.zoneId,
           planCode: order.planCode,
           expectedAmount: order.expectedAmount,
         });
@@ -365,36 +428,40 @@ const processCardPayment = async (req, res) => {
 const confirmUcOrder = async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await confirmUcOrderById(id);
+    const result = await confirmGameOrderById(id);
     if (!result.ok) {
       if (result.reason === "not_found") {
         return response.notFound(res, "Order topilmadi");
       }
-      if (result.reason === "not_uc") {
-        return response.error(res, "Bu order UC emas");
+      if (result.reason === "not_game") {
+        return response.error(res, "Bu order o'yin orderi emas");
       }
       if (result.reason === "not_paid") {
         return response.error(res, "Order hali to'lanmagan");
       }
-      return response.error(res, "UC tasdiqlashda xatolik");
+      return response.error(res, "O'yin orderini tasdiqlashda xatolik");
     }
 
-    return response.success(res, "UC order yakunlandi", result.order);
+    return response.success(res, "O'yin orderi yakunlandi", result.order);
   } catch (error) {
-    return response.serverError(res, "UC tasdiqlashda xatolik", error.message);
+    return response.serverError(
+      res,
+      "O'yin orderini tasdiqlashda xatolik",
+      error.message,
+    );
   }
 };
 
 const cancelUcOrder = async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await cancelUcOrderById(id);
+    const result = await cancelGameOrderById(id);
     if (!result.ok) {
       if (result.reason === "not_found") {
         return response.notFound(res, "Order topilmadi");
       }
-      if (result.reason === "not_uc") {
-        return response.error(res, "Bu order UC emas");
+      if (result.reason === "not_game") {
+        return response.error(res, "Bu order o'yin orderi emas");
       }
       if (result.reason === "not_paid") {
         return response.error(res, "Order hali bekor qilib bo'lmaydigan holatda");
@@ -402,12 +469,16 @@ const cancelUcOrder = async (req, res) => {
       if (result.reason === "refund_not_available") {
         return response.error(res, "Balansga qaytarish uchun tgUserId yoki paidAmount topilmadi");
       }
-      return response.error(res, "UC orderni bekor qilishda xatolik");
+      return response.error(res, "O'yin orderini bekor qilishda xatolik");
     }
 
-    return response.success(res, "UC order bekor qilindi", result.order);
+    return response.success(res, "O'yin orderi bekor qilindi", result.order);
   } catch (error) {
-    return response.serverError(res, "UC bekor qilishda xatolik", error.message);
+    return response.serverError(
+      res,
+      "O'yin orderini bekor qilishda xatolik",
+      error.message,
+    );
   }
 };
 
