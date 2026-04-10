@@ -106,6 +106,7 @@ const nftOfferSchema = new mongoose.Schema(
 
 nftOfferSchema.index({ sellerTgUserId: 1, status: 1, createdAt: -1 });
 nftOfferSchema.index({ buyerTgUserId: 1, createdAt: -1 });
+nftOfferSchema.index({ buyerTgUserId: 1, nftId: 1, createdAt: -1 });
 nftOfferSchema.index({ nftId: 1, status: 1, createdAt: -1 });
 nftOfferSchema.index({ status: 1, expiresAt: 1 });
 

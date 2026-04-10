@@ -1136,6 +1136,14 @@ function mapSavedGiftToNft(savedGift, usersMap, options = {}) {
   const acquiredAt = toSafeNumber(savedGift?.date, 0)
     ? new Date(toSafeNumber(savedGift?.date, 0) * 1000).toISOString()
     : null;
+  const canTransferAtUnix = toSafeNumber(
+    savedGift?.canTransferAt ?? savedGift?.can_transfer_at,
+    0,
+  );
+  const canTransferAt =
+    canTransferAtUnix > 0
+      ? new Date(canTransferAtUnix * 1000).toISOString()
+      : null;
 
   if (previewDocument && typeof options.onPreviewDocument === "function") {
     options.onPreviewDocument(savedId, previewDocument);
@@ -1163,6 +1171,7 @@ function mapSavedGiftToNft(savedGift, usersMap, options = {}) {
     quantityTotal: toSafeNumber(gift?.availabilityTotal, 0),
     valueStars,
     acquiredAt,
+    canTransferAt,
     sourceMsgId: toSafeNumber(savedGift?.msgId ?? savedGift?.msg_id, 0),
     sourceSavedId: normalizeGiftId(savedGift?.savedId ?? savedGift?.saved_id),
     emoji: "🎁",

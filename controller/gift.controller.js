@@ -77,6 +77,61 @@ function formatUzsAmount(value) {
   return `${Math.max(0, Math.round(toSafeNumber(value, 0))).toLocaleString("uz-UZ")} UZS`;
 }
 
+function formatRemainingSeconds(seconds) {
+  const total = Math.max(0, Math.trunc(toSafeNumber(seconds, 0)));
+  if (!total) return "0 soniya";
+
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+
+  const parts = [];
+  if (days) parts.push(`${days} kun`);
+  if (hours) parts.push(`${hours} soat`);
+  if (minutes) parts.push(`${minutes} daqiqa`);
+  if (!parts.length || secs) parts.push(`${secs} soniya`);
+
+  return parts.join(" ");
+}
+
+function getNftTransferLockPayload(canTransferAtValue) {
+  const canTransferAtDate = toDateOrNull(canTransferAtValue);
+  if (!canTransferAtDate) return null;
+
+  const secondsLeft = Math.max(
+    0,
+    Math.ceil((canTransferAtDate.getTime() - Date.now()) / 1000),
+  );
+  if (secondsLeft <= 0) return null;
+
+  return {
+    code: "NFT_TRANSFER_TOO_EARLY",
+    canTransferAt: canTransferAtDate.toISOString(),
+    secondsLeft,
+    remainingLabel: formatRemainingSeconds(secondsLeft),
+  };
+}
+
+function getTransferTooEarlySeconds(error) {
+  const raw = normalizeString(error?.errorMessage || error?.message);
+  if (!raw) return 0;
+
+  const match = raw.match(/(?:STARGIFT_)?TRANSFER_TOO_EARLY[_:\s-]*(\d+)/i);
+  if (!match) return 0;
+
+  const seconds = Math.max(0, Math.trunc(toSafeNumber(match[1], 0)));
+  return seconds;
+}
+
+function buildTransferTooEarlyMessage(lockPayload) {
+  if (!lockPayload?.secondsLeft) {
+    return "NFT ni hozir yechib bo'lmaydi. Keyinroq urinib ko'ring.";
+  }
+
+  return `NFT ni hozir yechib bo'lmaydi. Qolgan vaqt: ${lockPayload.remainingLabel}.`;
+}
+
 function pickFirstNonEmpty(...values) {
   for (const value of values) {
     const normalized = normalizeString(value);
@@ -208,6 +263,7 @@ function mapNftDocToClient(doc, pricePerStar) {
     patternAssetStatus === "available"
       ? `/api/gifts/nft-pattern/${encodeURIComponent(nftId)}`
       : "";
+  const transferLock = getNftTransferLockPayload(doc?.canTransferAt);
 
   return {
     nftId,
@@ -228,6 +284,10 @@ function mapNftDocToClient(doc, pricePerStar) {
     valueStars: toSafeNumber(doc?.valueStars, 0),
     approxValueUzs: Math.round(toSafeNumber(doc?.valueStars, 0) * toSafeNumber(pricePerStar, 0)),
     acquiredAt: doc?.acquiredAt || doc?.createdAt || null,
+    canTransferAt: transferLock?.canTransferAt || (toDateOrNull(doc?.canTransferAt)?.toISOString() || null),
+    transferLocked: Boolean(transferLock?.secondsLeft),
+    transferLockedSeconds: Math.max(0, Math.trunc(toSafeNumber(transferLock?.secondsLeft, 0))),
+    transferLockLabel: normalizeString(transferLock?.remainingLabel),
     emoji: normalizeString(doc?.emoji) || "🎁",
     imageUrl: `/api/gifts/nft-image/${encodeURIComponent(nftId)}`,
     patternImageUrl,
@@ -656,6 +716,7 @@ async function syncOwnedNftsFromTelegram() {
       quantityTotal: toSafeNumber(item?.quantityTotal, 0),
       valueStars: toSafeNumber(item?.valueStars, 0),
       acquiredAt: toDateOrNull(item?.acquiredAt),
+      canTransferAt: toDateOrNull(item?.canTransferAt),
       sourceFromTgUserId,
       sourceFromUsername: normalizeString(
         sourceUser?.username || item?.sourceFromUsername,
@@ -1096,6 +1157,7 @@ async function createNftOffer(req, res) {
     const nftId = normalizeString(req.body?.nftId);
     const offeredPriceUzs = Math.round(toSafeNumber(req.body?.offeredPriceUzs, 0));
     const offerDurationDays = Math.trunc(toSafeNumber(req.body?.offerDurationDays, 0));
+    const buyerBalanceUzs = Math.max(0, Math.round(toSafeNumber(buyer?.balance, 0)));
 
     if (!nftId) return response.error(res, "nftId required");
     if (!offeredPriceUzs || offeredPriceUzs <= 0) {
@@ -1103,6 +1165,19 @@ async function createNftOffer(req, res) {
     }
     if (!offerDurationDays || offerDurationDays < 1 || offerDurationDays > 30) {
       return response.error(res, "Taklif muddati 1-30 kun oralig'ida bo'lishi kerak");
+    }
+    if (buyerBalanceUzs <= 0) {
+      return response.error(res, "Balansda mablag' yetarli emas");
+    }
+    if (buyerBalanceUzs < offeredPriceUzs) {
+      return response.error(
+        res,
+        "Balans yetarli emas. Balansingiz: " +
+          buyerBalanceUzs.toLocaleString("uz-UZ") +
+          " UZS, taklif: " +
+          offeredPriceUzs.toLocaleString("uz-UZ") +
+          " UZS",
+      );
     }
 
     const latestOffer = await NftOffer.findOne({
@@ -1139,6 +1214,37 @@ async function createNftOffer(req, res) {
     }
     if (sellerTgUserId === buyer.tgUserId) {
       return response.error(res, "O'zingizning NFT'ingizga taklif yubora olmaysiz");
+    }
+
+    const offerLimitWindowMs = 60 * 60 * 1000;
+    const offerLimitPerNft = 3;
+    const limitWindowStart = new Date(Date.now() - offerLimitWindowMs);
+
+    const recentOfferCountForNft = await NftOffer.countDocuments({
+      buyerTgUserId: buyer.tgUserId,
+      nftId,
+      createdAt: { $gte: limitWindowStart },
+    });
+
+    if (recentOfferCountForNft >= offerLimitPerNft) {
+      const oldestRecentOffer = await NftOffer.findOne({
+        buyerTgUserId: buyer.tgUserId,
+        nftId,
+        createdAt: { $gte: limitWindowStart },
+      })
+        .sort({ createdAt: 1 })
+        .lean();
+
+      const unlockAtMs =
+        new Date(oldestRecentOffer?.createdAt || Date.now()).getTime() +
+        offerLimitWindowMs;
+      const waitSeconds = Math.max(1, Math.ceil((unlockAtMs - Date.now()) / 1000));
+      const waitLabel = formatRemainingSeconds(waitSeconds);
+
+      return response.error(
+        res,
+        `Bu NFT uchun soatlik limit tugagan (max 3 ta taklif). Qolgan vaqt: ${waitLabel}`,
+      );
     }
 
     const existingPending = await NftOffer.findOne({
@@ -2253,6 +2359,16 @@ async function withdrawMyNft(req, res) {
       );
     };
 
+    const initialTransferLock = getNftTransferLockPayload(nft?.canTransferAt);
+    if (initialTransferLock?.secondsLeft) {
+      await restoreListedState();
+      return response.error(
+        res,
+        buildTransferTooEarlyMessage(initialTransferLock),
+        initialTransferLock,
+      );
+    }
+
     const marketConfig = await getNftMarketplaceConfig();
     const withdrawFeeUzs = Math.max(
       0,
@@ -2276,7 +2392,9 @@ async function withdrawMyNft(req, res) {
         await restoreListedState();
         return response.error(
           res,
-          `Balans yetarli emas. NFT yechib olish uchun ${withdrawFeeUzs.toLocaleString("uz-UZ")} UZS kerak`,
+          "Balans yetarli emas. NFT yechib olish uchun " +
+            withdrawFeeUzs.toLocaleString("uz-UZ") +
+            " UZS kerak",
         );
       }
     }
@@ -2309,6 +2427,30 @@ async function withdrawMyNft(req, res) {
         );
       }
       await restoreListedState();
+
+      const tooEarlySeconds = getTransferTooEarlySeconds(transferError);
+      if (tooEarlySeconds > 0) {
+        const canTransferAtDate = new Date(Date.now() + tooEarlySeconds * 1000);
+        await UserNft.updateOne(
+          { nftId, ownerTgUserId: user.tgUserId },
+          { $set: { canTransferAt: canTransferAtDate } },
+        );
+
+        const lockPayload =
+          getNftTransferLockPayload(canTransferAtDate) || {
+            code: "NFT_TRANSFER_TOO_EARLY",
+            canTransferAt: canTransferAtDate.toISOString(),
+            secondsLeft: tooEarlySeconds,
+            remainingLabel: formatRemainingSeconds(tooEarlySeconds),
+          };
+
+        return response.error(
+          res,
+          buildTransferTooEarlyMessage(lockPayload),
+          lockPayload,
+        );
+      }
+
       return response.error(res, mapSendGiftError(transferError));
     }
 
@@ -2327,6 +2469,7 @@ async function withdrawMyNft(req, res) {
           listedByTgUserId: "",
           withdrawnAt: now,
           withdrawnTo: recipientIdentifier,
+          canTransferAt: null,
         },
       },
     );

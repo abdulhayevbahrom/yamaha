@@ -172,6 +172,11 @@ const userNftSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    canTransferAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
 
     isTelegramPresent: {
       type: Boolean,
