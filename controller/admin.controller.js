@@ -29,6 +29,9 @@ const { emitUserUpdate } = require("../socket");
 const {
   listPaymentCardsForAdmin,
 } = require("../services/payment-card.service");
+const {
+  getTelegramUserProfilePhoto,
+} = require("../services/telegram-profile-photo.service");
 
 const PURCHASE_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb"];
 const PAID_STATUSES = ["paid_auto_processed", "completed"];
@@ -52,6 +55,12 @@ function normalizeDisplayName(user) {
   const username = normalizeUsername(user.username);
   if (username) return `@${username}`;
   return normalizeString(user.tgUserId);
+}
+
+function buildAdminUserPhotoUrl(tgUserId) {
+  const normalized = normalizeString(tgUserId);
+  if (!normalized) return "";
+  return `/api/admin/users/${encodeURIComponent(normalized)}/photo`;
 }
 async function resolveUserByIdentifier(identifier) {
   const raw = normalizeString(identifier);
@@ -230,6 +239,7 @@ async function buildAdminUserList(items) {
       username: String(user.username || ""),
       profileName: String(user.profileName || ""),
       displayName: normalizeDisplayName(user),
+      photoUrl: buildAdminUserPhotoUrl(user.tgUserId),
       balance: Number(user.balance || 0),
       isBlocked: Boolean(user.isBlocked),
       blockedAt: user.blockedAt || null,
@@ -768,6 +778,7 @@ const searchAssets = async (req, res) => {
         tgUserId: safeUserId,
         username: safeUsername,
         profileName: safeProfileName,
+        photoUrl: buildAdminUserPhotoUrl(safeUserId),
         displayName:
           safeProfileName ||
           (safeUsername ? `@${normalizeUsername(safeUsername)}` : safeUserId),
@@ -804,6 +815,32 @@ const searchAssets = async (req, res) => {
     );
   }
 };
+
+const getUserProfilePhoto = async (req, res) => {
+  try {
+    const tgUserId = normalizeString(req.params.tgUserId);
+    if (!tgUserId) {
+      return res.status(204).end();
+    }
+
+    const exists = await User.exists({ tgUserId });
+    if (!exists) {
+      return res.status(204).end();
+    }
+
+    const image = await getTelegramUserProfilePhoto(tgUserId);
+    if (!image?.buffer || !Buffer.isBuffer(image.buffer) || !image.buffer.length) {
+      return res.status(204).end();
+    }
+
+    res.setHeader("Cache-Control", "private, max-age=300");
+    res.setHeader("Content-Type", normalizeString(image.mimeType) || "image/jpeg");
+    return res.status(200).send(image.buffer);
+  } catch (_) {
+    return res.status(204).end();
+  }
+};
+
 const adminRemoveUserNft = async (req, res) => {
   try {
     const ownerTgUserId = normalizeString(req.params.tgUserId);
@@ -1194,6 +1231,7 @@ module.exports = {
   deletePaymentCard,
   searchUsers,
   searchAssets,
+  getUserProfilePhoto,
   getUserReferrals,
   getUserAssets,
   adminRemoveUserNft,
