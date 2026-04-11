@@ -228,6 +228,8 @@ async function buildAdminUserList(items) {
       _id: user._id,
       tgUserId: String(user.tgUserId || ""),
       username: String(user.username || ""),
+      profileName: String(user.profileName || ""),
+      displayName: normalizeDisplayName(user),
       balance: Number(user.balance || 0),
       isBlocked: Boolean(user.isBlocked),
       blockedAt: user.blockedAt || null,
@@ -1076,6 +1078,8 @@ module.exports = {
   updateUserBlockStatus,
   getDiagnostics,
 };
+
+
 
 
 
