@@ -62,6 +62,113 @@ function buildAdminUserPhotoUrl(tgUserId) {
   if (!normalized) return "";
   return `/api/admin/users/${encodeURIComponent(normalized)}/photo`;
 }
+
+function parseNftSlugAndNumber(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) {
+    return {
+      slug: "",
+      nftNumber: 0,
+      nftNumberText: "",
+    };
+  }
+
+  const match = normalized.match(/^(.*)-(\d{1,18})$/);
+  if (!match) {
+    return {
+      slug: "",
+      nftNumber: 0,
+      nftNumberText: "",
+    };
+  }
+
+  const slug = normalizeString(match[1]).replace(/[-_]+$/, "");
+  const nftNumberText = normalizeString(match[2]);
+  const nftNumber = Number(nftNumberText);
+
+  if (!slug || !Number.isFinite(nftNumber) || nftNumber <= 0) {
+    return {
+      slug: "",
+      nftNumber: 0,
+      nftNumberText: "",
+    };
+  }
+
+  return {
+    slug,
+    nftNumber,
+    nftNumberText,
+  };
+}
+
+function extractTelegramNftSearchMeta(query) {
+  const rawQuery = normalizeString(query);
+  if (!rawQuery) {
+    return {
+      candidate: "",
+      slug: "",
+      nftNumber: 0,
+      nftNumberText: "",
+      titleFromSlug: "",
+    };
+  }
+
+  let candidate = rawQuery;
+  const directMatch = rawQuery.match(
+    /(?:https?:\/\/)?(?:t(?:elegram)?\.me)\/nft\/([^\s/?#]+)/i,
+  );
+
+  if (directMatch?.[1]) {
+    candidate = directMatch[1];
+  } else {
+    const normalizedRaw = rawQuery.replace(/^https?:\/\//i, "");
+    if (/^(?:t(?:elegram)?\.me)\/nft\//i.test(normalizedRaw)) {
+      const inline = normalizedRaw.match(/^(?:t(?:elegram)?\.me)\/nft\/([^\s/?#]+)/i);
+      if (inline?.[1]) candidate = inline[1];
+    }
+  }
+
+  if (!directMatch?.[1]) {
+    try {
+      const candidateUrl = rawQuery.includes("://") ? rawQuery : "https://" + rawQuery;
+      const url = new URL(candidateUrl);
+      const parts = String(url.pathname || "")
+        .split("/")
+        .filter(Boolean);
+      const nftIndex = parts.findIndex((part) => /^nft$/i.test(part));
+      if (nftIndex >= 0 && parts[nftIndex + 1]) {
+        candidate = parts[nftIndex + 1];
+      }
+    } catch (_) {
+      // ignore invalid URL input
+    }
+  }
+
+  const candidateRaw = String(candidate || "").split(/[?#]/)[0].replace(/\/+$/, "");
+  let decodedCandidate = normalizeString(candidateRaw);
+  try {
+    decodedCandidate = normalizeString(decodeURIComponent(candidateRaw));
+  } catch (_) {
+    decodedCandidate = normalizeString(candidateRaw);
+  }
+
+  const parsed = parseNftSlugAndNumber(decodedCandidate);
+  const titleFromSlug = parsed.slug
+    ? normalizeString(
+        parsed.slug
+          .replace(/[-_]+/g, " ")
+          .replace(/([a-z])([A-Z])/g, "$1 $2"),
+      )
+    : "";
+
+  return {
+    candidate: decodedCandidate,
+    slug: parsed.slug,
+    nftNumber: parsed.nftNumber,
+    nftNumberText: parsed.nftNumberText,
+    titleFromSlug,
+  };
+}
 async function resolveUserByIdentifier(identifier) {
   const raw = normalizeString(identifier);
   if (!raw) return null;
@@ -717,18 +824,60 @@ const searchAssets = async (req, res) => {
     let giftDocs = [];
 
     if (type === "all" || type === "nft") {
+      const nftMeta = extractTelegramNftSearchMeta(rawQuery);
+      const nftOr = [
+        { nftId: rawQuery },
+        { nftId: { $regex: regex } },
+        { title: { $regex: regex } },
+        { slug: { $regex: regex } },
+        { giftId: { $regex: regex } },
+        { ownerTgUserId: rawQuery },
+        { ownerUsername: { $regex: regex } },
+        { ownerName: { $regex: regex } },
+      ];
+
+      if (nftMeta.candidate && nftMeta.candidate !== rawQuery) {
+        const candidateRegex = new RegExp(escapeRegex(nftMeta.candidate), "i");
+        nftOr.push({ nftId: nftMeta.candidate });
+        nftOr.push({ nftId: { $regex: candidateRegex } });
+        nftOr.push({ slug: { $regex: candidateRegex } });
+      }
+
+      if (nftMeta.slug) {
+        const slugRegex = new RegExp(escapeRegex(nftMeta.slug), "i");
+        nftOr.push({ slug: nftMeta.slug });
+        nftOr.push({ slug: { $regex: slugRegex } });
+
+        if (nftMeta.titleFromSlug) {
+          const titleFromSlugRegex = new RegExp(
+            escapeRegex(nftMeta.titleFromSlug).replace(/\s+/g, "\\s*"),
+            "i",
+          );
+          nftOr.push({ title: { $regex: titleFromSlugRegex } });
+        }
+      }
+
+      if (nftMeta.nftNumber > 0) {
+        nftOr.push({ nftNumber: nftMeta.nftNumber });
+        nftOr.push({ nftId: nftMeta.nftNumberText });
+
+        const nftNumberRegex = new RegExp(
+          "(?:^|\\D)" + escapeRegex(nftMeta.nftNumberText) + "(?:\\D|$)",
+          "i",
+        );
+        nftOr.push({ nftId: { $regex: nftNumberRegex } });
+      }
+
+      if (nftMeta.slug && nftMeta.nftNumberText) {
+        const composite = nftMeta.slug + "-" + nftMeta.nftNumberText;
+        const compositeRegex = new RegExp(escapeRegex(composite), "i");
+        nftOr.push({ nftId: composite });
+        nftOr.push({ nftId: { $regex: compositeRegex } });
+      }
+
       nftDocs = await UserNft.find({
         isTelegramPresent: true,
-        $or: [
-          { nftId: rawQuery },
-          { nftId: { $regex: regex } },
-          { title: { $regex: regex } },
-          { slug: { $regex: regex } },
-          { giftId: { $regex: regex } },
-          { ownerTgUserId: rawQuery },
-          { ownerUsername: { $regex: regex } },
-          { ownerName: { $regex: regex } },
-        ],
+        $or: nftOr,
       })
         .sort({ updatedAt: -1, createdAt: -1 })
         .limit(limit)
