@@ -98,6 +98,7 @@ router.get(
 );
 router.put("/admin/settings", authMiddleware, adminController.updateSettings);
 router.get("/admin/users/search", authMiddleware, adminController.searchUsers);
+router.get("/admin/assets/search", authMiddleware, adminController.searchAssets);
 router.get(
   "/admin/users/:tgUserId/referrals",
   authMiddleware,
@@ -155,4 +156,5 @@ router.post(
 );
 
 module.exports = router;
+
 

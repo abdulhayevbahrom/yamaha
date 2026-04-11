@@ -681,6 +681,129 @@ const getUserAssets = async (req, res) => {
   }
 };
 
+const searchAssets = async (req, res) => {
+  try {
+    const rawQuery = normalizeString(req.query.q);
+    const rawType = normalizeString(req.query.type).toLowerCase();
+    const type = ["nft", "gift", "all"].includes(rawType) ? rawType : "all";
+    const requestedLimit = Number(req.query.limit || 30);
+    const limit =
+      Number.isFinite(requestedLimit) && requestedLimit > 0
+        ? Math.min(100, Math.floor(requestedLimit))
+        : 30;
+
+    if (!rawQuery) {
+      return response.success(res, "Asset search", {
+        query: "",
+        type,
+        nfts: [],
+        gifts: [],
+      });
+    }
+
+    const regex = new RegExp(escapeRegex(rawQuery), "i");
+
+    let nftDocs = [];
+    let giftDocs = [];
+
+    if (type === "all" || type === "nft") {
+      nftDocs = await UserNft.find({
+        isTelegramPresent: true,
+        $or: [
+          { nftId: rawQuery },
+          { nftId: { $regex: regex } },
+          { title: { $regex: regex } },
+          { slug: { $regex: regex } },
+          { giftId: { $regex: regex } },
+          { ownerTgUserId: rawQuery },
+          { ownerUsername: { $regex: regex } },
+          { ownerName: { $regex: regex } },
+        ],
+      })
+        .sort({ updatedAt: -1, createdAt: -1 })
+        .limit(limit)
+        .lean();
+    }
+
+    if (type === "all" || type === "gift") {
+      giftDocs = await UserGift.find({
+        $or: [
+          { giftId: rawQuery },
+          { giftId: { $regex: regex } },
+          { title: { $regex: regex } },
+          { tgUserId: rawQuery },
+          { tgUsername: { $regex: regex } },
+        ],
+      })
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .lean();
+    }
+
+    const ownerIds = Array.from(
+      new Set(
+        [
+          ...nftDocs.map((item) => normalizeString(item.ownerTgUserId)),
+          ...giftDocs.map((item) => normalizeString(item.tgUserId)),
+        ].filter(Boolean),
+      ),
+    );
+
+    const ownerDocs = ownerIds.length
+      ? await User.find({ tgUserId: { $in: ownerIds } })
+          .select({ tgUserId: 1, username: 1, profileName: 1 })
+          .lean()
+      : [];
+
+    const ownerMap = new Map(
+      ownerDocs.map((item) => [normalizeString(item.tgUserId), item]),
+    );
+
+    const mapOwner = ({ tgUserId, username }) => {
+      const safeUserId = normalizeString(tgUserId);
+      const ownerUser = ownerMap.get(safeUserId);
+      const safeUsername = normalizeString(ownerUser?.username || username);
+      const safeProfileName = normalizeString(ownerUser?.profileName);
+      return {
+        tgUserId: safeUserId,
+        username: safeUsername,
+        profileName: safeProfileName,
+        displayName:
+          safeProfileName ||
+          (safeUsername ? `@${normalizeUsername(safeUsername)}` : safeUserId),
+      };
+    };
+
+    const nfts = nftDocs.map((doc) => ({
+      ...mapAdminNftItem(doc),
+      owner: mapOwner({
+        tgUserId: doc.ownerTgUserId,
+        username: doc.ownerUsername,
+      }),
+    }));
+
+    const gifts = giftDocs.map((doc) => ({
+      ...mapAdminGiftItem(doc),
+      owner: mapOwner({
+        tgUserId: doc.tgUserId,
+        username: doc.tgUsername,
+      }),
+    }));
+
+    return response.success(res, "Asset search", {
+      query: rawQuery,
+      type,
+      nfts,
+      gifts,
+    });
+  } catch (error) {
+    return response.serverError(
+      res,
+      "Asset qidirishda xatolik",
+      error.message,
+    );
+  }
+};
 const adminRemoveUserNft = async (req, res) => {
   try {
     const ownerTgUserId = normalizeString(req.params.tgUserId);
@@ -1070,6 +1193,7 @@ module.exports = {
   updatePaymentCard,
   deletePaymentCard,
   searchUsers,
+  searchAssets,
   getUserReferrals,
   getUserAssets,
   adminRemoveUserNft,
@@ -1078,6 +1202,11 @@ module.exports = {
   updateUserBlockStatus,
   getDiagnostics,
 };
+
+
+
+
+
 
 
 
