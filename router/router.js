@@ -103,6 +103,21 @@ router.get(
   authMiddleware,
   adminController.getUserReferrals,
 );
+router.get(
+  "/admin/users/:tgUserId/assets",
+  authMiddleware,
+  adminController.getUserAssets,
+);
+router.post(
+  "/admin/users/:tgUserId/nfts/:nftId/remove",
+  authMiddleware,
+  adminController.adminRemoveUserNft,
+);
+router.post(
+  "/admin/users/:tgUserId/nfts/:nftId/transfer",
+  authMiddleware,
+  adminController.adminTransferUserNft,
+);
 router.post(
   "/admin/users/:tgUserId/balance",
   authMiddleware,

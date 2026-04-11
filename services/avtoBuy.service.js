@@ -57,7 +57,9 @@ function getFragmentErrorPayload(error) {
 
 function getFragmentErrorMessage(error) {
   const payload = getFragmentErrorPayload(error);
-  return String(payload?.error || payload?.message || error?.message || "").trim();
+  return String(
+    payload?.error || payload?.message || error?.message || "",
+  ).trim();
 }
 
 function isDuplicateIdempotencyError(error) {
@@ -182,7 +184,11 @@ async function ensureFragmentBalance(requiredTonAmount) {
 
   const tkBalance = await tonkeeper.getBalance();
   if (tkBalance >= sendAmount) {
-    await tonkeeper.sendTon(walletAddress, sendAmount, "Auto top-up to Fragment");
+    await tonkeeper.sendTon(
+      walletAddress,
+      sendAmount,
+      "Auto top-up to Fragment",
+    );
   } else {
     throw new Error(
       `Tonkeeper balansida yetarli TON yo'q. Kerak: ${sendAmount.toFixed(
@@ -191,14 +197,14 @@ async function ensureFragmentBalance(requiredTonAmount) {
     );
   }
 
-  for (let i = 0; i < 12; i += 1) {
+  for (let i = 0; i < 18; i += 1) {
     await sleep(5000);
     const updatedAccount = await getAccountInfo();
     const newBalance = parseFloat(updatedAccount.mainnet_balance || 0);
     if (newBalance >= requiredTonAmount) return true;
   }
 
-  throw new Error("Deposit 60 soniyada tasdiqlanmadi.");
+  throw new Error("Deposit 90 soniyada tasdiqlanmadi.");
 }
 
 async function purchaseFragment({
@@ -297,7 +303,10 @@ async function markFulfillmentSuccess(order, result) {
     fulfillmentStatus: "success",
     fulfilledAt: new Date(),
     tonAmount: result.tonAmount || 0,
-    fragmentTx: appendIdempotencyKey(result.fragment || result, result.idempotencyKey),
+    fragmentTx: appendIdempotencyKey(
+      result.fragment || result,
+      result.idempotencyKey,
+    ),
     fulfillmentError: "",
   });
   await sendOrderArchive(order);
@@ -416,7 +425,9 @@ async function autoFulfillOrder(orderOrId) {
       fulfillmentError: "",
     });
 
-    const recipient = String(order.username || "").replace(/^@/, "").trim();
+    const recipient = String(order.username || "")
+      .replace(/^@/, "")
+      .trim();
     const transactionId = String(order.orderId || order._id);
 
     try {
@@ -457,7 +468,9 @@ async function autoFulfillOrder(orderOrId) {
     fulfillmentError: "",
   });
 
-  const recipient = String(order.username || "").replace(/^@/, "").trim();
+  const recipient = String(order.username || "")
+    .replace(/^@/, "")
+    .trim();
   const transactionId = String(order.orderId || order._id);
 
   try {

@@ -5,6 +5,7 @@ const PaymentCard = require("../model/payment-card.model");
 const User = require("../model/user.model");
 const Order = require("../model/order.model");
 const UserGift = require("../model/user-gift.model");
+const UserNft = require("../model/user-nft.model");
 const NftOffer = require("../model/nft-offer.model");
 const UserBalanceAdjustment = require("../model/user-balance-adjustment.model");
 const {
@@ -42,6 +43,105 @@ function normalizeUsername(value) {
 
 function escapeRegex(value) {
   return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeDisplayName(user) {
+  if (!user || typeof user !== "object") return "";
+  const profile = normalizeString(user.profileName);
+  if (profile) return profile;
+  const username = normalizeUsername(user.username);
+  if (username) return `@${username}`;
+  return normalizeString(user.tgUserId);
+}
+async function resolveUserByIdentifier(identifier) {
+  const raw = normalizeString(identifier);
+  if (!raw) return null;
+
+  const normalizedUsername = normalizeUsername(raw);
+  const conditions = [{ tgUserId: raw }];
+  if (normalizedUsername) {
+    conditions.push({ username: normalizedUsername });
+  }
+
+  return User.findOne({ $or: conditions }).lean();
+}
+
+async function cancelPendingOffersForNftAdmin(nftId, reason = "admin_nft_action") {
+  const normalizedNftId = normalizeString(nftId);
+  if (!normalizedNftId) return 0;
+
+  const pending = await NftOffer.find({
+    nftId: normalizedNftId,
+    status: "pending",
+  })
+    .select({ _id: 1, buyerTgUserId: 1, sellerTgUserId: 1 })
+    .lean();
+
+  if (!pending.length) return 0;
+
+  const now = new Date();
+  await NftOffer.updateMany(
+    { _id: { $in: pending.map((item) => item._id) }, status: "pending" },
+    {
+      $set: {
+        status: "cancelled",
+        cancelledAt: now,
+        respondedAt: now,
+        cancelReason: normalizeString(reason) || "admin_nft_action",
+      },
+    },
+  );
+
+  for (const offer of pending) {
+    emitUserUpdate(normalizeString(offer.buyerTgUserId), {
+      type: "nft_offer_cancelled",
+      refreshNfts: true,
+      refreshNftOffers: true,
+      nftId: normalizedNftId,
+      offerId: String(offer._id),
+    });
+    emitUserUpdate(normalizeString(offer.sellerTgUserId), {
+      type: "nft_offer_cancelled",
+      refreshNftOffers: true,
+      nftId: normalizedNftId,
+      offerId: String(offer._id),
+    });
+  }
+
+  return pending.length;
+}
+
+function mapAdminGiftItem(doc) {
+  return {
+    userGiftId: String(doc?._id || ""),
+    giftId: normalizeString(doc?.giftId),
+    title: normalizeString(doc?.title) || "Gift",
+    emoji: normalizeString(doc?.emoji) || "🎁",
+    status: normalizeString(doc?.status) || "owned",
+    priceUzs: Number(doc?.priceUzs || 0),
+    stars: Number(doc?.stars || 0),
+    createdAt: doc?.createdAt || null,
+    sentAt: doc?.sentAt || null,
+  };
+}
+
+function mapAdminNftItem(doc) {
+  return {
+    nftId: normalizeString(doc?.nftId),
+    giftId: normalizeString(doc?.giftId),
+    slug: normalizeString(doc?.slug),
+    title: normalizeString(doc?.title) || "NFT Gift",
+    nftNumber: Number(doc?.nftNumber || 0),
+    ownerTgUserId: normalizeString(doc?.ownerTgUserId),
+    ownerUsername: normalizeString(doc?.ownerUsername),
+    marketStatus: normalizeString(doc?.marketStatus) || "owned",
+    listingPriceUzs: Number(doc?.listingPriceUzs || 0),
+    isTelegramPresent: Boolean(doc?.isTelegramPresent),
+    imageUrl:
+      "/api/gifts/nft-image/" + encodeURIComponent(normalizeString(doc?.nftId)),
+    createdAt: doc?.createdAt || null,
+    updatedAt: doc?.updatedAt || null,
+  };
 }
 
 async function measureSingleOrderCreateSeconds() {
@@ -535,6 +635,211 @@ const getUserReferrals = async (req, res) => {
   }
 };
 
+const getUserAssets = async (req, res) => {
+  try {
+    const tgUserId = normalizeString(req.params.tgUserId);
+    if (!tgUserId) {
+      return response.error(res, "Foydalanuvchi topilmadi");
+    }
+
+    const user = await User.findOne({ tgUserId }).lean();
+    if (!user) {
+      return response.notFound(res, "Foydalanuvchi topilmadi");
+    }
+
+    const [gifts, nfts] = await Promise.all([
+      UserGift.find({ tgUserId })
+        .sort({ createdAt: -1 })
+        .limit(300)
+        .lean(),
+      UserNft.find({
+        ownerTgUserId: tgUserId,
+        isTelegramPresent: true,
+      })
+        .sort({ updatedAt: -1, createdAt: -1 })
+        .limit(300)
+        .lean(),
+    ]);
+
+    return response.success(res, "User assets", {
+      user: {
+        tgUserId: normalizeString(user.tgUserId),
+        username: normalizeString(user.username),
+        profileName: normalizeString(user.profileName),
+      },
+      gifts: gifts.map(mapAdminGiftItem),
+      nfts: nfts.map(mapAdminNftItem),
+    });
+  } catch (error) {
+    return response.serverError(
+      res,
+      "Foydalanuvchi assetlarini olishda xatolik",
+      error.message,
+    );
+  }
+};
+
+const adminRemoveUserNft = async (req, res) => {
+  try {
+    const ownerTgUserId = normalizeString(req.params.tgUserId);
+    const nftId = normalizeString(req.params.nftId);
+    if (!ownerTgUserId || !nftId) {
+      return response.error(res, "Foydalanuvchi yoki NFT topilmadi");
+    }
+
+    const owner = await User.findOne({ tgUserId: ownerTgUserId }).lean();
+    if (!owner) {
+      return response.notFound(res, "Foydalanuvchi topilmadi");
+    }
+
+    const nft = await UserNft.findOne({
+      nftId,
+      ownerTgUserId,
+      isTelegramPresent: true,
+    }).lean();
+    if (!nft) {
+      return response.error(res, "NFT topilmadi");
+    }
+
+    await UserNft.updateOne(
+      { nftId, ownerTgUserId },
+      {
+        $set: {
+          isTelegramPresent: false,
+          marketStatus: "owned",
+          listingPriceUzs: 0,
+          listedAt: null,
+          listedByTgUserId: "",
+          withdrawnAt: new Date(),
+          withdrawnTo: "admin_manual_remove",
+        },
+      },
+    );
+
+    await cancelPendingOffersForNftAdmin(nftId, "admin_manual_remove");
+
+    emitUserUpdate(ownerTgUserId, {
+      type: "admin_nft_removed",
+      refreshNfts: true,
+      refreshNftOffers: true,
+      nftId,
+    });
+
+    return response.success(res, "NFT foydalanuvchi profilidan o'chirildi", {
+      nftId,
+      ownerTgUserId,
+    });
+  } catch (error) {
+    return response.serverError(
+      res,
+      "NFTni o'chirishda xatolik",
+      error.message,
+    );
+  }
+};
+
+const adminTransferUserNft = async (req, res) => {
+  try {
+    const ownerTgUserId = normalizeString(req.params.tgUserId);
+    const nftId = normalizeString(req.params.nftId);
+    const targetIdentifier = normalizeString(
+      req.body?.toTgUserId ||
+        req.body?.toUsername ||
+        req.body?.target ||
+        req.body?.recipient,
+    );
+
+    if (!ownerTgUserId || !nftId) {
+      return response.error(res, "Foydalanuvchi yoki NFT topilmadi");
+    }
+    if (!targetIdentifier) {
+      return response.error(res, "Qabul qiluvchi tgUserId yoki username kiriting");
+    }
+
+    const [owner, targetUser] = await Promise.all([
+      User.findOne({ tgUserId: ownerTgUserId }).lean(),
+      resolveUserByIdentifier(targetIdentifier),
+    ]);
+
+    if (!owner) {
+      return response.notFound(res, "Foydalanuvchi topilmadi");
+    }
+    if (!targetUser) {
+      return response.error(res, "Qabul qiluvchi topilmadi");
+    }
+
+    const targetTgUserId = normalizeString(targetUser.tgUserId);
+    if (!targetTgUserId) {
+      return response.error(res, "Qabul qiluvchi topilmadi");
+    }
+    if (targetTgUserId === ownerTgUserId) {
+      return response.error(res, "Qabul qiluvchi hozirgi egasi bilan bir xil");
+    }
+
+    const nft = await UserNft.findOne({
+      nftId,
+      ownerTgUserId,
+      isTelegramPresent: true,
+    }).lean();
+    if (!nft) {
+      return response.error(res, "NFT topilmadi");
+    }
+
+    await UserNft.updateOne(
+      { nftId, ownerTgUserId },
+      {
+        $set: {
+          ownerTgUserId: targetTgUserId,
+          ownerUsername: normalizeString(targetUser.username),
+          ownerName: normalizeDisplayName(targetUser),
+          marketStatus: "owned",
+          listingPriceUzs: 0,
+          listedAt: null,
+          listedByTgUserId: "",
+          withdrawnAt: null,
+          withdrawnTo: "",
+        },
+      },
+    );
+
+    await cancelPendingOffersForNftAdmin(nftId, "admin_manual_transfer");
+
+    emitUserUpdate(ownerTgUserId, {
+      type: "admin_nft_transferred_out",
+      refreshNfts: true,
+      refreshNftOffers: true,
+      nftId,
+      toTgUserId: targetTgUserId,
+    });
+    emitUserUpdate(targetTgUserId, {
+      type: "admin_nft_transferred_in",
+      refreshNfts: true,
+      refreshNftOffers: true,
+      nftId,
+      fromTgUserId: ownerTgUserId,
+    });
+
+    return response.success(res, "NFT boshqa foydalanuvchiga o'tkazildi", {
+      nftId,
+      from: {
+        tgUserId: ownerTgUserId,
+        username: normalizeString(owner.username),
+      },
+      to: {
+        tgUserId: targetTgUserId,
+        username: normalizeString(targetUser.username),
+      },
+    });
+  } catch (error) {
+    return response.serverError(
+      res,
+      "NFTni o'tkazishda xatolik",
+      error.message,
+    );
+  }
+};
+
+
 const topupUserBalance = async (req, res) => {
   try {
     const tgUserId = normalizeString(req.params.tgUserId);
@@ -764,9 +1069,15 @@ module.exports = {
   deletePaymentCard,
   searchUsers,
   getUserReferrals,
+  getUserAssets,
+  adminRemoveUserNft,
+  adminTransferUserNft,
   topupUserBalance,
   updateUserBlockStatus,
   getDiagnostics,
 };
+
+
+
 
 
