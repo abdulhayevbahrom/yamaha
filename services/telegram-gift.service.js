@@ -16,6 +16,9 @@ const UNIQUE_GIFT_CACHE_TTL_MS = 20 * 60 * 1000;
 let telegramClient = null;
 let connectPromise = null;
 
+const TELEGRAM_TYPE_NOT_FOUND_RE =
+  /TypeNotFoundError|matching Constructor ID|TLObject|constructor id/i;
+
 let catalogCache = {
   fetchedAt: 0,
   gifts: [],
@@ -77,6 +80,38 @@ function trimMapBySize(cacheMap, maxSize) {
 function isTruthyFlag(value) {
   const normalized = normalizeString(value).toLowerCase();
   return ["1", "true", "yes", "on", "debug"].includes(normalized);
+}
+
+function isTelegramTypeNotFoundError(error) {
+  const message = normalizeString(error?.message || error?.errorMessage);
+  const name = normalizeString(error?.name);
+  return TELEGRAM_TYPE_NOT_FOUND_RE.test(message) || name === "TypeNotFoundError";
+}
+
+function patchTelegramInvokeWithRetry(client, scopeLabel) {
+  if (!client || client.__yamahaInvokePatched) return;
+
+  const rawInvoke = client.invoke.bind(client);
+  client.invoke = async (request, dcId) => {
+    try {
+      return await rawInvoke(request, dcId);
+    } catch (error) {
+      if (!isTelegramTypeNotFoundError(error)) {
+        throw error;
+      }
+
+      const requestName = normalizeString(request?.className) || "unknown";
+      console.warn(
+        `[${scopeLabel}] TypeNotFoundError: ${requestName} uchun reconnect + retry ishlatildi.`,
+      );
+
+      await client.disconnect().catch(() => {});
+      await client.connect();
+      return rawInvoke(request, dcId);
+    }
+  };
+
+  client.__yamahaInvokePatched = true;
 }
 
 function buildRawGiftAttributes(rawGift) {
@@ -553,6 +588,10 @@ async function getTelegramGiftClient() {
       apiHash,
       { connectionRetries: 5 },
     );
+
+    // Bu client faqat RPC uchun ishlatiladi, update loop PM2 logini shovqin qiladi.
+    telegramClient._loopStarted = true;
+    patchTelegramInvokeWithRetry(telegramClient, "telegram-gift");
   }
 
   if (telegramClient.connected) {

@@ -10,6 +10,9 @@ const sessionString = telegramCredentials.sessionString;
 let client = null;
 let connectPromise = null;
 
+const TELEGRAM_TYPE_NOT_FOUND_RE =
+  /TypeNotFoundError|matching Constructor ID|TLObject|constructor id/i;
+
 function isTelegramPremiumCheckConfigured() {
   return Boolean(apiId && apiHash && sessionString && sessionString !== "test uchun");
 }
@@ -30,6 +33,38 @@ function resolveEntityInput(identifier) {
   return cleaned;
 }
 
+function isTelegramTypeNotFoundError(error) {
+  const message = String(error?.message || error?.errorMessage || "").trim();
+  const name = String(error?.name || "").trim();
+  return TELEGRAM_TYPE_NOT_FOUND_RE.test(message) || name === "TypeNotFoundError";
+}
+
+function patchTelegramInvokeWithRetry(instance, scopeLabel) {
+  if (!instance || instance.__yamahaInvokePatched) return;
+
+  const rawInvoke = instance.invoke.bind(instance);
+  instance.invoke = async (request, dcId) => {
+    try {
+      return await rawInvoke(request, dcId);
+    } catch (error) {
+      if (!isTelegramTypeNotFoundError(error)) {
+        throw error;
+      }
+
+      const requestName = String(request?.className || "").trim() || "unknown";
+      console.warn(
+        `[${scopeLabel}] TypeNotFoundError: ${requestName} uchun reconnect + retry ishlatildi.`,
+      );
+
+      await instance.disconnect().catch(() => {});
+      await instance.connect();
+      return rawInvoke(request, dcId);
+    }
+  };
+
+  instance.__yamahaInvokePatched = true;
+}
+
 async function getTelegramPremiumCheckClient() {
   if (!isTelegramPremiumCheckConfigured()) {
     throw new Error(
@@ -44,6 +79,10 @@ async function getTelegramPremiumCheckClient() {
       apiHash,
       { connectionRetries: 5 },
     );
+
+    // Premium-check servisga real-time update kerak emas.
+    client._loopStarted = true;
+    patchTelegramInvokeWithRetry(client, "telegram-premium-check");
   }
 
   if (client.connected) {
