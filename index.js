@@ -36,7 +36,7 @@ function shouldStartTelegramWorkers() {
 
   return true;
 }
-
+// 
 const PORT = Number(process.env.PORT) || 4090;
 const app = express();
 const server = createServer(app);
