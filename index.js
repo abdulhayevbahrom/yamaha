@@ -41,15 +41,37 @@ const PORT = Number(process.env.PORT) || 4090;
 const app = express();
 const server = createServer(app);
 
-let urls = [
+const staticCorsOrigins = [
   "http://localhost:5173",
   "https://yamaha-mini-app.vercel.app",
   "https://6vqq74qx-5173.euw.devtunnels.ms",
-];
+  String(process.env.WEB_APP_URL || "").trim(),
+  String(process.env.MAIN_URL || "").trim(),
+  String(process.env.FRONTEND_URL || "").trim(),
+].filter(Boolean);
+
+const envCorsOrigins = String(process.env.CORS_ORIGINS || "")
+  .split(",")
+  .map((item) => item.trim())
+  .filter(Boolean);
+
+const allowedOrigins = new Set([...staticCorsOrigins, ...envCorsOrigins]);
 
 app.use(
   cors({
-    origin: urls,
+    origin: (origin, callback) => {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      if (allowedOrigins.has(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error("CORS not allowed"));
+    },
     credentials: true,
   }),
 );
