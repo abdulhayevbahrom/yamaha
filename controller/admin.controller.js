@@ -24,7 +24,10 @@ const {
   updateReferralConfig,
   updateNftMarketplaceConfig,
 } = require("../services/settings.service");
-const { broadcastBotResumed } = require("../services/bot-broadcast.service");
+const {
+  broadcastBotResumed,
+  broadcastBotPaused,
+} = require("../services/bot-broadcast.service");
 const { emitUserUpdate } = require("../socket");
 const {
   listPaymentCardsForAdmin,
@@ -552,6 +555,16 @@ const updateSettings = async (req, res) => {
       out.botStatus?.enabled
     ) {
       out.broadcast = await broadcastBotResumed();
+    }
+
+    if (
+      botStatus &&
+      prevBotStatus &&
+      prevBotStatus.enabled &&
+      out.botStatus &&
+      !out.botStatus.enabled
+    ) {
+      out.broadcast = await broadcastBotPaused();
     }
 
     return response.success(res, "Settings yangilandi", out);

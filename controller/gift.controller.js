@@ -2662,9 +2662,12 @@ async function sendGift(req, res) {
 
     const target = normalizeString(req.body?.target).toLowerCase() === "friend" ? "friend" : "self";
     const recipientRaw = normalizeString(req.body?.recipient);
-    const recipient = target === "friend" ? normalizeRecipient(recipientRaw) : "me";
+    const selfRecipient = normalizeRecipient(
+      normalizeString(user?.username) || normalizeString(user?.tgUserId),
+    );
+    const recipient = target === "friend" ? normalizeRecipient(recipientRaw) : selfRecipient;
 
-    if (target === "friend" && !recipient) {
+    if (!recipient) {
       return response.error(res, "Qabul qiluvchi username yoki tgUserId kiriting");
     }
 
@@ -2693,8 +2696,8 @@ async function sendGift(req, res) {
         $set: {
           status: "sent",
           sentToType: target,
-          sentToValue: target === "self" ? "me" : recipient,
-          sentToResolved: target === "self" ? user.tgUserId : recipient,
+          sentToValue: recipient,
+          sentToResolved: recipient,
           sentAt: new Date(),
         },
       },
@@ -2705,14 +2708,14 @@ async function sendGift(req, res) {
       refreshGifts: true,
       giftId: ownedGift.giftId,
       target,
-      recipient: target === "self" ? user.tgUserId : recipient,
+      recipient,
     });
 
     return response.success(res, "Gift yuborildi", {
       userGiftId,
       giftId: normalizeGiftId(ownedGift.giftId),
       target,
-      recipient: target === "self" ? user.tgUserId : recipient,
+      recipient,
     });
   } catch (error) {
     return response.serverError(

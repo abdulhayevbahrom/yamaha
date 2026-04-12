@@ -6,6 +6,7 @@ const {
   getForceJoin,
   getBankomatTopupConfig,
   getReferralConfig,
+  getBotStatus,
 } = require("../services/settings.service");
 const { checkForceJoinMembership } = require("../services/force-join.service");
 const {
@@ -167,11 +168,13 @@ const getSettings = async (_, res) => {
     const forceJoin = await getForceJoin();
     const bankomatTopupConfig = await getBankomatTopupConfig();
     const referralConfig = await getReferralConfig();
+    const botStatus = await getBotStatus();
     return response.success(res, "Settings", {
       starPricing,
       forceJoin,
       bankomatTopupConfig,
       referralConfig,
+      botStatus,
     });
   } catch (error) {
     return response.serverError(res, "Settings olishda xatolik", error.message);
