@@ -2685,6 +2685,7 @@ async function sendGift(req, res) {
       await sendStarGiftToRecipient({
         giftId: ownedGift.giftId,
         recipientIdentifier: recipient,
+        hideName: true,
       });
     } catch (sendError) {
       return response.error(res, mapSendGiftError(sendError));
@@ -2747,3 +2748,4 @@ module.exports = {
   purchaseGift,
   sendGift,
 };
+
