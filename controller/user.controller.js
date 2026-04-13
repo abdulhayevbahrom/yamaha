@@ -335,11 +335,18 @@ async function getBalance(req, res) {
     const tgUserId = String(
       req.params?.tgUserId || req.query?.tgUserId || "",
     ).trim();
+    const authUserId = normalizeString(req?.telegramAuth?.tgUserId);
 
     if (!tgUserId) {
       return response.error(
         res,
         "Telegram profilingiz aniqlanmadi. Ilovani qayta ochib ko'ring.",
+      );
+    }
+    if (authUserId && authUserId !== tgUserId) {
+      return response.forbidden(
+        res,
+        "Faqat o'zingizning balansingizni ko'rishingiz mumkin",
       );
     }
 

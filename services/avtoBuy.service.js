@@ -37,6 +37,36 @@ function buildFragmentIdempotencyKey(productType, recipient, transactionId) {
   )}_${transactionId}`;
 }
 
+function getExistingOrderIdempotencyKey(order) {
+  const key =
+    order?.fragmentTx &&
+    typeof order.fragmentTx === "object" &&
+    !Array.isArray(order.fragmentTx)
+      ? String(order.fragmentTx.idempotencyKey || "").trim()
+      : "";
+  return key;
+}
+
+function buildOrderTransactionFingerprint(order) {
+  const objectId = String(order?._id || "").trim();
+  if (objectId) return objectId;
+
+  const orderId = String(order?.orderId || "").trim();
+  if (orderId) return `order_${orderId}`;
+
+  return `ts_${Date.now()}`;
+}
+
+function resolveOrderIdempotencyKey(order, productType, recipient) {
+  const existingKey = getExistingOrderIdempotencyKey(order);
+  if (existingKey) return existingKey;
+  return buildFragmentIdempotencyKey(
+    productType,
+    recipient,
+    buildOrderTransactionFingerprint(order),
+  );
+}
+
 function getFragmentErrorPayload(error) {
   const responseData = error?.response?.data;
   if (
@@ -212,15 +242,10 @@ async function purchaseFragment({
   recipient,
   quantity,
   months,
-  transactionId,
+  idempotencyKey,
   isTest = false,
 }) {
   const endpoint = isTest ? "/test/purchase" : "/api/purchase";
-  const idempotencyKey = buildFragmentIdempotencyKey(
-    productType,
-    recipient,
-    transactionId,
-  );
   const payload = {
     product_type: productType,
     recipient,
@@ -240,44 +265,52 @@ async function buyStars(recipient, amount, transactionId, options = {}) {
   const tonAmount = await getTonPrice("stars", amount);
   const payTon = options.payTon !== false;
   const isTest = options.isTest === true;
+  const idempotencyKey = String(
+    options.idempotencyKey ||
+      buildFragmentIdempotencyKey("stars", recipient, transactionId),
+  ).trim();
 
   if (payTon && !isTest) {
     await ensureFragmentBalance(tonAmount);
   }
 
-  const { data: fragment, idempotencyKey } = await retryOperation(() =>
+  const { data: fragment, idempotencyKey: requestIdempotencyKey } = await retryOperation(() =>
     purchaseFragment({
       productType: "stars",
       recipient,
       quantity: amount,
-      transactionId,
+      idempotencyKey,
       isTest,
     }),
   );
 
-  return { fragment, tonAmount, idempotencyKey };
+  return { fragment, tonAmount, idempotencyKey: requestIdempotencyKey };
 }
 
 async function buyPremium(recipient, months, transactionId, options = {}) {
   const tonAmount = await getTonPrice("premium", months);
   const payTon = options.payTon !== false;
   const isTest = options.isTest === true;
+  const idempotencyKey = String(
+    options.idempotencyKey ||
+      buildFragmentIdempotencyKey("premium", recipient, transactionId),
+  ).trim();
 
   if (payTon && !isTest) {
     await ensureFragmentBalance(tonAmount);
   }
 
-  const { data: fragment, idempotencyKey } = await retryOperation(() =>
+  const { data: fragment, idempotencyKey: requestIdempotencyKey } = await retryOperation(() =>
     purchaseFragment({
       productType: "premium",
       recipient,
       months,
-      transactionId,
+      idempotencyKey,
       isTest,
     }),
   );
 
-  return { fragment, tonAmount, idempotencyKey };
+  return { fragment, tonAmount, idempotencyKey: requestIdempotencyKey };
 }
 
 function buildDuplicateFragmentTx(order, error, idempotencyKey) {
@@ -300,6 +333,7 @@ function buildDuplicateFragmentTx(order, error, idempotencyKey) {
 
 async function markFulfillmentSuccess(order, result) {
   await Order.findByIdAndUpdate(order._id, {
+    status: "completed",
     fulfillmentStatus: "success",
     fulfilledAt: new Date(),
     tonAmount: result.tonAmount || 0,
@@ -335,10 +369,30 @@ async function markFulfillmentSuccess(order, result) {
 }
 
 async function markDuplicateFulfillment(order, error, idempotencyKey) {
-  await Order.findByIdAndUpdate(order._id, {
+  const latest = await Order.findById(order._id).lean();
+  if (latest?.fulfillmentStatus === "success") {
+    return {
+      ok: true,
+      duplicate: true,
+      recovered: true,
+      idempotencyKey,
+      result: {
+        fragment: latest.fragmentTx || null,
+        idempotencyKey:
+          idempotencyKey ||
+          latest?.fragmentTx?.idempotencyKey ||
+          "",
+      },
+    };
+  }
+
+  await Order.findOneAndUpdate({
+    _id: order._id,
+    fulfillmentStatus: { $ne: "success" },
+  }, {
     fulfillmentStatus: "processing",
     fulfillmentError: DUPLICATE_IDEMPOTENCY_MESSAGE,
-    fragmentTx: buildDuplicateFragmentTx(order, error, idempotencyKey),
+    fragmentTx: buildDuplicateFragmentTx(latest || order, error, idempotencyKey),
   });
   if (order.tgUserId) {
     emitUserUpdate(order.tgUserId, {
@@ -362,7 +416,19 @@ async function markDuplicateFulfillment(order, error, idempotencyKey) {
 
 async function markFulfillmentFailure(order, error, idempotencyKey) {
   const errorMessage = error.message || "Auto buy xatolik";
-  await Order.findByIdAndUpdate(order._id, {
+  const latest = await Order.findById(order._id).lean();
+  if (latest?.fulfillmentStatus === "success") {
+    return {
+      ok: true,
+      recovered: true,
+      reason: "already_fulfilled",
+    };
+  }
+
+  await Order.findOneAndUpdate({
+    _id: order._id,
+    fulfillmentStatus: { $ne: "success" },
+  }, {
     fulfillmentStatus: "failed",
     fulfillmentError: errorMessage,
     fragmentTx: appendIdempotencyKey(
@@ -384,11 +450,14 @@ async function markFulfillmentFailure(order, error, idempotencyKey) {
   return { ok: false, error: errorMessage, idempotencyKey };
 }
 
-async function autoFulfillOrder(orderOrId) {
-  const order =
+async function autoFulfillOrder(orderOrId, options = {}) {
+  const orderId =
     typeof orderOrId === "object" && orderOrId?._id
-      ? orderOrId
-      : await Order.findById(orderOrId).lean();
+      ? orderOrId._id
+      : orderOrId;
+  const order = await Order.findById(orderId).lean();
+  const allowDuplicateProcessingRetry =
+    options?.allowDuplicateProcessingRetry === true;
 
   if (!order) return { skipped: true, reason: "order_not_found" };
   if (order.status !== "paid_auto_processed") {
@@ -398,7 +467,11 @@ async function autoFulfillOrder(orderOrId) {
     return { skipped: true, reason: "unsupported_product" };
   }
   if (order.fulfillmentStatus === "processing") {
-    return { skipped: true, reason: "already_processing" };
+    const duplicateInProgress =
+      order.fulfillmentError === DUPLICATE_IDEMPOTENCY_MESSAGE;
+    if (!duplicateInProgress || !allowDuplicateProcessingRetry) {
+      return { skipped: true, reason: "already_processing" };
+    }
   }
   if (order.fulfillmentStatus === "success") {
     return { skipped: true, reason: "already_fulfilled" };
@@ -429,11 +502,17 @@ async function autoFulfillOrder(orderOrId) {
       .replace(/^@/, "")
       .trim();
     const transactionId = String(order.orderId || order._id);
+    const idempotencyKey = resolveOrderIdempotencyKey(
+      order,
+      "stars",
+      recipient,
+    );
 
     try {
       const result = await buyStars(recipient, amount, transactionId, {
         payTon: FRAGMENT_PAY_TON,
         isTest: FRAGMENT_TEST_MODE,
+        idempotencyKey,
       });
 
       return markFulfillmentSuccess(order, result);
@@ -442,14 +521,14 @@ async function autoFulfillOrder(orderOrId) {
         return markDuplicateFulfillment(
           order,
           error,
-          buildFragmentIdempotencyKey("stars", recipient, transactionId),
+          idempotencyKey,
         );
       }
 
       return markFulfillmentFailure(
         order,
         error,
-        buildFragmentIdempotencyKey("stars", recipient, transactionId),
+        idempotencyKey,
       );
     }
   }
@@ -472,6 +551,12 @@ async function autoFulfillOrder(orderOrId) {
     .replace(/^@/, "")
     .trim();
   const transactionId = String(order.orderId || order._id);
+  const productType = order.product === "premium" ? "premium" : "stars";
+  const idempotencyKey = resolveOrderIdempotencyKey(
+    order,
+    productType,
+    recipient,
+  );
 
   try {
     let result;
@@ -479,29 +564,30 @@ async function autoFulfillOrder(orderOrId) {
       result = await buyStars(recipient, plan.amount, transactionId, {
         payTon: FRAGMENT_PAY_TON,
         isTest: FRAGMENT_TEST_MODE,
+        idempotencyKey,
       });
     } else {
       result = await buyPremium(recipient, plan.amount, transactionId, {
         payTon: FRAGMENT_PAY_TON,
         isTest: FRAGMENT_TEST_MODE,
+        idempotencyKey,
       });
     }
 
     return markFulfillmentSuccess(order, result);
   } catch (error) {
-    const productType = order.product === "premium" ? "premium" : "stars";
     if (isDuplicateIdempotencyError(error)) {
       return markDuplicateFulfillment(
         order,
         error,
-        buildFragmentIdempotencyKey(productType, recipient, transactionId),
+        idempotencyKey,
       );
     }
 
     return markFulfillmentFailure(
       order,
       error,
-      buildFragmentIdempotencyKey(productType, recipient, transactionId),
+      idempotencyKey,
     );
   }
 }

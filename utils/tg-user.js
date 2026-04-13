@@ -79,6 +79,17 @@ function parseTelegramUserFromInitData(initData) {
 }
 
 function getTelegramUserFromRequest(req) {
+  const verifiedTgUser = req?.telegramAuth;
+  if (verifiedTgUser?.verified && verifiedTgUser?.tgUserId) {
+    return {
+      tgUserId: normalizeString(verifiedTgUser.tgUserId),
+      username: normalizeString(verifiedTgUser.username),
+      firstName: normalizeString(verifiedTgUser.firstName),
+      lastName: normalizeString(verifiedTgUser.lastName),
+      profileName: sanitizeProfileName(verifiedTgUser.profileName),
+    };
+  }
+
   let tgUserId = normalizeString(req.headers["x-tg-user-id"]);
   let username = normalizeString(req.headers["x-tg-username"]);
   let firstName = normalizeString(req.headers["x-tg-first-name"]);

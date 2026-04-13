@@ -379,11 +379,80 @@ const getReports = async (req, res) => {
   }
 };
 
-const getHistory = async (_, res) => {
+function normalizeScope(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function buildHistoryFilter(scope) {
+  if (scope === "sales" || scope === "reports") {
+    return {
+      status: { $in: ["paid_auto_processed", "completed"] },
+    };
+  }
+
+  if (scope === "uc_paid") {
+    return {
+      product: { $in: ["uc", "freefire", "mlbb"] },
+      status: "paid_auto_processed",
+    };
+  }
+
+  if (scope === "autobuy_errors") {
+    return {
+      product: { $in: ["star", "premium"] },
+      $or: [
+        { fulfillmentStatus: "failed" },
+        {
+          fulfillmentStatus: "processing",
+          $or: [
+            { fulfillmentError: /idempotency|natija tekshirilmoqda/i },
+            { "fragmentTx.duplicateIdempotency": true },
+            { "fragmentTx.lastError.error": /idempotency key/i },
+            { "fragmentTx.error": /idempotency key/i },
+          ],
+        },
+      ],
+    };
+  }
+
+  return {};
+}
+
+const getHistory = async (req, res) => {
   try {
     await expirePendingOrders();
-    const orders = await Order.find().sort({ createdAt: -1 }).limit(1000).lean();
-    return response.success(res, "Tarix", orders);
+    const scope = normalizeScope(req.query?.scope || "all");
+    const requestedLimit = Number(req.query?.limit || 3000);
+    const limit =
+      Number.isFinite(requestedLimit) && requestedLimit > 0
+        ? Math.min(10000, Math.floor(requestedLimit))
+        : 3000;
+    const requestedPage = Number(req.query?.page || 1);
+    const page =
+      Number.isFinite(requestedPage) && requestedPage > 0
+        ? Math.floor(requestedPage)
+        : 1;
+    const filter = buildHistoryFilter(scope);
+
+    const totalItems = await Order.countDocuments(filter);
+    const totalPages = Math.max(1, Math.ceil(Number(totalItems || 0) / limit));
+    const safePage = Math.min(page, totalPages);
+
+    const orders = await Order.find(filter)
+      .sort({ updatedAt: -1, createdAt: -1 })
+      .skip((safePage - 1) * limit)
+      .limit(limit)
+      .lean();
+    return response.success(res, "Tarix", {
+      items: orders,
+      pagination: {
+        page: safePage,
+        limit,
+        totalItems: Number(totalItems || 0),
+        totalPages,
+      },
+      scope,
+    });
   } catch (error) {
     return response.serverError(res, "Tarix olishda xatolik", error.message);
   }
@@ -511,7 +580,9 @@ const retryFulfillment = async (req, res) => {
     const order = await Order.findById(id).lean();
     if (!order) return response.notFound(res, "Order topilmadi");
 
-    const result = await autoFulfillOrder(order);
+    const result = await autoFulfillOrder(order, {
+      allowDuplicateProcessingRetry: true,
+    });
     if (result?.ok) {
       return response.success(res, "Auto buy qayta bajarildi", result);
     }

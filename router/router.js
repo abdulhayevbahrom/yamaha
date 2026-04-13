@@ -6,6 +6,11 @@ const userController = require("../controller/user.controller");
 const giftController = require("../controller/gift.controller");
 const authMiddleware = require("../middleware/auth.middleware");
 const botActiveMiddleware = require("../middleware/bot-active.middleware");
+const apiKeyMiddleware = require("../middleware/api-key.middleware");
+const signatureMiddleware = require("../middleware/signature.middleware");
+const ipAllowlistMiddleware = require("../middleware/ip-allowlist.middleware");
+const { requireTelegramAuth } = require("../middleware/telegram-auth.middleware");
+const { createRateLimit } = require("../middleware/rate-limit.middleware");
 const validate = require("../middleware/validate.middleware");
 const {
   loginValidation,
@@ -14,6 +19,30 @@ const {
   createPaymentCardValidation,
   updatePaymentCardValidation,
 } = require("../validations/admin.validation");
+
+const telegramAuthMiddleware = requireTelegramAuth();
+const userWriteRateLimit = createRateLimit({
+  keyPrefix: "user-write",
+  windowMs: Number(process.env.RATE_LIMIT_USER_WRITE_WINDOW_MS || 60_000),
+  max: Number(process.env.RATE_LIMIT_USER_WRITE_MAX || 40),
+  keyGenerator: (req) =>
+    String(
+      req?.telegramAuth?.tgUserId ||
+        req.headers["x-tg-user-id"] ||
+        req.ip ||
+        "",
+    ).trim(),
+});
+const adminLoginRateLimit = createRateLimit({
+  keyPrefix: "admin-login",
+  windowMs: Number(process.env.RATE_LIMIT_ADMIN_LOGIN_WINDOW_MS || 60_000),
+  max: Number(process.env.RATE_LIMIT_ADMIN_LOGIN_MAX || 12),
+});
+const integrationRateLimit = createRateLimit({
+  keyPrefix: "integration",
+  windowMs: Number(process.env.RATE_LIMIT_INTEGRATION_WINDOW_MS || 60_000),
+  max: Number(process.env.RATE_LIMIT_INTEGRATION_MAX || 120),
+});
 
 router.get("/health", publicController.health);
 router.get("/catalog", publicController.getCatalog);
@@ -24,37 +53,122 @@ router.get("/lookup-profile", publicController.lookupProfile);
 router.get("/premium-status", publicController.checkPremiumStatus);
 router.get("/mlbb/check-role", publicController.checkMlbbRole);
 router.post("/calculate-price", orderController.calculatePrice);
-router.post("/orders", botActiveMiddleware, orderController.createOrder);
-router.get("/reports", orderController.getReports);
-router.get("/history", orderController.getHistory);
-router.get("/me", userController.getMe);
-router.get("/balance/:tgUserId", userController.getBalance);
-router.get("/my-orders", userController.getMyOrders);
-router.get("/my-referrals", userController.getMyReferrals);
-router.post("/balance/topup", botActiveMiddleware, userController.createBalanceTopup);
+router.post(
+  "/orders",
+  telegramAuthMiddleware,
+  userWriteRateLimit,
+  botActiveMiddleware,
+  orderController.createOrder,
+);
+router.get("/reports", authMiddleware, orderController.getReports);
+router.get("/history", authMiddleware, orderController.getHistory);
+router.get("/me", telegramAuthMiddleware, userController.getMe);
+router.get("/balance/:tgUserId", telegramAuthMiddleware, userController.getBalance);
+router.get("/my-orders", telegramAuthMiddleware, userController.getMyOrders);
+router.get("/my-referrals", telegramAuthMiddleware, userController.getMyReferrals);
+router.post(
+  "/balance/topup",
+  telegramAuthMiddleware,
+  userWriteRateLimit,
+  botActiveMiddleware,
+  userController.createBalanceTopup,
+);
 
 router.get("/gifts/catalog", giftController.getGiftCatalog);
 router.get("/gifts/image/:giftId", giftController.getGiftImage);
 router.get("/gifts/nft-image/:nftId", giftController.getNftImage);
 router.get("/gifts/nft-pattern/:nftId", giftController.getNftPattern);
-router.get("/my-gifts", giftController.getMyGifts);
-router.get("/gifts/nft", giftController.getMyNftGifts);
+router.get("/my-gifts", telegramAuthMiddleware, giftController.getMyGifts);
+router.get("/gifts/nft", telegramAuthMiddleware, giftController.getMyNftGifts);
 router.get("/gifts/nft/market", giftController.getNftMarketplace);
-router.get("/gifts/nft/offers/incoming", giftController.getIncomingNftOffers);
-router.get("/gifts/nft/offers/sent", giftController.getMySentNftOffers);
-router.post("/gifts/nft/offers", botActiveMiddleware, giftController.createNftOffer);
-router.post("/gifts/nft/offers/accept", botActiveMiddleware, giftController.acceptNftOffer);
-router.post("/gifts/nft/offers/reject", botActiveMiddleware, giftController.rejectNftOffer);
-router.post("/gifts/nft/offers/cancel", botActiveMiddleware, giftController.cancelMyNftOffer);
-router.post("/gifts/nft/list", botActiveMiddleware, giftController.listMyNftForSale);
-router.post("/gifts/nft/unlist", botActiveMiddleware, giftController.unlistMyNft);
-router.post("/gifts/nft/buy", botActiveMiddleware, giftController.buyNftFromMarketplace);
-router.post("/gifts/nft/withdraw", botActiveMiddleware, giftController.withdrawMyNft);
-router.post("/gifts/purchase", botActiveMiddleware, giftController.purchaseGift);
-router.post("/gifts/send", botActiveMiddleware, giftController.sendGift);
+router.get(
+  "/gifts/nft/offers/incoming",
+  telegramAuthMiddleware,
+  giftController.getIncomingNftOffers,
+);
+router.get(
+  "/gifts/nft/offers/sent",
+  telegramAuthMiddleware,
+  giftController.getMySentNftOffers,
+);
+router.post(
+  "/gifts/nft/offers",
+  telegramAuthMiddleware,
+  userWriteRateLimit,
+  botActiveMiddleware,
+  giftController.createNftOffer,
+);
+router.post(
+  "/gifts/nft/offers/accept",
+  telegramAuthMiddleware,
+  userWriteRateLimit,
+  botActiveMiddleware,
+  giftController.acceptNftOffer,
+);
+router.post(
+  "/gifts/nft/offers/reject",
+  telegramAuthMiddleware,
+  userWriteRateLimit,
+  botActiveMiddleware,
+  giftController.rejectNftOffer,
+);
+router.post(
+  "/gifts/nft/offers/cancel",
+  telegramAuthMiddleware,
+  userWriteRateLimit,
+  botActiveMiddleware,
+  giftController.cancelMyNftOffer,
+);
+router.post(
+  "/gifts/nft/list",
+  telegramAuthMiddleware,
+  userWriteRateLimit,
+  botActiveMiddleware,
+  giftController.listMyNftForSale,
+);
+router.post(
+  "/gifts/nft/unlist",
+  telegramAuthMiddleware,
+  userWriteRateLimit,
+  botActiveMiddleware,
+  giftController.unlistMyNft,
+);
+router.post(
+  "/gifts/nft/buy",
+  telegramAuthMiddleware,
+  userWriteRateLimit,
+  botActiveMiddleware,
+  giftController.buyNftFromMarketplace,
+);
+router.post(
+  "/gifts/nft/withdraw",
+  telegramAuthMiddleware,
+  userWriteRateLimit,
+  botActiveMiddleware,
+  giftController.withdrawMyNft,
+);
+router.post(
+  "/gifts/purchase",
+  telegramAuthMiddleware,
+  userWriteRateLimit,
+  botActiveMiddleware,
+  giftController.purchaseGift,
+);
+router.post(
+  "/gifts/send",
+  telegramAuthMiddleware,
+  userWriteRateLimit,
+  botActiveMiddleware,
+  giftController.sendGift,
+);
 
 router.get("/admin/access", adminController.checkAccess);
-router.post("/admin/login", validate(loginValidation), adminController.login);
+router.post(
+  "/admin/login",
+  adminLoginRateLimit,
+  validate(loginValidation),
+  adminController.login,
+);
 router.get("/admin/plans", authMiddleware, adminController.getPlans);
 router.get(
   "/admin/payment-cards",
@@ -138,6 +252,14 @@ router.post(
 router.post(
   "/admin/orders/process-payment",
   authMiddleware,
+  orderController.processCardPayment,
+);
+router.post(
+  "/integrations/orders/process-payment",
+  integrationRateLimit,
+  ipAllowlistMiddleware,
+  apiKeyMiddleware,
+  signatureMiddleware,
   orderController.processCardPayment,
 );
 router.post(

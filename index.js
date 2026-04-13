@@ -36,19 +36,26 @@ function shouldStartTelegramWorkers() {
 
   return true;
 }
-// 
+//
 const PORT = Number(process.env.PORT) || 4090;
 const app = express();
 const server = createServer(app);
 
-const staticCorsOrigins = [
-  "http://localhost:5173",
-  "https://yamaha-mini-app.vercel.app",
-  "https://6vqq74qx-5173.euw.devtunnels.ms",
-  String(process.env.WEB_APP_URL || "").trim(),
-  String(process.env.MAIN_URL || "").trim(),
-  String(process.env.FRONTEND_URL || "").trim(),
-].filter(Boolean);
+const trustProxyRaw = String(process.env.TRUST_PROXY || "1").trim();
+if (trustProxyRaw) {
+  const parsedTrustProxy = Number(trustProxyRaw);
+  if (!Number.isNaN(parsedTrustProxy)) {
+    app.set("trust proxy", parsedTrustProxy);
+  } else if (["true", "false"].includes(trustProxyRaw.toLowerCase())) {
+    app.set("trust proxy", trustProxyRaw.toLowerCase() === "true");
+  } else {
+    app.set("trust proxy", trustProxyRaw);
+  }
+}
+
+const staticCorsOrigins = [String(process.env.WEB_APP_URL || "").trim()].filter(
+  Boolean,
+);
 
 const envCorsOrigins = String(process.env.CORS_ORIGINS || "")
   .split(",")
