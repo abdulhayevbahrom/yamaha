@@ -7,6 +7,7 @@ const mongoose = require("mongoose");
 const { processIncomingPayment } = require("../services/payment-match.service");
 const connectDB = require("../config/dbConfig");
 const { getTelegramCredentials } = require("../config/telegram-credentials");
+const { acquireTelegramSessionLock } = require("../utils/telegram-session-lock");
 
 const telegramCredentials = getTelegramCredentials("cardxabar");
 const apiId = telegramCredentials.apiId;
@@ -24,6 +25,10 @@ const statusPollIntervalMs = Number(
 );
 
 let sessionAlertSent = false;
+let sessionLockHandle = null;
+let startPromise = null;
+let activeClient = null;
+let shutdownHooksRegistered = false;
 const runtimeStatus = {
   running: false,
   dbReady: false,
@@ -102,6 +107,32 @@ function buildStatusMessage() {
 
 function isStatusCommand(text) {
   return /^\/status(?:@\w+)?$/i.test(String(text || "").trim());
+}
+
+async function releaseSessionLock() {
+  if (!sessionLockHandle) return;
+  const lock = sessionLockHandle;
+  sessionLockHandle = null;
+  await lock.release().catch(() => {});
+}
+
+function registerShutdownHooks() {
+  if (shutdownHooksRegistered) return;
+  shutdownHooksRegistered = true;
+
+  const handleSignal = (signal, code) => {
+    Promise.resolve(releaseSessionLock())
+      .catch(() => {})
+      .finally(() => {
+        process.exit(code);
+      });
+  };
+
+  process.once("SIGINT", () => handleSignal("SIGINT", 130));
+  process.once("SIGTERM", () => handleSignal("SIGTERM", 143));
+  process.once("beforeExit", () => {
+    void releaseSessionLock();
+  });
 }
 
 if (!apiId || !apiHash) {
@@ -217,110 +248,148 @@ async function startSavedMessagesStatusWatcher(client) {
 }
 
 async function startUserClient({ strict = false } = {}) {
-  try {
-    await ensureDbReady();
-  } catch (err) {
-    markRuntimeError(err.message);
-    if (strict) throw err;
-    console.warn("User-client DB ulanmagan:", err.message);
-    return null;
-  }
-  const client = new TelegramClient(stringSession, apiId, apiHash, {
-    connectionRetries: 5,
-  });
-
-  if (!sessionString) {
-    const error = new Error(
-      `${telegramCredentials.acceptedKeys.session.join(" yoki ")} topilmadi. Avval session string yarating va backend/.env ga yozing.`,
-    );
-    markRuntimeError(error.message);
-    await notifyAdminsAboutSessionIssue(error.message);
-    throw error;
+  if (activeClient?.connected) {
+    return activeClient;
   }
 
-  await client.connect();
-  runtimeStatus.startedAt = new Date().toISOString();
-  runtimeStatus.connectedAt = new Date().toISOString();
-  const isAuthorized = await client.checkAuthorization();
-  if (!isAuthorized) {
-    const error = new Error(
-      `${telegramCredentials.resolvedKeys.session || telegramCredentials.preferredKeys.session} yaroqsiz yoki eskirgan. Yangi session string yarating.`,
-    );
-    markRuntimeError(error.message);
-    await notifyAdminsAboutSessionIssue(error.message);
-    throw error;
+  if (startPromise) {
+    return startPromise;
   }
-  const me = await client.getMe();
-  runtimeStatus.authorized = true;
-  runtimeStatus.running = true;
-  runtimeStatus.selfId = String(me?.id || "");
-  runtimeStatus.selfUsername = String(me?.username || "").trim();
-  await startSavedMessagesStatusWatcher(client);
-  console.log("User-client ishga tushdi.");
 
-  client.addEventHandler(async (event) => {
+  startPromise = (async () => {
     try {
-      const message = event.message;
-      if (!message) return;
-
-      const text = String(message.message || "").trim();
-      if (!text) return;
-
-      const chatId =
-        typeof message.chatId?.toString === "function"
-          ? message.chatId.toString()
-          : String(message.chatId || "").trim();
-
-      if (chatId && runtimeStatus.selfId && chatId === runtimeStatus.selfId) {
-        if (isStatusCommand(text)) {
-          runtimeStatus.lastCommandAt = new Date().toISOString();
-          await client.sendMessage("me", {
-            message: buildStatusMessage(),
-            replyTo: message.id,
-          });
-        }
-        return;
-      }
-
-      if (message.out) {
-        return;
-      }
-
-      const sender =
-        message.sender || (typeof message.getSender === "function"
-          ? await message.getSender()
-          : null);
-      const senderUsername = String(sender?.username || "").trim();
-      const usernameMatch =
-        cardxabarUsername &&
-        senderUsername.toLowerCase() === cardxabarUsername.toLowerCase();
-      const chatMatch = cardxabarChatId && chatId === cardxabarChatId;
-
-      if (cardxabarChatId || cardxabarUsername) {
-        if (!chatMatch && !usernameMatch) {
-          return;
-        }
-      }
-
-      runtimeStatus.lastMonitoredMessageAt = new Date().toISOString();
-      const externalMessageId = `${chatId}:${message.id}`;
-      const result = await processIncomingPayment({
-        rawText: text,
-        externalMessageId,
-        source: "cardxabar-user",
-      });
-      runtimeStatus.lastPaymentProcessedAt = new Date().toISOString();
-      runtimeStatus.processedPayments += 1;
-      if (result?.matched) {
-        runtimeStatus.matchedPayments += 1;
-      }
+      await ensureDbReady();
     } catch (err) {
       markRuntimeError(err.message);
-      console.error("User-client message error:", err.message);
+      if (strict) throw err;
+      console.warn("User-client DB ulanmagan:", err.message);
+      return null;
     }
-  }, new NewMessage({}));
 
-  return client;
+    if (!sessionString) {
+      const error = new Error(
+        `${telegramCredentials.acceptedKeys.session.join(" yoki ")} topilmadi. Avval session string yarating va backend/.env ga yozing.`,
+      );
+      markRuntimeError(error.message);
+      await notifyAdminsAboutSessionIssue(error.message);
+      throw error;
+    }
+
+    try {
+      if (!sessionLockHandle) {
+        sessionLockHandle = await acquireTelegramSessionLock({
+          scope: "cardxabar-user-client",
+          sessionString,
+        });
+        registerShutdownHooks();
+      }
+    } catch (lockError) {
+      markRuntimeError(lockError.message);
+      if (strict) throw lockError;
+      console.warn("User-client session lock olinmadi:", lockError.message);
+      return null;
+    }
+
+    const client = new TelegramClient(stringSession, apiId, apiHash, {
+      connectionRetries: 5,
+    });
+
+    try {
+      await client.connect();
+      runtimeStatus.startedAt = new Date().toISOString();
+      runtimeStatus.connectedAt = new Date().toISOString();
+      const isAuthorized = await client.checkAuthorization();
+      if (!isAuthorized) {
+        const error = new Error(
+          `${telegramCredentials.resolvedKeys.session || telegramCredentials.preferredKeys.session} yaroqsiz yoki eskirgan. Yangi session string yarating.`,
+        );
+        markRuntimeError(error.message);
+        await notifyAdminsAboutSessionIssue(error.message);
+        throw error;
+      }
+      const me = await client.getMe();
+      runtimeStatus.authorized = true;
+      runtimeStatus.running = true;
+      runtimeStatus.selfId = String(me?.id || "");
+      runtimeStatus.selfUsername = String(me?.username || "").trim();
+      await startSavedMessagesStatusWatcher(client);
+      console.log("User-client ishga tushdi.");
+
+      client.addEventHandler(async (event) => {
+        try {
+          const message = event.message;
+          if (!message) return;
+
+          const text = String(message.message || "").trim();
+          if (!text) return;
+
+          const chatId =
+            typeof message.chatId?.toString === "function"
+              ? message.chatId.toString()
+              : String(message.chatId || "").trim();
+
+          if (chatId && runtimeStatus.selfId && chatId === runtimeStatus.selfId) {
+            if (isStatusCommand(text)) {
+              runtimeStatus.lastCommandAt = new Date().toISOString();
+              await client.sendMessage("me", {
+                message: buildStatusMessage(),
+                replyTo: message.id,
+              });
+            }
+            return;
+          }
+
+          if (message.out) {
+            return;
+          }
+
+          const sender =
+            message.sender || (typeof message.getSender === "function"
+              ? await message.getSender()
+              : null);
+          const senderUsername = String(sender?.username || "").trim();
+          const usernameMatch =
+            cardxabarUsername &&
+            senderUsername.toLowerCase() === cardxabarUsername.toLowerCase();
+          const chatMatch = cardxabarChatId && chatId === cardxabarChatId;
+
+          if (cardxabarChatId || cardxabarUsername) {
+            if (!chatMatch && !usernameMatch) {
+              return;
+            }
+          }
+
+          runtimeStatus.lastMonitoredMessageAt = new Date().toISOString();
+          const externalMessageId = `${chatId}:${message.id}`;
+          const result = await processIncomingPayment({
+            rawText: text,
+            externalMessageId,
+            source: "cardxabar-user",
+          });
+          runtimeStatus.lastPaymentProcessedAt = new Date().toISOString();
+          runtimeStatus.processedPayments += 1;
+          if (result?.matched) {
+            runtimeStatus.matchedPayments += 1;
+          }
+        } catch (err) {
+          markRuntimeError(err.message);
+          console.error("User-client message error:", err.message);
+        }
+      }, new NewMessage({}));
+
+      activeClient = client;
+      return client;
+    } catch (error) {
+      await releaseSessionLock();
+      throw error;
+    }
+  })();
+
+  try {
+    return await startPromise;
+  } finally {
+    startPromise = null;
+  }
 }
 
 module.exports = { startUserClient, buildStatusMessage };

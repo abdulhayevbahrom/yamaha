@@ -9,6 +9,7 @@
     "bot:dev": "nodemon --legacy-watch bot/index.js",
     "user-client": "node user-client/index.js",
     "user-client:dev": "nodemon --legacy-watch user-client/index.js",
+    "session:cardxabar": "node generate-cardxabar-session.js",
     "inspect:nft-pattern": "node scripts/inspect-nft-pattern.js"
   },
   "dependencies": {

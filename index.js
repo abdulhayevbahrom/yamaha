@@ -103,7 +103,9 @@ server.listen(PORT, () => {
   console.log(`Server: http://localhost:${PORT}`);
   if (shouldStartTelegramWorkers()) {
     startBot();
-    startUserClient();
+    Promise.resolve(startUserClient()).catch((error) => {
+      console.error("User-client start error:", error?.message || error);
+    });
   } else {
     console.log(
       "Telegram workerlar bu processda ishga tushirilmadi (PM2 instance yoki env cheklovi).",
