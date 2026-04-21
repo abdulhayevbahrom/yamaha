@@ -217,6 +217,9 @@ function mapSendGiftError(error) {
   const raw = normalizeString(error?.errorMessage || error?.message || "");
   if (!raw) return "Gift yuborishda xatolik yuz berdi";
 
+  if (raw.includes("BALANCE_TOO_LOW")) {
+    return "Giftni yechib olish uchun xizmat hisobida stars yetarli emas. Administratorga murojaat qiling";
+  }
   if (raw.includes("USERNAME_INVALID")) {
     return "Username noto'g'ri";
   }
