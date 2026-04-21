@@ -1,6 +1,7 @@
 require("dotenv").config();
 const path = require("node:path");
 const TelegramBot = require("node-telegram-bot-api");
+const connectDB = require("../config/dbConfig");
 const { processIncomingPayment } = require("../services/payment-match.service");
 const { onGamePaid } = require("../services/notify.service");
 const { confirmGameOrderById } = require("../services/uc-fulfillment.service");
@@ -76,7 +77,7 @@ const buildGameAccountLines = ({ product, username, playerId, zoneId }) => {
   return lines;
 };
 
-function startBot({ strict = false } = {}) {
+async function startBot({ strict = false } = {}) {
   const token = process.env.BOT_TOKEN;
   const webAppUrl = process.env.WEB_APP_URL;
   const cardxabarSourceChatId = normalizeOptionalId(
@@ -95,6 +96,14 @@ function startBot({ strict = false } = {}) {
       "Bot ishga tushmadi: BOT_TOKEN yoki WEB_APP_URL topilmadi (backend/.env).";
     if (strict) throw new Error(message);
     console.warn(message);
+    return null;
+  }
+
+  try {
+    await connectDB();
+  } catch (error) {
+    if (strict) throw error;
+    console.warn("Telegram bot DB ulanmagan:", error?.message || error);
     return null;
   }
 
@@ -679,5 +688,8 @@ function startBot({ strict = false } = {}) {
 module.exports = { startBot };
 
 if (require.main === module) {
-  startBot({ strict: true });
+  startBot({ strict: true }).catch((error) => {
+    console.error("Telegram bot start error:", error?.message || error);
+    process.exit(1);
+  });
 }

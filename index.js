@@ -109,7 +109,9 @@ app.use((_, res) => {
 server.listen(PORT, () => {
   console.log(`Server: http://localhost:${PORT}`);
   if (shouldStartTelegramWorkers()) {
-    startBot();
+    Promise.resolve(startBot()).catch((error) => {
+      console.error("Bot start error:", error?.message || error);
+    });
     Promise.resolve(startUserClient()).catch((error) => {
       console.error("User-client start error:", error?.message || error);
     });
