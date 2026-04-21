@@ -150,10 +150,6 @@ const orderSchema = new Schema(
       type: String,
       default: ""
     },
-    tonAmount: {
-      type: Number,
-      default: 0
-    },
     fragmentTx: {
       type: Schema.Types.Mixed,
       default: null

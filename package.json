@@ -13,7 +13,6 @@
     "inspect:nft-pattern": "node scripts/inspect-nft-pattern.js"
   },
   "dependencies": {
-    "@ton/crypto": "^3.3.0",
     "axios": "^1.7.9",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
@@ -22,8 +21,7 @@
     "mongoose": "^8.19.1",
     "node-telegram-bot-api": "^0.66.0",
     "socket.io": "^4.8.1",
-    "telegram": "^2.26.16",
-    "tonweb": "^0.0.66"
+    "telegram": "^2.26.16"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"

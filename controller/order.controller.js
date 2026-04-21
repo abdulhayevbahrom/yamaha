@@ -400,18 +400,7 @@ function buildHistoryFilter(scope) {
   if (scope === "autobuy_errors") {
     return {
       product: { $in: ["star", "premium"] },
-      $or: [
-        { fulfillmentStatus: "failed" },
-        {
-          fulfillmentStatus: "processing",
-          $or: [
-            { fulfillmentError: /idempotency|natija tekshirilmoqda/i },
-            { "fragmentTx.duplicateIdempotency": true },
-            { "fragmentTx.lastError.error": /idempotency key/i },
-            { "fragmentTx.error": /idempotency key/i },
-          ],
-        },
-      ],
+      fulfillmentStatus: { $in: ["failed", "processing"] },
     };
   }
 
@@ -580,18 +569,9 @@ const retryFulfillment = async (req, res) => {
     const order = await Order.findById(id).lean();
     if (!order) return response.notFound(res, "Order topilmadi");
 
-    const result = await autoFulfillOrder(order, {
-      allowDuplicateProcessingRetry: true,
-    });
+    const result = await autoFulfillOrder(order);
     if (result?.ok) {
       return response.success(res, "Auto buy qayta bajarildi", result);
-    }
-    if (result?.duplicate) {
-      return response.success(
-        res,
-        "Fragment so'rovi oldin yuborilgan, natija tekshirilmoqda",
-        result,
-      );
     }
     return response.warning(res, "Auto buy bajarilmadi", result);
   } catch (error) {
