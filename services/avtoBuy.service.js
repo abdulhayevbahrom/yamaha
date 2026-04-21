@@ -1,12 +1,15 @@
 const Order = require("../model/order.model");
 const Plan = require("../model/plan.model");
 const { sendOrderArchive } = require("./order-archive.service");
+const { sendTelegramText } = require("./telegram-notify.service");
+const { refundToBalance } = require("./order-cancel.service");
 const { emitUserUpdate } = require("../socket");
 const { awardReferralCommissionForOrder } = require("./referral.service");
 const {
   buyStars: buyStarsFromFragment,
   buyPremium: buyPremiumFromFragment,
 } = require("./fragment-api.service");
+const User = require("../model/user.model");
 
 function getFragmentErrorPayload(error) {
   const fragmentPayload = error?.fragmentPayload;
@@ -33,6 +36,137 @@ function getFragmentErrorPayload(error) {
     return { error: String(error.message) };
   }
   return null;
+}
+
+function parseAdminNotifyIds() {
+  return String(process.env.ADMIN_NOTIFY_CHAT_ID || "")
+    .split(",")
+    .map((id) => String(id).trim())
+    .filter(Boolean);
+}
+
+function normalizeFragmentErrorText(payload, fallback = "") {
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    return String(
+      payload.message || payload.error || payload.code || fallback || "",
+    )
+      .trim()
+      .toLowerCase();
+  }
+
+  return String(fallback || "").trim().toLowerCase();
+}
+
+function isFragmentLowBalanceError(payload, fallback = "") {
+  const code = String(payload?.code || "").trim().toUpperCase();
+  const text = normalizeFragmentErrorText(payload, fallback);
+
+  return (
+    code === "INSUFFICIENT_FUNDS" ||
+    text.includes("hamyonda to'lov uchun yetarli ton yo'q") ||
+    text.includes("yetarli ton yo'q") ||
+    text.includes("insufficient funds")
+  );
+}
+
+async function notifyAdminsAboutFragmentLowBalance(order, payload) {
+  const adminIds = parseAdminNotifyIds();
+  if (!adminIds.length) return false;
+
+  const orderCode = String(order?.orderId || order?._id || "").trim() || "-";
+  const product = String(order?.product || "").trim() || "-";
+  const username = String(order?.username || "").trim() || "-";
+  const amount =
+    order?.product === "star"
+      ? Number(order?.customAmount || 0) || String(order?.planCode || "").trim()
+      : String(order?.planCode || "").trim() || "-";
+  const paymentMethod = String(order?.paymentMethod || "").trim() || "-";
+  const paidAmount = Number(order?.paidAmount || 0).toLocaleString("uz-UZ");
+  const reason = String(
+    payload?.message || payload?.error || payload?.code || "Unknown error",
+  ).trim();
+
+  const message = [
+    "Fragment hamyonida TON yetarli emas.",
+    "Balansni to'ldirish kerak.",
+    `Order: ${orderCode}`,
+    `Mahsulot: ${product}`,
+    `Username: ${username}`,
+    `Miqdor/Paket: ${amount}`,
+    `To'lov turi: ${paymentMethod}`,
+    `To'langan summa: ${paidAmount} UZS`,
+    `Xabar: ${reason}`,
+  ].join("\n");
+
+  const results = await Promise.allSettled(
+    adminIds.map((adminId) => sendTelegramText(adminId, message)),
+  );
+
+  return results.some((result) => result.status === "fulfilled" && result.value?.ok);
+}
+
+function getOrderChargeAmount(order) {
+  const amount = Number(order?.paidAmount || order?.expectedAmount || 0);
+  return Number.isFinite(amount) && amount > 0 ? amount : 0;
+}
+
+function hasRefundToBalanceMarker(order) {
+  return Boolean(order?.fragmentTx?.refundedToBalanceAt);
+}
+
+function stripRefundMarkers(fragmentTx) {
+  if (!fragmentTx || typeof fragmentTx !== "object" || Array.isArray(fragmentTx)) {
+    return null;
+  }
+
+  const next = { ...fragmentTx };
+  delete next.refundedToBalanceAt;
+  delete next.refundedToBalanceAmount;
+  delete next.refundReason;
+  delete next.refundTarget;
+  delete next.adminLowBalanceAlertSentAt;
+  return Object.keys(next).length ? next : null;
+}
+
+async function rechargeRefundedBalanceOrder(order) {
+  if (String(order?.paymentMethod || "").trim() !== "balance") {
+    return { ok: true };
+  }
+  if (!hasRefundToBalanceMarker(order)) {
+    return { ok: true };
+  }
+
+  const chargeAmount = getOrderChargeAmount(order);
+  if (!order?.tgUserId || chargeAmount <= 0) {
+    return { ok: false, error: "Balansni qayta yechish uchun ma'lumot yetarli emas" };
+  }
+
+  const user = await User.findOneAndUpdate(
+    { tgUserId: String(order.tgUserId), balance: { $gte: chargeAmount } },
+    { $inc: { balance: -chargeAmount } },
+    { new: true },
+  ).lean();
+
+  if (!user) {
+    return { ok: false, error: "Balans yetarli emas" };
+  }
+
+  const cleanedFragmentTx = stripRefundMarkers(order.fragmentTx);
+  await Order.findByIdAndUpdate(order._id, {
+    fragmentTx: cleanedFragmentTx,
+  });
+  order.fragmentTx = cleanedFragmentTx;
+
+  emitUserUpdate(order.tgUserId, {
+    type: "order_created",
+    refreshOrders: true,
+    refreshBalance: true,
+    orderId: order._id,
+    status: order.status,
+    product: order.product,
+  });
+
+  return { ok: true };
 }
 
 function buildFragmentTransaction({
@@ -111,24 +245,92 @@ async function markFulfillmentSuccess(order, result) {
 }
 async function markFulfillmentFailure(order, error) {
   const errorMessage = error.message || "Auto buy xatolik";
+  const payload = getFragmentErrorPayload(error);
+  const shouldNotifyAdmins =
+    isFragmentLowBalanceError(payload, errorMessage) &&
+    !order?.fragmentTx?.adminLowBalanceAlertSentAt;
+  let adminAlertSentAt = null;
+  let refundSentAt = null;
+  let refundTarget = "";
+  let nextStatus = order?.status;
+  let nextFulfillmentStatus = "failed";
+  let nextErrorMessage = errorMessage;
+
+  if (shouldNotifyAdmins) {
+    const sent = await notifyAdminsAboutFragmentLowBalance(order, payload);
+    if (sent) {
+      adminAlertSentAt = new Date();
+    }
+  }
+
+  const isLowBalanceError = isFragmentLowBalanceError(payload, errorMessage);
+  const alreadyRefunded = hasRefundToBalanceMarker(order);
+
+  if (isLowBalanceError && !alreadyRefunded) {
+    const refundResult = await refundToBalance(order);
+    if (refundResult?.ok) {
+      refundSentAt = new Date();
+      refundTarget = "webapp_balance";
+
+      if (String(order?.paymentMethod || "").trim() === "balance") {
+        nextErrorMessage =
+          "Fragment hamyonida TON yetarli emas. Mablag'ingiz balansga qaytarildi. Admin balansni to'ldirgach qayta urinish mumkin.";
+      } else {
+        nextStatus = "cancelled";
+        nextFulfillmentStatus = "skipped";
+        nextErrorMessage =
+          "Fragment hamyonida TON yetarli emas. To'lovingiz webapp balansiga qaytarildi.";
+      }
+
+      if (order?.tgUserId) {
+        await sendTelegramText(
+          order.tgUserId,
+          nextErrorMessage,
+        );
+      }
+    }
+  }
+
+  const fragmentTx =
+    payload && typeof payload === "object" && !Array.isArray(payload)
+      ? {
+          ...payload,
+          ...(adminAlertSentAt
+            ? { adminLowBalanceAlertSentAt: adminAlertSentAt }
+            : {}),
+          ...(refundSentAt
+            ? {
+                refundedToBalanceAt: refundSentAt,
+                refundedToBalanceAmount: getOrderChargeAmount(order),
+                refundReason: "fragment_low_balance",
+                refundTarget,
+              }
+            : {}),
+        }
+      : payload;
 
   await Order.findByIdAndUpdate(order._id, {
-    fulfillmentStatus: "failed",
-    fulfillmentError: errorMessage,
-    fragmentTx: getFragmentErrorPayload(error),
+    status: nextStatus,
+    fulfillmentStatus: nextFulfillmentStatus,
+    fulfillmentError: nextErrorMessage,
+    fragmentTx,
   });
   if (order.tgUserId) {
     emitUserUpdate(order.tgUserId, {
-      type: "order_fulfillment_failed",
+      type:
+        nextStatus === "cancelled"
+          ? "order_cancelled_refund"
+          : "order_fulfillment_failed",
+      refreshBalance: Boolean(refundSentAt),
       refreshOrders: true,
       orderId: order._id,
-      status: order.status,
-      fulfillmentStatus: "failed",
+      status: nextStatus,
+      fulfillmentStatus: nextFulfillmentStatus,
       product: order.product,
     });
   }
 
-  return { ok: false, error: errorMessage };
+  return { ok: false, error: nextErrorMessage };
 }
 
 async function autoFulfillOrder(orderOrId) {
@@ -150,6 +352,11 @@ async function autoFulfillOrder(orderOrId) {
   }
   if (order.fulfillmentStatus === "success") {
     return { skipped: true, reason: "already_fulfilled" };
+  }
+
+  const rechargeResult = await rechargeRefundedBalanceOrder(order);
+  if (!rechargeResult?.ok) {
+    return markFulfillmentFailure(order, new Error(rechargeResult.error || "Balans yetarli emas"));
   }
 
   const plan = await Plan.findOne({
