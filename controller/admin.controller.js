@@ -68,6 +68,21 @@ function buildAdminUserPhotoUrl(tgUserId) {
   return `/api/admin/users/${encodeURIComponent(normalized)}/photo`;
 }
 
+function queueBotStatusBroadcast(type) {
+  const runner =
+    type === "resumed" ? broadcastBotResumed : type === "paused" ? broadcastBotPaused : null;
+  if (!runner) return;
+
+  setImmediate(() => {
+    runner().catch((error) => {
+      console.error(
+        `[admin-settings] Bot ${type} broadcast error:`,
+        error?.message || error,
+      );
+    });
+  });
+}
+
 function parseNftSlugAndNumber(value) {
   const normalized = normalizeString(value);
   if (!normalized) {
@@ -557,23 +572,28 @@ const updateSettings = async (req, res) => {
       );
     }
 
-    if (
+    const shouldBroadcastResume = Boolean(
       botStatus &&
-      prevBotStatus &&
-      !prevBotStatus.enabled &&
-      out.botStatus?.enabled
-    ) {
-      out.broadcast = await broadcastBotResumed();
+        prevBotStatus &&
+        !prevBotStatus.enabled &&
+        out.botStatus?.enabled,
+    );
+    const shouldBroadcastPause = Boolean(
+      botStatus &&
+        prevBotStatus &&
+        prevBotStatus.enabled &&
+        out.botStatus &&
+        !out.botStatus.enabled,
+    );
+
+    if (shouldBroadcastResume) {
+      out.broadcast = { queued: true, type: "resumed" };
+      queueBotStatusBroadcast("resumed");
     }
 
-    if (
-      botStatus &&
-      prevBotStatus &&
-      prevBotStatus.enabled &&
-      out.botStatus &&
-      !out.botStatus.enabled
-    ) {
-      out.broadcast = await broadcastBotPaused();
+    if (shouldBroadcastPause) {
+      out.broadcast = { queued: true, type: "paused" };
+      queueBotStatusBroadcast("paused");
     }
 
     return response.success(res, "Settings yangilandi", out);
