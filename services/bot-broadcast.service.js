@@ -1,5 +1,6 @@
 const User = require("../model/user.model");
 const { sendTelegramText } = require("./telegram-notify.service");
+const { getBotBroadcastConfig } = require("./settings.service");
 
 async function broadcastToAllUsers(text) {
   const message = String(text || "").trim();
@@ -19,16 +20,22 @@ async function broadcastToAllUsers(text) {
 }
 
 async function broadcastBotResumed() {
-  const result = await broadcastToAllUsers(
-    "Bot faoliyatini boshladi. Qayta /start bosib davom etishingiz mumkin.",
-  );
+  const config = await getBotBroadcastConfig();
+  if (!config.sendOnResume) {
+    return { ok: true, sent: 0, skipped: true, reason: "disabled_by_admin", type: "resumed" };
+  }
+
+  const result = await broadcastToAllUsers(config.resumeText);
   return { ...result, type: "resumed" };
 }
 
 async function broadcastBotPaused() {
-  const result = await broadcastToAllUsers(
-    "Bot vaqtincha to'xtatildi. Xizmatlar qisqa muddatga ishlamaydi.",
-  );
+  const config = await getBotBroadcastConfig();
+  if (!config.sendOnPause) {
+    return { ok: true, sent: 0, skipped: true, reason: "disabled_by_admin", type: "paused" };
+  }
+
+  const result = await broadcastToAllUsers(config.pauseText);
   return { ...result, type: "paused" };
 }
 

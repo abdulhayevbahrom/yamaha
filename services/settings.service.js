@@ -16,6 +16,13 @@ const DEFAULT_BOT_STATUS = {
   enabled: true,
 };
 
+const DEFAULT_BOT_BROADCAST_CONFIG = {
+  sendOnResume: true,
+  resumeText: "Bot faoliyatini boshladi. Qayta /start bosib davom etishingiz mumkin.",
+  sendOnPause: true,
+  pauseText: "Bot vaqtincha to'xtatildi. Xizmatlar qisqa muddatga ishlamaydi.",
+};
+
 const DEFAULT_PAYMENT_CARD_CONFIG = {
   selectionMode: "sequential",
   monthlyMaxTransactions: 50,
@@ -65,6 +72,35 @@ async function getBotStatus() {
       typeof doc.value.enabled === "boolean"
         ? doc.value.enabled
         : DEFAULT_BOT_STATUS.enabled,
+  };
+}
+
+function normalizeBotBroadcastText(value, fallback) {
+  const text = String(value || "").trim();
+  return text || fallback;
+}
+
+async function getBotBroadcastConfig() {
+  const doc = await Settings.findOne({ key: "bot_broadcast_config" }).lean();
+  if (!doc?.value) return DEFAULT_BOT_BROADCAST_CONFIG;
+
+  return {
+    sendOnResume:
+      typeof doc.value.sendOnResume === "boolean"
+        ? doc.value.sendOnResume
+        : DEFAULT_BOT_BROADCAST_CONFIG.sendOnResume,
+    resumeText: normalizeBotBroadcastText(
+      doc.value.resumeText,
+      DEFAULT_BOT_BROADCAST_CONFIG.resumeText,
+    ),
+    sendOnPause:
+      typeof doc.value.sendOnPause === "boolean"
+        ? doc.value.sendOnPause
+        : DEFAULT_BOT_BROADCAST_CONFIG.sendOnPause,
+    pauseText: normalizeBotBroadcastText(
+      doc.value.pauseText,
+      DEFAULT_BOT_BROADCAST_CONFIG.pauseText,
+    ),
   };
 }
 
@@ -201,6 +237,50 @@ async function updateBotStatus(payload) {
   };
 }
 
+async function updateBotBroadcastConfig(payload) {
+  const current = await getBotBroadcastConfig();
+  const next = {
+    sendOnResume:
+      typeof payload?.sendOnResume === "boolean"
+        ? payload.sendOnResume
+        : current.sendOnResume,
+    resumeText: normalizeBotBroadcastText(
+      payload?.resumeText,
+      current.resumeText,
+    ),
+    sendOnPause:
+      typeof payload?.sendOnPause === "boolean"
+        ? payload.sendOnPause
+        : current.sendOnPause,
+    pauseText: normalizeBotBroadcastText(payload?.pauseText, current.pauseText),
+  };
+
+  const doc = await Settings.findOneAndUpdate(
+    { key: "bot_broadcast_config" },
+    { value: next },
+    { new: true, upsert: true },
+  ).lean();
+
+  return {
+    sendOnResume:
+      typeof doc?.value?.sendOnResume === "boolean"
+        ? doc.value.sendOnResume
+        : DEFAULT_BOT_BROADCAST_CONFIG.sendOnResume,
+    resumeText: normalizeBotBroadcastText(
+      doc?.value?.resumeText,
+      DEFAULT_BOT_BROADCAST_CONFIG.resumeText,
+    ),
+    sendOnPause:
+      typeof doc?.value?.sendOnPause === "boolean"
+        ? doc.value.sendOnPause
+        : DEFAULT_BOT_BROADCAST_CONFIG.sendOnPause,
+    pauseText: normalizeBotBroadcastText(
+      doc?.value?.pauseText,
+      DEFAULT_BOT_BROADCAST_CONFIG.pauseText,
+    ),
+  };
+}
+
 async function updatePaymentCardConfig(payload) {
   const selectionMode =
     payload.selectionMode === "random" ? "random" : "sequential";
@@ -319,6 +399,7 @@ module.exports = {
   getStarPricing,
   getForceJoin,
   getBotStatus,
+  getBotBroadcastConfig,
   getPaymentCardConfig,
   getBankomatTopupConfig,
   getReferralConfig,
@@ -326,6 +407,7 @@ module.exports = {
   updateStarPricing,
   updateForceJoin,
   updateBotStatus,
+  updateBotBroadcastConfig,
   updatePaymentCardConfig,
   updateBankomatTopupConfig,
   updateReferralConfig,

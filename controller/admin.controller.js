@@ -12,6 +12,7 @@ const {
   getStarPricing,
   getForceJoin,
   getBotStatus,
+  getBotBroadcastConfig,
   getPaymentCardConfig,
   getBankomatTopupConfig,
   getReferralConfig,
@@ -19,6 +20,7 @@ const {
   updateStarPricing,
   updateForceJoin,
   updateBotStatus,
+  updateBotBroadcastConfig,
   updatePaymentCardConfig,
   updateBankomatTopupConfig,
   updateReferralConfig,
@@ -479,6 +481,7 @@ const getSettings = async (_, res) => {
     const starPricing = await getStarPricing();
     const forceJoin = await getForceJoin();
     const botStatus = await getBotStatus();
+    const botBroadcastConfig = await getBotBroadcastConfig();
     const paymentCardConfig = await getPaymentCardConfig();
     const bankomatTopupConfig = await getBankomatTopupConfig();
     const referralConfig = await getReferralConfig();
@@ -488,6 +491,7 @@ const getSettings = async (_, res) => {
       starPricing,
       forceJoin,
       botStatus,
+      botBroadcastConfig,
       paymentCardConfig,
       bankomatTopupConfig,
       referralConfig,
@@ -504,6 +508,7 @@ const updateSettings = async (req, res) => {
       starPricing,
       forceJoin,
       botStatus,
+      botBroadcastConfig,
       paymentCardConfig,
       bankomatTopupConfig,
       referralConfig,
@@ -514,6 +519,7 @@ const updateSettings = async (req, res) => {
       !starPricing &&
       !forceJoin &&
       !botStatus &&
+      !botBroadcastConfig &&
       !paymentCardConfig &&
       !bankomatTopupConfig &&
       !referralConfig &&
@@ -521,7 +527,7 @@ const updateSettings = async (req, res) => {
     ) {
       return response.error(
         res,
-        "starPricing yoki forceJoin yoki botStatus yoki paymentCardConfig yoki bankomatTopupConfig yoki referralConfig yoki nftMarketplaceConfig required",
+        "starPricing yoki forceJoin yoki botStatus yoki botBroadcastConfig yoki paymentCardConfig yoki bankomatTopupConfig yoki referralConfig yoki nftMarketplaceConfig required",
       );
     }
 
@@ -531,6 +537,9 @@ const updateSettings = async (req, res) => {
     if (starPricing) out.starPricing = await updateStarPricing(starPricing);
     if (forceJoin) out.forceJoin = await updateForceJoin(forceJoin);
     if (botStatus) out.botStatus = await updateBotStatus(botStatus);
+    if (botBroadcastConfig) {
+      out.botBroadcastConfig = await updateBotBroadcastConfig(botBroadcastConfig);
+    }
     if (paymentCardConfig) {
       out.paymentCardConfig = await updatePaymentCardConfig(paymentCardConfig);
     }
