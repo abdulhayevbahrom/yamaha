@@ -5,6 +5,7 @@ const UserNft = require("../model/user-nft.model");
 const NftOffer = require("../model/nft-offer.model");
 const { emitUserUpdate } = require("../socket");
 const { getTelegramUserFromRequest } = require("../utils/tg-user");
+const { getTelegramCredentials } = require("../config/telegram-credentials");
 const { ensureReferralIdentity } = require("../services/referral.service");
 const { sendTelegramText } = require("../services/telegram-notify.service");
 const {
@@ -240,6 +241,89 @@ function mapSendGiftError(error) {
   }
 
   return raw;
+}
+
+function parseAdminNotifyIds() {
+  return String(process.env.ADMIN_NOTIFY_CHAT_ID || "")
+    .split(",")
+    .map((id) => String(id).trim())
+    .filter(Boolean);
+}
+
+function isGiftServiceLowStarsError(error) {
+  const raw = normalizeString(error?.errorMessage || error?.message).toUpperCase();
+  if (!raw) return false;
+
+  return (
+    raw.includes("BALANCE_TOO_LOW") ||
+    raw.includes("PAYMENT_REQUIRED") ||
+    (raw.includes("STARS") && raw.includes("LOW"))
+  );
+}
+
+function getGiftServiceAccountLabel() {
+  const explicitLabel = normalizeString(
+    process.env.GIFT_TG_ACCOUNT_LABEL ||
+      process.env.GIFT_TG_USERNAME ||
+      process.env.TG_GIFT_USERNAME,
+  );
+  if (explicitLabel) {
+    return explicitLabel.startsWith("@") ? explicitLabel : `@${explicitLabel}`;
+  }
+
+  const credentials = getTelegramCredentials("gift");
+  const sessionKey =
+    normalizeString(credentials?.resolvedKeys?.session) ||
+    normalizeString(credentials?.preferredKeys?.session) ||
+    "GIFT_TG_USER_SESSION";
+
+  return `gift/nft service account (${sessionKey})`;
+}
+
+async function notifyAdminsAboutGiftServiceLowStars({
+  action,
+  user,
+  recipientIdentifier,
+  nft,
+  gift,
+  error,
+}) {
+  const adminIds = parseAdminNotifyIds();
+  if (!adminIds.length) return false;
+
+  const accountLabel = getGiftServiceAccountLabel();
+  const userLabel =
+    normalizeString(user?.username)
+      ? `@${normalizeString(user.username).replace(/^@+/, "")}`
+      : normalizeString(user?.tgUserId) || "-";
+  const recipientLabel = normalizeString(recipientIdentifier) || userLabel;
+  const actionLabel = action === "nft_withdraw" ? "NFT yechib olish" : "Gift yuborish";
+  const assetTitle =
+    normalizeString(nft?.title) || normalizeString(gift?.title) || "Gift/NFT";
+  const assetId =
+    normalizeString(nft?.nftId) ||
+    normalizeString(gift?.giftId) ||
+    normalizeString(gift?._id) ||
+    "-";
+  const reason = normalizeString(error?.errorMessage || error?.message) || "BALANCE_TOO_LOW";
+
+  const message = [
+    "Gift/NFT xizmat accountida stars yetarli emas.",
+    "Shu accountga stars solish kerak.",
+    `Account: ${accountLabel}`,
+    `Amal: ${actionLabel}`,
+    `Foydalanuvchi: ${userLabel}`,
+    `Recipient: ${recipientLabel}`,
+    `Asset: ${assetTitle}`,
+    `Asset ID: ${assetId}`,
+    `Xabar: ${reason}`,
+  ].join("\n");
+
+  const results = await Promise.allSettled(
+    adminIds.map((adminId) => sendTelegramText(adminId, message)),
+  );
+
+  return results.some((result) => result.status === "fulfilled" && result.value?.ok);
 }
 
 async function ensureCurrentUser(tgUser) {
@@ -2423,6 +2507,16 @@ async function withdrawMyNft(req, res) {
         recipientIdentifier,
       });
     } catch (transferError) {
+      if (isGiftServiceLowStarsError(transferError)) {
+        await notifyAdminsAboutGiftServiceLowStars({
+          action: "nft_withdraw",
+          user,
+          recipientIdentifier,
+          nft,
+          error: transferError,
+        });
+      }
+
       if (withdrawFeeUzs > 0) {
         await User.updateOne(
           { tgUserId: user.tgUserId },
@@ -2691,6 +2785,16 @@ async function sendGift(req, res) {
         hideName: true,
       });
     } catch (sendError) {
+      if (isGiftServiceLowStarsError(sendError)) {
+        await notifyAdminsAboutGiftServiceLowStars({
+          action: "gift_send",
+          user,
+          recipientIdentifier: recipient,
+          gift: ownedGift,
+          error: sendError,
+        });
+      }
+
       return response.error(res, mapSendGiftError(sendError));
     }
 
