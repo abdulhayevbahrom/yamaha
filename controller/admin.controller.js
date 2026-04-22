@@ -248,14 +248,18 @@ async function cancelPendingOffersForNftAdmin(nftId, reason = "admin_nft_action"
 }
 
 function mapAdminGiftItem(doc) {
+  const normalizedGiftId = normalizeString(doc?.giftId);
   return {
     userGiftId: String(doc?._id || ""),
-    giftId: normalizeString(doc?.giftId),
+    giftId: normalizedGiftId,
     title: normalizeString(doc?.title) || "Gift",
     emoji: normalizeString(doc?.emoji) || "🎁",
     status: normalizeString(doc?.status) || "owned",
     priceUzs: Number(doc?.priceUzs || 0),
     stars: Number(doc?.stars || 0),
+    imageUrl: normalizedGiftId
+      ? "/api/gifts/image/" + encodeURIComponent(normalizedGiftId)
+      : "",
     createdAt: doc?.createdAt || null,
     sentAt: doc?.sentAt || null,
   };
