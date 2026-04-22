@@ -8,6 +8,7 @@ const { processIncomingPayment } = require("../services/payment-match.service");
 const connectDB = require("../config/dbConfig");
 const { getTelegramCredentials } = require("../config/telegram-credentials");
 const { acquireTelegramSessionLock } = require("../utils/telegram-session-lock");
+const { buildTelegramClientOptions } = require("../utils/telegram-client-options");
 
 const telegramCredentials = getTelegramCredentials("cardxabar");
 const apiId = telegramCredentials.apiId;
@@ -291,7 +292,7 @@ async function startUserClient({ strict = false } = {}) {
     }
 
     const client = new TelegramClient(stringSession, apiId, apiHash, {
-      connectionRetries: 5,
+      ...buildTelegramClientOptions({ connectionRetries: 5 }),
     });
 
     try {

@@ -2,6 +2,7 @@ const util = require("node:util");
 const { Api, TelegramClient } = require("telegram");
 const { StringSession } = require("telegram/sessions");
 const { getTelegramCredentials } = require("../config/telegram-credentials");
+const { buildTelegramClientOptions } = require("../utils/telegram-client-options");
 
 const telegramCredentials = getTelegramCredentials("gift");
 const apiId = telegramCredentials.apiId;
@@ -586,7 +587,7 @@ async function getTelegramGiftClient() {
       new StringSession(sessionString),
       apiId,
       apiHash,
-      { connectionRetries: 5 },
+      buildTelegramClientOptions({ connectionRetries: 5 }),
     );
 
     // Bu client faqat RPC uchun ishlatiladi, update loop PM2 logini shovqin qiladi.

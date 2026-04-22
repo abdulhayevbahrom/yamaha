@@ -138,12 +138,46 @@ async function startBot({ strict = false } = {}) {
       }
     };
   };
+  const transientTelegramErrorWindowMs = 5 * 60 * 1000;
+  const transientTelegramErrorLastLog = new Map();
+
+  const isTransientTelegramTransportError = (error) => {
+    const message = String(error?.message || error || "")
+      .trim()
+      .toUpperCase();
+    return (
+      message.includes("ETIMEDOUT") ||
+      message.includes("ECONNRESET") ||
+      message.includes("EAI_AGAIN")
+    );
+  };
+
+  const logTelegramTransportError = (scope, error) => {
+    const message = String(error?.message || error || "Unknown error").trim();
+    if (!isTransientTelegramTransportError(error)) {
+      console.error(`Telegram ${scope} error:`, message);
+      return;
+    }
+
+    const now = Date.now();
+    const key = String(scope || "unknown");
+    const lastLogAt = Number(transientTelegramErrorLastLog.get(key) || 0);
+    if (now - lastLogAt < transientTelegramErrorWindowMs) {
+      return;
+    }
+
+    transientTelegramErrorLastLog.set(key, now);
+    console.warn(
+      `Telegram ${scope} transient network issue (throttled):`,
+      message,
+    );
+  };
 
   bot.on("polling_error", (error) => {
-    console.error("Telegram polling error:", error?.message || error);
+    logTelegramTransportError("polling", error);
   });
   bot.on("webhook_error", (error) => {
-    console.error("Telegram webhook error:", error?.message || error);
+    logTelegramTransportError("webhook", error);
   });
 
   const ensureBotActive = async (chatId, { silent = false } = {}) => {

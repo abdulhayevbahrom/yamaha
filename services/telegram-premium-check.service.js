@@ -1,6 +1,7 @@
 const { TelegramClient } = require("telegram");
 const { StringSession } = require("telegram/sessions");
 const { getTelegramCredentials } = require("../config/telegram-credentials");
+const { buildTelegramClientOptions } = require("../utils/telegram-client-options");
 
 const telegramCredentials = getTelegramCredentials("premium_check");
 const apiId = telegramCredentials.apiId;
@@ -77,7 +78,7 @@ async function getTelegramPremiumCheckClient() {
       new StringSession(sessionString),
       apiId,
       apiHash,
-      { connectionRetries: 5 },
+      buildTelegramClientOptions({ connectionRetries: 5 }),
     );
 
     // Premium-check servisga real-time update kerak emas.
