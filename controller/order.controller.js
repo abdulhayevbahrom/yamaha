@@ -18,7 +18,10 @@ const {
 const { cancelPaidOrderById } = require("../services/order-cancel.service");
 const { notifyGamePaid } = require("../services/notify.service");
 const { emitAdminUpdate, emitUserUpdate } = require("../socket");
-const { getStarPricing } = require("../services/settings.service");
+const {
+  getStarPricing,
+  getGameStarsPaymentConfig,
+} = require("../services/settings.service");
 const { getTelegramUserFromRequest } = require("../utils/tg-user");
 const { selectPaymentCardForType } = require("../services/payment-card.service");
 
@@ -422,6 +425,7 @@ const createOrder = async (req, res) => {
           zoneId: order.zoneId,
           planCode: order.planCode,
           expectedAmount: order.expectedAmount,
+          paymentMethod: order.paymentMethod,
         });
       }
 
@@ -819,8 +823,11 @@ const createStarsInvoice = async (req, res) => {
       return response.error(res, "Buyurtma muddati tugagan");
     }
 
-    const pricing = await getStarPricing();
-    const pricePerStar = Math.max(1, Number(pricing?.pricePerStar || 220));
+    const gameStarsPricing = await getGameStarsPaymentConfig();
+    const pricePerStar = Math.max(
+      1,
+      Number(gameStarsPricing?.pricePerStar || 220),
+    );
     const starsAmount = Math.max(
       1,
       Math.ceil(Number(order.expectedAmount || 0) / pricePerStar),

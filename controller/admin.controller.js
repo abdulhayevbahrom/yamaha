@@ -10,6 +10,7 @@ const NftOffer = require("../model/nft-offer.model");
 const UserBalanceAdjustment = require("../model/user-balance-adjustment.model");
 const {
   getStarPricing,
+  getGameStarsPaymentConfig,
   getForceJoin,
   getBotStatus,
   getBotBroadcastConfig,
@@ -18,6 +19,7 @@ const {
   getReferralConfig,
   getNftMarketplaceConfig,
   updateStarPricing,
+  updateGameStarsPaymentConfig,
   updateForceJoin,
   updateBotStatus,
   updateBotBroadcastConfig,
@@ -589,6 +591,7 @@ const deletePlan = async (req, res) => {
 const getSettings = async (_, res) => {
   try {
     const starPricing = await getStarPricing();
+    const gameStarsPaymentConfig = await getGameStarsPaymentConfig();
     const forceJoin = await getForceJoin();
     const botStatus = await getBotStatus();
     const botBroadcastConfig = await getBotBroadcastConfig();
@@ -599,6 +602,7 @@ const getSettings = async (_, res) => {
 
     return response.success(res, "Settings", {
       starPricing,
+      gameStarsPaymentConfig,
       forceJoin,
       botStatus,
       botBroadcastConfig,
@@ -616,6 +620,7 @@ const updateSettings = async (req, res) => {
   try {
     const {
       starPricing,
+      gameStarsPaymentConfig,
       forceJoin,
       botStatus,
       botBroadcastConfig,
@@ -627,6 +632,7 @@ const updateSettings = async (req, res) => {
 
     if (
       !starPricing &&
+      !gameStarsPaymentConfig &&
       !forceJoin &&
       !botStatus &&
       !botBroadcastConfig &&
@@ -637,7 +643,7 @@ const updateSettings = async (req, res) => {
     ) {
       return response.error(
         res,
-        "starPricing yoki forceJoin yoki botStatus yoki botBroadcastConfig yoki paymentCardConfig yoki bankomatTopupConfig yoki referralConfig yoki nftMarketplaceConfig required",
+        "starPricing yoki gameStarsPaymentConfig yoki forceJoin yoki botStatus yoki botBroadcastConfig yoki paymentCardConfig yoki bankomatTopupConfig yoki referralConfig yoki nftMarketplaceConfig required",
       );
     }
 
@@ -645,6 +651,11 @@ const updateSettings = async (req, res) => {
     const prevBotStatus = botStatus ? await getBotStatus() : null;
 
     if (starPricing) out.starPricing = await updateStarPricing(starPricing);
+    if (gameStarsPaymentConfig) {
+      out.gameStarsPaymentConfig = await updateGameStarsPaymentConfig(
+        gameStarsPaymentConfig,
+      );
+    }
     if (forceJoin) out.forceJoin = await updateForceJoin(forceJoin);
     if (botStatus) out.botStatus = await updateBotStatus(botStatus);
     if (botBroadcastConfig) {

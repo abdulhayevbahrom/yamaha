@@ -79,6 +79,7 @@ async function handlePostPaymentEffects(order, paidAmount, { userEventType = "pa
       zoneId: order.zoneId,
       planCode: order.planCode,
       expectedAmount: order.expectedAmount,
+      paymentMethod: order.paymentMethod,
     });
   }
 

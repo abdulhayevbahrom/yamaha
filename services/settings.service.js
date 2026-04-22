@@ -6,6 +6,10 @@ const DEFAULT_STAR_PRICING = {
   max: 10000,
 };
 
+const DEFAULT_GAME_STARS_PAYMENT_CONFIG = {
+  pricePerStar: 220,
+};
+
 const DEFAULT_FORCE_JOIN = {
   enabled: false,
   channelId: "",
@@ -61,6 +65,17 @@ async function getForceJoin() {
     enabled: Boolean(doc.value.enabled),
     channelId: String(doc.value.channelId || "").trim(),
     joinUrl: String(doc.value.joinUrl || "").trim(),
+  };
+}
+
+async function getGameStarsPaymentConfig() {
+  const doc = await Settings.findOne({ key: "game_stars_payment_config" }).lean();
+  const configured = Number(doc?.value?.pricePerStar);
+  if (!Number.isFinite(configured) || configured <= 0) {
+    return DEFAULT_GAME_STARS_PAYMENT_CONFIG;
+  }
+  return {
+    pricePerStar: configured,
   };
 }
 
@@ -219,6 +234,25 @@ async function updateForceJoin(payload) {
     enabled: Boolean(doc?.value?.enabled),
     channelId: String(doc?.value?.channelId || "").trim(),
     joinUrl: String(doc?.value?.joinUrl || "").trim(),
+  };
+}
+
+async function updateGameStarsPaymentConfig(payload) {
+  const pricePerStar = Number(payload?.pricePerStar);
+  if (!Number.isFinite(pricePerStar) || pricePerStar <= 0) {
+    throw new Error("gameStars pricePerStar noto'g'ri");
+  }
+
+  const doc = await Settings.findOneAndUpdate(
+    { key: "game_stars_payment_config" },
+    { value: { pricePerStar } },
+    { new: true, upsert: true },
+  ).lean();
+
+  return {
+    pricePerStar: Number(
+      doc?.value?.pricePerStar ?? DEFAULT_GAME_STARS_PAYMENT_CONFIG.pricePerStar,
+    ),
   };
 }
 
@@ -404,6 +438,7 @@ async function updateNftMarketplaceConfig(payload) {
 
 module.exports = {
   getStarPricing,
+  getGameStarsPaymentConfig,
   getForceJoin,
   getBotStatus,
   getBotBroadcastConfig,
@@ -412,6 +447,7 @@ module.exports = {
   getReferralConfig,
   getNftMarketplaceConfig,
   updateStarPricing,
+  updateGameStarsPaymentConfig,
   updateForceJoin,
   updateBotStatus,
   updateBotBroadcastConfig,

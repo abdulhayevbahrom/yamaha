@@ -43,6 +43,18 @@ const getGameProductLabel = (product) => {
   return "O'yin";
 };
 
+const getPaymentMethodLabel = (paymentMethod) => {
+  const key = String(paymentMethod || "").trim().toLowerCase();
+  if (key === "stars") return "Telegram Stars";
+  if (key === "card") return "Karta";
+  if (key === "balance") return "Balans";
+  if (key === "bankomat") return "Bankomat";
+  if (key === "click") return "Click";
+  if (key === "paynet") return "Paynet";
+  if (key === "uzumbank") return "UzumBank";
+  return key || "-";
+};
+
 const splitMlbbAccount = (value) => {
   const raw = String(value || "").trim();
   if (!raw) return { playerId: "", zoneId: "" };
@@ -838,6 +850,7 @@ async function startBot({ strict = false } = {}) {
           }),
           `🎮 Miqdor: <code>${payload.planCode}</code>`,
           `💵 Summa: <b>${payload.expectedAmount} UZS</b>`,
+          `💳 To'lov: <b>${getPaymentMethodLabel(payload?.paymentMethod)}</b>`,
         ].join("\n");
 
         await sendToAdmins(message, {

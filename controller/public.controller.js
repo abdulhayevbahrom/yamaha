@@ -3,6 +3,7 @@ const Plan = require("../model/plan.model");
 const Order = require("../model/order.model");
 const {
   getStarPricing,
+  getGameStarsPaymentConfig,
   getForceJoin,
   getBankomatTopupConfig,
   getReferralConfig,
@@ -165,12 +166,14 @@ const getCatalog = async (_, res) => {
 const getSettings = async (_, res) => {
   try {
     const starPricing = await getStarPricing();
+    const gameStarsPaymentConfig = await getGameStarsPaymentConfig();
     const forceJoin = await getForceJoin();
     const bankomatTopupConfig = await getBankomatTopupConfig();
     const referralConfig = await getReferralConfig();
     const botStatus = await getBotStatus();
     return response.success(res, "Settings", {
       starPricing,
+      gameStarsPaymentConfig,
       forceJoin,
       bankomatTopupConfig,
       referralConfig,
