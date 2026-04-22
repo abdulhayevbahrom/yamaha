@@ -265,6 +265,48 @@ function mapAdminGiftItem(doc) {
   };
 }
 
+function mapAdminGiftHistoryItems(doc) {
+  const items = [];
+  const giftId = normalizeString(doc?.giftId);
+  const title = normalizeString(doc?.title) || "Gift";
+  const emoji = normalizeString(doc?.emoji) || "🎁";
+  const amount = Number(doc?.priceUzs || 0);
+  const imageUrl = giftId ? "/api/gifts/image/" + encodeURIComponent(giftId) : "";
+  const createdAt = doc?.createdAt || null;
+  const sentAt = doc?.sentAt || null;
+
+  if (createdAt) {
+    items.push({
+      type: "gift",
+      action: "purchased",
+      itemId: String(doc?._id || ""),
+      giftId,
+      title,
+      emoji,
+      amountUzs: amount,
+      timestamp: createdAt,
+      imageUrl,
+    });
+  }
+
+  if (sentAt) {
+    items.push({
+      type: "gift",
+      action: "sent",
+      itemId: String(doc?._id || ""),
+      giftId,
+      title,
+      emoji,
+      amountUzs: amount,
+      timestamp: sentAt,
+      imageUrl,
+      recipient: normalizeString(doc?.sentToResolved || doc?.sentToValue),
+    });
+  }
+
+  return items;
+}
+
 function mapAdminNftItem(doc) {
   const normalizedNftId = normalizeString(doc?.nftId);
   const patternStatus = normalizeString(doc?.patternAssetStatus) || "unknown";
@@ -305,6 +347,31 @@ function mapAdminNftItem(doc) {
     },
     createdAt: doc?.createdAt || null,
     updatedAt: doc?.updatedAt || null,
+  };
+}
+
+function buildNftTradeHistoryItem(offer, selfTgUserId, nftTitleMap) {
+  const isBuyer =
+    normalizeString(offer?.buyerTgUserId) === normalizeString(selfTgUserId);
+  const nftId = normalizeString(offer?.nftId);
+  const title = normalizeString(nftTitleMap.get(nftId)) || "NFT Gift";
+  const timestamp = offer?.acceptedAt || offer?.respondedAt || offer?.createdAt || null;
+
+  return {
+    type: "nft",
+    action: isBuyer ? "buy" : "sell",
+    itemId: String(offer?._id || ""),
+    nftId,
+    title,
+    amountUzs: Number(offer?.offeredPriceUzs || 0),
+    timestamp,
+    counterparty: isBuyer
+      ? normalizeString(
+          offer?.sellerProfileName || offer?.sellerUsername || offer?.sellerTgUserId,
+        )
+      : normalizeString(
+          offer?.buyerProfileName || offer?.buyerUsername || offer?.buyerTgUserId,
+        ),
   };
 }
 
@@ -836,7 +903,7 @@ const getUserAssets = async (req, res) => {
       return response.notFound(res, "Foydalanuvchi topilmadi");
     }
 
-    const [gifts, nfts] = await Promise.all([
+    const [gifts, nfts, acceptedOffers] = await Promise.all([
       UserGift.find({ tgUserId })
         .sort({ createdAt: -1 })
         .limit(300)
@@ -848,7 +915,48 @@ const getUserAssets = async (req, res) => {
         .sort({ updatedAt: -1, createdAt: -1 })
         .limit(300)
         .lean(),
+      NftOffer.find({
+        status: "accepted",
+        $or: [{ buyerTgUserId: tgUserId }, { sellerTgUserId: tgUserId }],
+      })
+        .sort({ acceptedAt: -1, respondedAt: -1, createdAt: -1 })
+        .limit(300)
+        .select({
+          nftId: 1,
+          buyerTgUserId: 1,
+          buyerProfileName: 1,
+          buyerUsername: 1,
+          sellerTgUserId: 1,
+          sellerProfileName: 1,
+          sellerUsername: 1,
+          offeredPriceUzs: 1,
+          acceptedAt: 1,
+          respondedAt: 1,
+          createdAt: 1,
+        })
+        .lean(),
     ]);
+
+    const nftIds = Array.from(
+      new Set(acceptedOffers.map((item) => normalizeString(item?.nftId)).filter(Boolean)),
+    );
+    const nftDocs = nftIds.length
+      ? await UserNft.find({ nftId: { $in: nftIds } }).select({ nftId: 1, title: 1 }).lean()
+      : [];
+    const nftTitleMap = new Map(
+      nftDocs.map((item) => [normalizeString(item?.nftId), normalizeString(item?.title)]),
+    );
+
+    const history = [
+      ...gifts.flatMap((item) => mapAdminGiftHistoryItems(item)),
+      ...acceptedOffers.map((offer) => buildNftTradeHistoryItem(offer, tgUserId, nftTitleMap)),
+    ]
+      .sort((left, right) => {
+        const leftTime = new Date(left?.timestamp || 0).getTime();
+        const rightTime = new Date(right?.timestamp || 0).getTime();
+        return rightTime - leftTime;
+      })
+      .slice(0, 500);
 
     return response.success(res, "User assets", {
       user: {
@@ -858,6 +966,7 @@ const getUserAssets = async (req, res) => {
       },
       gifts: gifts.map(mapAdminGiftItem),
       nfts: nfts.map(mapAdminNftItem),
+      history,
     });
   } catch (error) {
     return response.serverError(
