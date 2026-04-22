@@ -205,6 +205,11 @@ router.delete(
   authMiddleware,
   adminController.deletePaymentCard,
 );
+router.post(
+  "/admin/payment-cards/:id/reset-limit",
+  authMiddleware,
+  adminController.resetPaymentCardLimit,
+);
 router.get("/admin/settings", authMiddleware, adminController.getSettings);
 router.get(
   "/admin/diagnostics",
@@ -266,6 +271,11 @@ router.post(
   "/admin/orders/:id/retry-fulfill",
   authMiddleware,
   orderController.retryFulfillment,
+);
+router.post(
+  "/admin/orders/:id/mark-completed",
+  authMiddleware,
+  orderController.markAutobuyOrderCompleted,
 );
 router.post(
   "/admin/orders/:id/confirm-uc",

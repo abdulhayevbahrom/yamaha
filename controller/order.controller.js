@@ -583,6 +583,78 @@ const retryFulfillment = async (req, res) => {
   }
 };
 
+const markAutobuyOrderCompleted = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const order = await Order.findById(id);
+    if (!order) return response.notFound(res, "Order topilmadi");
+
+    if (!["star", "premium"].includes(String(order.product || ""))) {
+      return response.error(
+        res,
+        "Faqat star/premium auto buy orderlari uchun ruxsat berilgan",
+      );
+    }
+
+    if (order.status === "completed" && order.fulfillmentStatus === "success") {
+      return response.success(res, "Order allaqachon bajarilgan", order);
+    }
+
+    if (order.status !== "paid_auto_processed") {
+      return response.error(
+        res,
+        "Faqat paid_auto_processed holatidagi orderni bajarilgan deb belgilash mumkin",
+      );
+    }
+
+    const manualCompleteAt = new Date();
+    const previousFragmentTx =
+      order.fragmentTx && typeof order.fragmentTx === "object" && !Array.isArray(order.fragmentTx)
+        ? order.fragmentTx
+        : {};
+
+    order.status = "completed";
+    order.fulfillmentStatus = "success";
+    order.fulfillmentError = "";
+    order.fulfilledAt = manualCompleteAt;
+    order.fragmentTx = {
+      ...previousFragmentTx,
+      manuallyCompletedByAdmin: true,
+      manualCompletedAt: manualCompleteAt.toISOString(),
+    };
+    await order.save();
+
+    emitAdminUpdate({
+      type: "autobuy_manually_completed",
+      refreshHistory: true,
+      orderId: order._id,
+      orderCode: order.orderId,
+      product: order.product,
+      tgUserId: order.tgUserId,
+    });
+
+    if (String(order.tgUserId || "").trim()) {
+      emitUserUpdate(String(order.tgUserId || ""), {
+        type: "order_fulfilled",
+        refreshOrders: true,
+        refreshBalance: false,
+        orderId: order._id,
+        product: order.product,
+        status: order.status,
+        fulfillmentStatus: order.fulfillmentStatus,
+      });
+    }
+
+    return response.success(res, "Order bajarildi deb belgilandi", order);
+  } catch (error) {
+    return response.serverError(
+      res,
+      "Orderni bajarilgan deb belgilashda xatolik",
+      error.message,
+    );
+  }
+};
+
 module.exports = {
   calculatePrice,
   createOrder,
@@ -590,6 +662,7 @@ module.exports = {
   getHistory,
   processCardPayment,
   retryFulfillment,
+  markAutobuyOrderCompleted,
   confirmUcOrder,
   cancelUcOrder,
   cancelOrder,

@@ -21,42 +21,40 @@ const LEGACY_PAYMENT_CARDS = {
   },
 };
 
-function getPaymentCardMonthRange(date = new Date()) {
-  const start = new Date(date.getFullYear(), date.getMonth(), 1);
-  const end = new Date(date.getFullYear(), date.getMonth() + 1, 1);
+function getPaymentCardDayRange(date = new Date()) {
+  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const end = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
   return { start, end };
 }
 
-function mapCardUsageRows(rows = []) {
-  const usageMap = new Map();
-  rows.forEach((row) => {
-    if (!row?._id) return;
-    usageMap.set(String(row._id), Number(row.count || 0));
-  });
-  return usageMap;
+function resolveUsageRangeStart(card, dayStart) {
+  const resetAt = card?.dailyUsageResetAt
+    ? new Date(card.dailyUsageResetAt)
+    : null;
+  if (!resetAt || Number.isNaN(resetAt.getTime())) {
+    return dayStart;
+  }
+  return resetAt > dayStart ? resetAt : dayStart;
 }
 
-async function getCardUsageMap(cardIds = []) {
-  if (!cardIds.length) return new Map();
+async function getCardUsageMap(cards = []) {
+  const list = Array.isArray(cards) ? cards.filter((item) => item?._id) : [];
+  if (!list.length) return new Map();
 
-  const { start, end } = getPaymentCardMonthRange();
-  const rows = await Order.aggregate([
-    {
-      $match: {
-        createdAt: { $gte: start, $lt: end },
+  const { start: dayStart, end: dayEnd } = getPaymentCardDayRange();
+  const counts = await Promise.all(
+    list.map(async (card) => {
+      const from = resolveUsageRangeStart(card, dayStart);
+      const count = await Order.countDocuments({
+        paymentCardId: card._id,
         status: { $ne: "cancelled" },
-        paymentCardId: { $in: cardIds },
-      },
-    },
-    {
-      $group: {
-        _id: "$paymentCardId",
-        count: { $sum: 1 },
-      },
-    },
-  ]);
+        createdAt: { $gte: from, $lt: dayEnd },
+      });
+      return [String(card._id), Number(count || 0)];
+    }),
+  );
 
-  return mapCardUsageRows(rows);
+  return new Map(counts);
 }
 
 function buildPaymentCardSnapshot(card, { isFallback = false } = {}) {
@@ -87,20 +85,22 @@ async function listPaymentCardsForAdmin() {
     PaymentCard.find().sort({ type: 1, sortOrder: 1, createdAt: 1 }).lean(),
   ]);
 
-  const usageMap = await getCardUsageMap(cards.map((card) => card._id));
+  const usageMap = await getCardUsageMap(cards);
 
   return {
     config,
     cards: cards.map((card) => {
-      const currentMonthTransactions = usageMap.get(String(card._id)) || 0;
+      const currentDayTransactions = usageMap.get(String(card._id)) || 0;
       const remainingTransactions = Math.max(
-        Number(config.monthlyMaxTransactions || 0) - currentMonthTransactions,
+        Number(config.dailyMaxTransactions || 0) - currentDayTransactions,
         0,
       );
 
       return {
         ...card,
-        currentMonthTransactions,
+        currentDayTransactions,
+        // Keep old key for frontend compatibility during rollout.
+        currentMonthTransactions: currentDayTransactions,
         remainingTransactions,
         isEligible: Boolean(card.isActive) && remainingTransactions > 0,
       };
@@ -122,11 +122,11 @@ async function selectPaymentCardForType(type) {
     };
   }
 
-  const usageMap = await getCardUsageMap(cards.map((card) => card._id));
-  const monthlyMaxTransactions = Number(config.monthlyMaxTransactions || 0);
+  const usageMap = await getCardUsageMap(cards);
+  const dailyMaxTransactions = Number(config.dailyMaxTransactions || 0);
   const eligibleCards = cards.filter((card) => {
     const used = usageMap.get(String(card._id)) || 0;
-    return used < monthlyMaxTransactions;
+    return used < dailyMaxTransactions;
   });
 
   if (!eligibleCards.length) {

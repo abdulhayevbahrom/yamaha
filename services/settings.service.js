@@ -25,7 +25,7 @@ const DEFAULT_BOT_BROADCAST_CONFIG = {
 
 const DEFAULT_PAYMENT_CARD_CONFIG = {
   selectionMode: "sequential",
-  monthlyMaxTransactions: 50,
+  dailyMaxTransactions: 50,
 };
 
 const DEFAULT_BANKOMAT_TOPUP_CONFIG = {
@@ -112,17 +112,19 @@ async function getPaymentCardConfig() {
     doc.value.selectionMode === "random"
       ? "random"
       : DEFAULT_PAYMENT_CARD_CONFIG.selectionMode;
-  const monthlyMaxTransactions = Number(
-    doc.value.monthlyMaxTransactions ||
-      DEFAULT_PAYMENT_CARD_CONFIG.monthlyMaxTransactions,
+  // Backward compatibility: old configs may still store monthlyMaxTransactions.
+  const dailyMaxTransactions = Number(
+    doc.value.dailyMaxTransactions ||
+      doc.value.monthlyMaxTransactions ||
+      DEFAULT_PAYMENT_CARD_CONFIG.dailyMaxTransactions,
   );
 
   return {
     selectionMode,
-    monthlyMaxTransactions:
-      Number.isFinite(monthlyMaxTransactions) && monthlyMaxTransactions > 0
-        ? monthlyMaxTransactions
-        : DEFAULT_PAYMENT_CARD_CONFIG.monthlyMaxTransactions,
+    dailyMaxTransactions:
+      Number.isFinite(dailyMaxTransactions) && dailyMaxTransactions > 0
+        ? dailyMaxTransactions
+        : DEFAULT_PAYMENT_CARD_CONFIG.dailyMaxTransactions,
   };
 }
 
@@ -284,22 +286,27 @@ async function updateBotBroadcastConfig(payload) {
 async function updatePaymentCardConfig(payload) {
   const selectionMode =
     payload.selectionMode === "random" ? "random" : "sequential";
-  const monthlyMaxTransactions = Number(payload.monthlyMaxTransactions);
+  // Accept both new and legacy field names from client.
+  const dailyMaxTransactions = Number(
+    payload?.dailyMaxTransactions ?? payload?.monthlyMaxTransactions,
+  );
 
-  if (!Number.isFinite(monthlyMaxTransactions) || monthlyMaxTransactions <= 0) {
-    throw new Error("monthlyMaxTransactions noto'g'ri");
+  if (!Number.isFinite(dailyMaxTransactions) || dailyMaxTransactions <= 0) {
+    throw new Error("dailyMaxTransactions noto'g'ri");
   }
 
   const doc = await Settings.findOneAndUpdate(
     { key: "payment_card_config" },
-    { value: { selectionMode, monthlyMaxTransactions } },
+    { value: { selectionMode, dailyMaxTransactions } },
     { new: true, upsert: true },
   ).lean();
 
   return {
     selectionMode:
       doc?.value?.selectionMode === "random" ? "random" : "sequential",
-    monthlyMaxTransactions: Number(doc?.value?.monthlyMaxTransactions || 0),
+    dailyMaxTransactions: Number(
+      doc?.value?.dailyMaxTransactions || doc?.value?.monthlyMaxTransactions || 0,
+    ),
   };
 }
 

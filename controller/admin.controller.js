@@ -1060,6 +1060,26 @@ const getUserProfilePhoto = async (req, res) => {
   }
 };
 
+const resetPaymentCardLimit = async (req, res) => {
+  try {
+    const now = new Date();
+    const updated = await PaymentCard.findByIdAndUpdate(
+      req.params.id,
+      { $set: { dailyUsageResetAt: now } },
+      { new: true, runValidators: true },
+    ).lean();
+
+    if (!updated) return response.notFound(res, "To'lov kartasi topilmadi");
+    return response.success(res, "Karta limiti reset qilindi", updated);
+  } catch (error) {
+    return response.serverError(
+      res,
+      "Karta limitini reset qilishda xatolik",
+      error.message,
+    );
+  }
+};
+
 const adminRemoveUserNft = async (req, res) => {
   try {
     const ownerTgUserId = normalizeString(req.params.tgUserId);
@@ -1448,6 +1468,7 @@ module.exports = {
   createPaymentCard,
   updatePaymentCard,
   deletePaymentCard,
+  resetPaymentCardLimit,
   searchUsers,
   searchAssets,
   getUserProfilePhoto,

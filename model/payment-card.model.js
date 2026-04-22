@@ -39,6 +39,10 @@ const paymentCardSchema = new Schema(
       default: true,
       index: true,
     },
+    dailyUsageResetAt: {
+      type: Date,
+      default: null,
+    },
   },
   { timestamps: true },
 );
