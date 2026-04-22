@@ -262,8 +262,15 @@ function mapAdminGiftItem(doc) {
 }
 
 function mapAdminNftItem(doc) {
+  const normalizedNftId = normalizeString(doc?.nftId);
+  const patternStatus = normalizeString(doc?.patternAssetStatus) || "unknown";
+  const patternImageUrl =
+    patternStatus === "available" && normalizedNftId
+      ? "/api/gifts/nft-pattern/" + encodeURIComponent(normalizedNftId)
+      : "";
+
   return {
-    nftId: normalizeString(doc?.nftId),
+    nftId: normalizedNftId,
     giftId: normalizeString(doc?.giftId),
     slug: normalizeString(doc?.slug),
     title: normalizeString(doc?.title) || "NFT Gift",
@@ -274,7 +281,24 @@ function mapAdminNftItem(doc) {
     listingPriceUzs: Number(doc?.listingPriceUzs || 0),
     isTelegramPresent: Boolean(doc?.isTelegramPresent),
     imageUrl:
-      "/api/gifts/nft-image/" + encodeURIComponent(normalizeString(doc?.nftId)),
+      "/api/gifts/nft-image/" + encodeURIComponent(normalizedNftId),
+    backdrop: normalizeString(doc?.backdrop),
+    backdropRarity: normalizeString(doc?.backdropRarity),
+    backdropColors: {
+      center: normalizeString(doc?.backdropColors?.center) || "#346d2b",
+      edge: normalizeString(doc?.backdropColors?.edge) || "#2d5f24",
+      pattern: normalizeString(doc?.backdropColors?.pattern) || "#8ec95d",
+      text: normalizeString(doc?.backdropColors?.text) || "#eaffdc",
+    },
+    patternAsset: {
+      status: patternStatus,
+      sourceMethod: normalizeString(doc?.patternAssetSourceMethod),
+      sourceLabel: normalizeString(doc?.patternAssetSourceLabel),
+      path: normalizeString(doc?.patternAssetPath),
+      mimeType: normalizeString(doc?.patternAssetMimeType),
+      missingReason: normalizeString(doc?.patternAssetMissingReason),
+      imageUrl: patternImageUrl,
+    },
     createdAt: doc?.createdAt || null,
     updatedAt: doc?.updatedAt || null,
   };
