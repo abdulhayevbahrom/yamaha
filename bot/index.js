@@ -186,72 +186,92 @@ async function startBot({ strict = false } = {}) {
   bot.on(
     "pre_checkout_query",
     withSafeHandler("pre_checkout_query", async (query) => {
-      const payload = String(query?.invoice_payload || "").trim();
-      const currency = String(query?.currency || "").trim().toUpperCase();
-      const totalAmount = Math.floor(Number(query?.total_amount || 0));
-      const updateUserId = String(query?.from?.id || "").trim();
-
-      if (!payload.startsWith("stars_order:")) {
+      let answered = false;
+      const safeAnswer = async (ok, errorMessage = "") => {
+        if (answered) return;
+        answered = true;
+        if (ok) {
+          await bot.answerPreCheckoutQuery(query.id, true);
+          return;
+        }
         await bot.answerPreCheckoutQuery(query.id, false, {
-          error_message: "Noto'g'ri invoice payload",
+          error_message: errorMessage || "To'lovni tekshirishda xatolik",
         });
-        return;
-      }
+      };
 
-      const orderMongoId = payload.replace("stars_order:", "").split(":")[0]?.trim();
-      if (!orderMongoId) {
-        await bot.answerPreCheckoutQuery(query.id, false, {
-          error_message: "Buyurtma topilmadi",
-        });
-        return;
-      }
+      const fallbackTimer = setTimeout(() => {
+        safeAnswer(false, "Server band. Qayta urinib ko'ring.").catch(() => null);
+      }, 8500);
 
-      const order = await Order.findById(orderMongoId).lean();
-      if (!order) {
-        await bot.answerPreCheckoutQuery(query.id, false, {
-          error_message: "Buyurtma topilmadi",
-        });
-        return;
-      }
+      try {
+        const payload = String(query?.invoice_payload || "").trim();
+        const currency = String(query?.currency || "").trim().toUpperCase();
+        const totalAmount = Math.floor(Number(query?.total_amount || 0));
+        const updateUserId = String(query?.from?.id || "").trim();
 
-      if (String(order.paymentMethod || "") !== "stars") {
-        await bot.answerPreCheckoutQuery(query.id, false, {
-          error_message: "Stars to'lov faqat stars order uchun",
-        });
-        return;
-      }
+        if (!payload.startsWith("stars_order:")) {
+          await safeAnswer(false, "Noto'g'ri invoice payload");
+          return;
+        }
 
-      if (String(order.status || "") !== "pending_payment") {
-        await bot.answerPreCheckoutQuery(query.id, false, {
-          error_message: "Buyurtma holati to'lovga mos emas",
-        });
-        return;
-      }
+        const orderMongoId = payload
+          .replace("stars_order:", "")
+          .split(":")[0]
+          ?.trim();
+        if (!orderMongoId) {
+          await safeAnswer(false, "Buyurtma topilmadi");
+          return;
+        }
 
-      if (currency !== "XTR") {
-        await bot.answerPreCheckoutQuery(query.id, false, {
-          error_message: "Faqat Telegram Stars (XTR) qabul qilinadi",
-        });
-        return;
-      }
+        if (currency !== "XTR") {
+          await safeAnswer(false, "Faqat Telegram Stars (XTR) qabul qilinadi");
+          return;
+        }
 
-      const expectedStars = Math.max(0, Math.floor(Number(order.starsAmount || 0)));
-      if (expectedStars > 0 && totalAmount !== expectedStars) {
-        await bot.answerPreCheckoutQuery(query.id, false, {
-          error_message: "To'lov summasi mos emas. Iltimos qayta urinib ko'ring.",
-        });
-        return;
-      }
+        const order = await Promise.race([
+          Order.findById(orderMongoId).lean(),
+          new Promise((resolve) => setTimeout(() => resolve(null), 4000)),
+        ]);
+        if (!order) {
+          await safeAnswer(false, "Buyurtma topilmadi");
+          return;
+        }
 
-      const orderUserId = String(order.tgUserId || "").trim();
-      if (orderUserId && updateUserId && orderUserId !== updateUserId) {
-        await bot.answerPreCheckoutQuery(query.id, false, {
-          error_message: "Bu invoice boshqa foydalanuvchi uchun",
-        });
-        return;
-      }
+        if (String(order.paymentMethod || "") !== "stars") {
+          await safeAnswer(false, "Stars to'lov faqat stars order uchun");
+          return;
+        }
 
-      await bot.answerPreCheckoutQuery(query.id, true);
+        if (String(order.status || "") !== "pending_payment") {
+          await safeAnswer(false, "Buyurtma holati to'lovga mos emas");
+          return;
+        }
+
+        const expectedStars = Math.max(
+          0,
+          Math.floor(Number(order.starsAmount || 0)),
+        );
+        if (expectedStars > 0 && totalAmount !== expectedStars) {
+          await safeAnswer(
+            false,
+            "To'lov summasi mos emas. Iltimos qayta urinib ko'ring.",
+          );
+          return;
+        }
+
+        const orderUserId = String(order.tgUserId || "").trim();
+        if (orderUserId && updateUserId && orderUserId !== updateUserId) {
+          await safeAnswer(false, "Bu invoice boshqa foydalanuvchi uchun");
+          return;
+        }
+
+        await safeAnswer(true);
+      } catch (error) {
+        console.error("pre_checkout_query fatal:", error?.message || error);
+        await safeAnswer(false, "To'lovni tekshirishda xatolik");
+      } finally {
+        clearTimeout(fallbackTimer);
+      }
     }),
   );
 
