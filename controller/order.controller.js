@@ -2,6 +2,7 @@ const response = require("../utils/response");
 const Plan = require("../model/plan.model");
 const Order = require("../model/order.model");
 const User = require("../model/user.model");
+const mongoose = require("mongoose");
 const { getNextOrderId } = require("../services/order-id.service");
 const { processIncomingPayment } = require("../services/payment-match.service");
 const { autoFulfillOrder } = require("../services/avtoBuy.service");
@@ -383,6 +384,52 @@ function normalizeScope(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function normalizeSearch(value) {
+  return String(value || "").trim();
+}
+
+function escapeRegExp(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildSearchFilter(rawSearch) {
+  const normalized = normalizeSearch(rawSearch);
+  if (!normalized) return null;
+
+  const safeRegex = new RegExp(escapeRegExp(normalized), "i");
+  const conditions = [
+    { username: safeRegex },
+    { tgUsername: safeRegex },
+    { tgUserId: safeRegex },
+    { profileName: safeRegex },
+    { planCode: safeRegex },
+    { product: safeRegex },
+    { status: safeRegex },
+    { paymentMethod: safeRegex },
+    { fulfillmentStatus: safeRegex },
+    { fulfillmentError: safeRegex },
+    { playerId: safeRegex },
+    { zoneId: safeRegex },
+    { "paymentCardSnapshot.label": safeRegex },
+    { "paymentCardSnapshot.cardNumber": safeRegex },
+    { "paymentCardSnapshot.cardHolder": safeRegex },
+  ];
+
+  const numeric = Number(normalized);
+  if (Number.isFinite(numeric)) {
+    conditions.push({ orderId: Math.floor(numeric) });
+    conditions.push({ expectedAmount: Math.floor(numeric) });
+    conditions.push({ paidAmount: Math.floor(numeric) });
+    conditions.push({ customAmount: Math.floor(numeric) });
+  }
+
+  if (mongoose.Types.ObjectId.isValid(normalized)) {
+    conditions.push({ _id: new mongoose.Types.ObjectId(normalized) });
+  }
+
+  return { $or: conditions };
+}
+
 function buildHistoryFilter(scope) {
   if (scope === "sales" || scope === "reports") {
     return {
@@ -411,6 +458,7 @@ const getHistory = async (req, res) => {
   try {
     await expirePendingOrders();
     const scope = normalizeScope(req.query?.scope || "all");
+    const search = normalizeSearch(req.query?.search || "");
     const requestedLimit = Number(req.query?.limit || 3000);
     const limit =
       Number.isFinite(requestedLimit) && requestedLimit > 0
@@ -421,7 +469,11 @@ const getHistory = async (req, res) => {
       Number.isFinite(requestedPage) && requestedPage > 0
         ? Math.floor(requestedPage)
         : 1;
-    const filter = buildHistoryFilter(scope);
+    const scopeFilter = buildHistoryFilter(scope);
+    const searchFilter = buildSearchFilter(search);
+    const filter = searchFilter
+      ? { $and: [scopeFilter, searchFilter] }
+      : scopeFilter;
 
     const totalItems = await Order.countDocuments(filter);
     const totalPages = Math.max(1, Math.ceil(Number(totalItems || 0) / limit));
@@ -441,6 +493,7 @@ const getHistory = async (req, res) => {
         totalPages,
       },
       scope,
+      search,
     });
   } catch (error) {
     return response.serverError(res, "Tarix olishda xatolik", error.message);
