@@ -86,8 +86,24 @@ const orderSchema = new Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ["card", "bankomat", "uzumbank", "paynet", "click", "balance"],
+      enum: ["card", "bankomat", "uzumbank", "paynet", "click", "balance", "stars"],
       default: "card"
+    },
+    starsAmount: {
+      type: Number,
+      default: 0
+    },
+    starsInvoicePayload: {
+      type: String,
+      default: ""
+    },
+    starsInvoiceLink: {
+      type: String,
+      default: ""
+    },
+    starsTelegramChargeId: {
+      type: String,
+      default: ""
     },
     paymentGrossAmount: {
       type: Number,

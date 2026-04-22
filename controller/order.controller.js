@@ -1,4 +1,5 @@
 const response = require("../utils/response");
+const axios = require("axios");
 const Plan = require("../model/plan.model");
 const Order = require("../model/order.model");
 const User = require("../model/user.model");
@@ -23,6 +24,60 @@ const { selectPaymentCardForType } = require("../services/payment-card.service")
 
 let sequence = 1;
 const PENDING_TTL_MS = 10 * 60 * 1000;
+const ORDER_PAYMENT_METHODS = ["card", "bankomat", "uzumbank", "paynet", "click", "balance", "stars"];
+const STARS_PAYMENT_PRODUCTS = new Set(["uc", "freefire", "mlbb"]);
+
+function getOrderProductLabel(product) {
+  const key = String(product || "").trim().toLowerCase();
+  if (key === "star") return "Telegram Star";
+  if (key === "premium") return "Telegram Premium";
+  if (key === "uc") return "PUBG UC";
+  if (key === "mlbb") return "MLBB Diamond";
+  if (key === "freefire") return "Free Fire Diamond";
+  return "Buyurtma";
+}
+
+async function createTelegramStarsInvoiceLink({
+  order,
+  starsAmount,
+  payload,
+}) {
+  const botToken = String(process.env.BOT_TOKEN || "").trim();
+  if (!botToken) {
+    throw new Error("BOT_TOKEN topilmadi");
+  }
+
+  const title = `${getOrderProductLabel(order?.product)} #${order?.orderId || "-"}`.slice(0, 32);
+  const description = `Buyurtma #${order?.orderId || "-"} uchun Telegram Stars to'lovi`.slice(0, 255);
+  const apiUrl = `https://api.telegram.org/bot${botToken}/createInvoiceLink`;
+
+  const telegramResponse = await axios.post(
+    apiUrl,
+    {
+      title,
+      description,
+      payload,
+      provider_token: "",
+      currency: "XTR",
+      prices: [
+        {
+          label: `Order #${order?.orderId || "-"}`.slice(0, 32),
+          amount: Math.max(1, Math.floor(Number(starsAmount || 0))),
+        },
+      ],
+    },
+    { timeout: 12_000 },
+  );
+
+  const invoiceLink = String(telegramResponse?.data?.result || "").trim();
+  if (!telegramResponse?.data?.ok || !invoiceLink) {
+    throw new Error(
+      String(telegramResponse?.data?.description || "Telegram invoice link yaratilmadi"),
+    );
+  }
+
+  return invoiceLink;
+}
 
 async function resolvePaymentCardSelection(type) {
   const selected = await selectPaymentCardForType(type);
@@ -178,6 +233,9 @@ const createOrder = async (req, res) => {
       paymentMethod = "card",
       status,
     } = req.body;
+    const normalizedPaymentMethod = String(paymentMethod || "card")
+      .trim()
+      .toLowerCase();
     const { tgUserId, username: tgUsername } = getTelegramUserFromRequest(req);
 
     if (!tgUserId) {
@@ -194,6 +252,18 @@ const createOrder = async (req, res) => {
     }
     if (!["star", "premium", "uc", "freefire", "mlbb"].includes(product)) {
       return response.error(res, "Tanlangan mahsulot noto'g'ri");
+    }
+    if (!ORDER_PAYMENT_METHODS.includes(normalizedPaymentMethod)) {
+      return response.error(res, "To'lov usuli noto'g'ri");
+    }
+    if (
+      normalizedPaymentMethod === "stars" &&
+      !STARS_PAYMENT_PRODUCTS.has(String(product || "").toLowerCase())
+    ) {
+      return response.error(
+        res,
+        "Stars orqali to'lov faqat PUBG/Free Fire/MLBB orderlari uchun mavjud",
+      );
     }
     const normalizedPlayerId = String(playerId || "").trim();
     const normalizedZoneId = String(zoneId || "").trim();
@@ -248,7 +318,7 @@ const createOrder = async (req, res) => {
     let paymentCardId = null;
     let paymentCardSnapshot = null;
 
-    if (paymentMethod === "balance") {
+    if (normalizedPaymentMethod === "balance") {
       expected = Number(resolvedBasePrice || 0);
       const user = await User.findOneAndUpdate(
         { tgUserId, balance: { $gte: expected } },
@@ -269,15 +339,22 @@ const createOrder = async (req, res) => {
     }
 
     if (finalStatus === "pending_payment") {
-      expected = await getUniquePendingAmount({
-        product,
-        planCode,
-        basePrice: resolvedBasePrice,
-      });
+      if (normalizedPaymentMethod === "stars") {
+        expected = Number(resolvedBasePrice || 0);
+      } else {
+        expected = await getUniquePendingAmount({
+          product,
+          planCode,
+          basePrice: resolvedBasePrice,
+        });
+      }
       expiresAt = new Date(Date.now() + PENDING_TTL_MS);
     }
 
-    if (paymentMethod !== "balance") {
+    if (
+      normalizedPaymentMethod !== "balance" &&
+      normalizedPaymentMethod !== "stars"
+    ) {
       let selectedCard;
       try {
         selectedCard = await resolvePaymentCardSelection("purchase");
@@ -311,7 +388,7 @@ const createOrder = async (req, res) => {
           : profileName,
       paymentCardId,
       paymentCardSnapshot,
-      paymentMethod,
+      paymentMethod: normalizedPaymentMethod,
       expectedAmount: expected,
       paidAmount: paid,
       paidAt,
@@ -356,7 +433,7 @@ const createOrder = async (req, res) => {
     emitUserUpdate(tgUserId, {
       type: "order_created",
       refreshOrders: true,
-      refreshBalance: paymentMethod === "balance",
+      refreshBalance: normalizedPaymentMethod === "balance",
       orderId: order._id,
       status: finalStatus,
       product,
@@ -701,6 +778,81 @@ const getHistory = async (req, res) => {
   }
 };
 
+const createStarsInvoice = async (req, res) => {
+  try {
+    const { tgUserId } = getTelegramUserFromRequest(req);
+    const orderId = String(req.params?.id || "").trim();
+    if (!tgUserId) {
+      return response.error(
+        res,
+        "Telegram profilingiz aniqlanmadi. Ilovani qayta ochib ko'ring.",
+      );
+    }
+    if (!mongoose.Types.ObjectId.isValid(orderId)) {
+      return response.notFound(res, "Buyurtma topilmadi");
+    }
+
+    await expirePendingOrders();
+
+    const order = await Order.findOne({
+      _id: new mongoose.Types.ObjectId(orderId),
+      tgUserId: String(tgUserId),
+      paymentMethod: "stars",
+    });
+    if (!order) {
+      return response.notFound(res, "Stars to'lovli buyurtma topilmadi");
+    }
+    if (!STARS_PAYMENT_PRODUCTS.has(String(order.product || "").toLowerCase())) {
+      return response.error(
+        res,
+        "Stars invoice faqat PUBG/Free Fire/MLBB orderlari uchun yaratiladi",
+      );
+    }
+
+    if (order.status !== "pending_payment") {
+      return response.error(res, "Bu buyurtma uchun Stars to'lov ochib bo'lmaydi");
+    }
+
+    if (order.expiresAt && new Date(order.expiresAt).getTime() <= Date.now()) {
+      order.status = "cancelled";
+      await order.save();
+      return response.error(res, "Buyurtma muddati tugagan");
+    }
+
+    const pricing = await getStarPricing();
+    const pricePerStar = Math.max(1, Number(pricing?.pricePerStar || 220));
+    const starsAmount = Math.max(
+      1,
+      Math.ceil(Number(order.expectedAmount || 0) / pricePerStar),
+    );
+    const payload = `stars_order:${String(order._id)}:${Date.now()}`;
+    const invoiceLink = await createTelegramStarsInvoiceLink({
+      order,
+      starsAmount,
+      payload,
+    });
+
+    order.starsAmount = starsAmount;
+    order.starsInvoicePayload = payload;
+    order.starsInvoiceLink = invoiceLink;
+    await order.save();
+
+    return response.success(res, "Stars invoice yaratildi", {
+      orderId: order.orderId,
+      orderMongoId: String(order._id),
+      starsAmount,
+      invoiceLink,
+      expiresAt: order.expiresAt,
+    });
+  } catch (error) {
+    return response.serverError(
+      res,
+      "Stars invoice yaratishda xatolik",
+      error.message,
+    );
+  }
+};
+
 const processCardPayment = async (req, res) => {
   try {
     const {
@@ -913,6 +1065,7 @@ const markAutobuyOrderCompleted = async (req, res) => {
 module.exports = {
   calculatePrice,
   createOrder,
+  createStarsInvoice,
   getReports,
   getHistory,
   processCardPayment,

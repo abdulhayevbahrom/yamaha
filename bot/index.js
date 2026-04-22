@@ -2,7 +2,10 @@ require("dotenv").config();
 const path = require("node:path");
 const TelegramBot = require("node-telegram-bot-api");
 const connectDB = require("../config/dbConfig");
-const { processIncomingPayment } = require("../services/payment-match.service");
+const {
+  processIncomingPayment,
+  processTelegramStarsPayment,
+} = require("../services/payment-match.service");
 const { onGamePaid } = require("../services/notify.service");
 const { confirmGameOrderById } = require("../services/uc-fulfillment.service");
 const {
@@ -179,6 +182,78 @@ async function startBot({ strict = false } = {}) {
   bot.on("webhook_error", (error) => {
     logTelegramTransportError("webhook", error);
   });
+
+  bot.on(
+    "pre_checkout_query",
+    withSafeHandler("pre_checkout_query", async (query) => {
+      const payload = String(query?.invoice_payload || "").trim();
+      const currency = String(query?.currency || "").trim().toUpperCase();
+      const totalAmount = Math.floor(Number(query?.total_amount || 0));
+      const updateUserId = String(query?.from?.id || "").trim();
+
+      if (!payload.startsWith("stars_order:")) {
+        await bot.answerPreCheckoutQuery(query.id, false, {
+          error_message: "Noto'g'ri invoice payload",
+        });
+        return;
+      }
+
+      const orderMongoId = payload.replace("stars_order:", "").split(":")[0]?.trim();
+      if (!orderMongoId) {
+        await bot.answerPreCheckoutQuery(query.id, false, {
+          error_message: "Buyurtma topilmadi",
+        });
+        return;
+      }
+
+      const order = await Order.findById(orderMongoId).lean();
+      if (!order) {
+        await bot.answerPreCheckoutQuery(query.id, false, {
+          error_message: "Buyurtma topilmadi",
+        });
+        return;
+      }
+
+      if (String(order.paymentMethod || "") !== "stars") {
+        await bot.answerPreCheckoutQuery(query.id, false, {
+          error_message: "Stars to'lov faqat stars order uchun",
+        });
+        return;
+      }
+
+      if (String(order.status || "") !== "pending_payment") {
+        await bot.answerPreCheckoutQuery(query.id, false, {
+          error_message: "Buyurtma holati to'lovga mos emas",
+        });
+        return;
+      }
+
+      if (currency !== "XTR") {
+        await bot.answerPreCheckoutQuery(query.id, false, {
+          error_message: "Faqat Telegram Stars (XTR) qabul qilinadi",
+        });
+        return;
+      }
+
+      const expectedStars = Math.max(0, Math.floor(Number(order.starsAmount || 0)));
+      if (expectedStars > 0 && totalAmount !== expectedStars) {
+        await bot.answerPreCheckoutQuery(query.id, false, {
+          error_message: "To'lov summasi mos emas. Iltimos qayta urinib ko'ring.",
+        });
+        return;
+      }
+
+      const orderUserId = String(order.tgUserId || "").trim();
+      if (orderUserId && updateUserId && orderUserId !== updateUserId) {
+        await bot.answerPreCheckoutQuery(query.id, false, {
+          error_message: "Bu invoice boshqa foydalanuvchi uchun",
+        });
+        return;
+      }
+
+      await bot.answerPreCheckoutQuery(query.id, true);
+    }),
+  );
 
   const ensureBotActive = async (chatId, { silent = false } = {}) => {
     const botStatus = await getBotStatus();
@@ -651,6 +726,39 @@ async function startBot({ strict = false } = {}) {
       console.error("Admin ads error:", err.message);
     }
   });
+
+  bot.on(
+    "message",
+    withSafeHandler("stars_successful_payment", async (msg) => {
+      const payment = msg?.successful_payment;
+      if (!payment) return;
+      if (String(payment.currency || "").trim().toUpperCase() !== "XTR") return;
+
+      const result = await processTelegramStarsPayment({
+        invoicePayload: payment.invoice_payload,
+        telegramPaymentChargeId: payment.telegram_payment_charge_id,
+        providerPaymentChargeId: payment.provider_payment_charge_id,
+        totalAmount: payment.total_amount,
+        tgUserId: String(msg?.from?.id || "").trim(),
+        currency: payment.currency,
+      });
+
+      if (!result?.matched) {
+        console.warn(
+          "Stars successful_payment ignored:",
+          result?.reason || "unknown",
+        );
+        return;
+      }
+
+      const chatId = msg?.chat?.id;
+      if (!chatId) return;
+      await bot.sendMessage(
+        chatId,
+        `✅ To'lov qabul qilindi. Buyurtma #${result?.order?.orderId || "-"} bajarilmoqda.`,
+      );
+    }),
+  );
 
   if (cardxabarSourceChatId) {
     bot.on("message", async (msg) => {

@@ -60,6 +60,13 @@ router.post(
   botActiveMiddleware,
   orderController.createOrder,
 );
+router.post(
+  "/orders/:id/stars-invoice",
+  telegramAuthMiddleware,
+  userWriteRateLimit,
+  botActiveMiddleware,
+  orderController.createStarsInvoice,
+);
 router.get("/reports", authMiddleware, orderController.getReports);
 router.get("/history", authMiddleware, orderController.getHistory);
 router.get("/me", telegramAuthMiddleware, userController.getMe);
