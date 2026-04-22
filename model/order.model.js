@@ -146,6 +146,11 @@ const orderSchema = new Schema(
       enum: ["pending", "processing", "success", "failed", "skipped"],
       default: "pending"
     },
+    completionMode: {
+      type: String,
+      enum: ["manual", "auto", ""],
+      default: ""
+    },
     fulfillmentError: {
       type: String,
       default: ""

@@ -388,6 +388,16 @@ function normalizeSearch(value) {
   return String(value || "").trim();
 }
 
+function parseOrderIdSearch(value) {
+  const raw = normalizeSearch(value);
+  if (!raw) return null;
+  const normalized = raw.replace(/^#/, "");
+  if (!/^\d+$/.test(normalized)) return null;
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.floor(parsed);
+}
+
 function escapeRegExp(value) {
   return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -406,6 +416,7 @@ function buildSearchFilter(rawSearch) {
     { product: safeRegex },
     { status: safeRegex },
     { paymentMethod: safeRegex },
+    { completionMode: safeRegex },
     { fulfillmentStatus: safeRegex },
     { fulfillmentError: safeRegex },
     { playerId: safeRegex },
@@ -471,9 +482,18 @@ const getHistory = async (req, res) => {
         : 1;
     const scopeFilter = buildHistoryFilter(scope);
     const searchFilter = buildSearchFilter(search);
-    const filter = searchFilter
+    const parsedOrderId = parseOrderIdSearch(search);
+    let filter = searchFilter
       ? { $and: [scopeFilter, searchFilter] }
       : scopeFilter;
+
+    if (parsedOrderId !== null) {
+      const exactOrderFilter = { $and: [scopeFilter, { orderId: parsedOrderId }] };
+      const hasExactOrderMatch = await Order.exists(exactOrderFilter);
+      if (hasExactOrderMatch) {
+        filter = exactOrderFilter;
+      }
+    }
 
     const totalItems = await Order.countDocuments(filter);
     const totalPages = Math.max(1, Math.ceil(Number(totalItems || 0) / limit));
@@ -668,6 +688,7 @@ const markAutobuyOrderCompleted = async (req, res) => {
 
     order.status = "completed";
     order.fulfillmentStatus = "success";
+    order.completionMode = "manual";
     order.fulfillmentError = "";
     order.fulfilledAt = manualCompleteAt;
     order.fragmentTx = {

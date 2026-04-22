@@ -26,6 +26,7 @@ async function confirmGameOrderById(orderId) {
 
   order.status = "completed";
   order.fulfillmentStatus = "success";
+  order.completionMode = "manual";
   order.fulfilledAt = new Date();
   order.fulfillmentError = "";
   await order.save();

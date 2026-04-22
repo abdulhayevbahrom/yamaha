@@ -215,6 +215,7 @@ async function markFulfillmentSuccess(order, result) {
   await Order.findByIdAndUpdate(order._id, {
     status: "completed",
     fulfillmentStatus: "success",
+    completionMode: "auto",
     fulfilledAt: new Date(),
     fragmentTx: result.fragment || result || null,
     fulfillmentError: "",

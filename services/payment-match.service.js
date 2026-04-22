@@ -125,6 +125,7 @@ async function processIncomingPayment({
     await Order.findByIdAndUpdate(pending._id, {
       status: "completed",
       fulfillmentStatus: "success",
+      completionMode: "auto",
       fulfilledAt: new Date(),
       fulfillmentError: "",
     });
