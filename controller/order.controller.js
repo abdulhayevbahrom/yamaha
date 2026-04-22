@@ -2,6 +2,9 @@ const response = require("../utils/response");
 const Plan = require("../model/plan.model");
 const Order = require("../model/order.model");
 const User = require("../model/user.model");
+const UserGift = require("../model/user-gift.model");
+const UserNft = require("../model/user-nft.model");
+const NftOffer = require("../model/nft-offer.model");
 const mongoose = require("mongoose");
 const { getNextOrderId } = require("../services/order-id.service");
 const { processIncomingPayment } = require("../services/payment-match.service");
@@ -465,6 +468,173 @@ function buildHistoryFilter(scope) {
   return {};
 }
 
+function toTimeMs(value) {
+  const timestamp = new Date(value || 0).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function buildNftGiftSearchRegex(search) {
+  const normalized = normalizeSearch(search);
+  if (!normalized) return null;
+  return new RegExp(escapeRegExp(normalized), "i");
+}
+
+async function getNftGiftHistory({ page, limit, search }) {
+  const regex = buildNftGiftSearchRegex(search);
+  const numeric = Number(normalizeSearch(search));
+  const hasNumeric = Number.isFinite(numeric);
+
+  const giftFilter = {};
+  if (regex) {
+    const giftConditions = [
+      { giftId: regex },
+      { title: regex },
+      { tgUserId: regex },
+      { tgUsername: regex },
+      { status: regex },
+      { sentToValue: regex },
+      { sentToResolved: regex },
+    ];
+    if (hasNumeric) {
+      giftConditions.push({ priceUzs: Math.floor(numeric) });
+      giftConditions.push({ stars: Math.floor(numeric) });
+    }
+    giftFilter.$or = giftConditions;
+  }
+
+  const offerFilter = { status: "accepted" };
+  if (regex) {
+    const offerConditions = [
+      { nftId: regex },
+      { buyerTgUserId: regex },
+      { buyerUsername: regex },
+      { buyerProfileName: regex },
+      { sellerTgUserId: regex },
+      { sellerUsername: regex },
+      { sellerProfileName: regex },
+      { status: regex },
+    ];
+    if (hasNumeric) {
+      offerConditions.push({ offeredPriceUzs: Math.floor(numeric) });
+      offerConditions.push({ listingPriceUzs: Math.floor(numeric) });
+    }
+    offerFilter.$or = offerConditions;
+  }
+
+  const [gifts, acceptedOffers] = await Promise.all([
+    UserGift.find(giftFilter)
+      .sort({ createdAt: -1 })
+      .limit(5000)
+      .lean(),
+    NftOffer.find(offerFilter)
+      .sort({ acceptedAt: -1, respondedAt: -1, createdAt: -1 })
+      .limit(5000)
+      .select({
+        nftId: 1,
+        buyerTgUserId: 1,
+        buyerUsername: 1,
+        buyerProfileName: 1,
+        sellerTgUserId: 1,
+        sellerUsername: 1,
+        sellerProfileName: 1,
+        offeredPriceUzs: 1,
+        acceptedAt: 1,
+        respondedAt: 1,
+        createdAt: 1,
+      })
+      .lean(),
+  ]);
+
+  const nftIds = Array.from(
+    new Set(acceptedOffers.map((item) => normalizeSearch(item?.nftId)).filter(Boolean)),
+  );
+  const nftDocs = nftIds.length
+    ? await UserNft.find({ nftId: { $in: nftIds } }).select({ nftId: 1, title: 1 }).lean()
+    : [];
+  const nftTitleMap = new Map(
+    nftDocs.map((item) => [normalizeSearch(item?.nftId), normalizeSearch(item?.title)]),
+  );
+
+  const giftItems = gifts.flatMap((gift) => {
+    const base = {
+      _id: `gift_${String(gift?._id || "")}`,
+      type: "gift",
+      giftId: normalizeSearch(gift?.giftId),
+      title: normalizeSearch(gift?.title) || "Gift",
+      emoji: normalizeSearch(gift?.emoji) || "🎁",
+      amountUzs: Number(gift?.priceUzs || 0),
+      tgUserId: normalizeSearch(gift?.tgUserId),
+      tgUsername: normalizeSearch(gift?.tgUsername),
+      createdAt: gift?.createdAt || null,
+      updatedAt: gift?.updatedAt || null,
+    };
+
+    const items = [];
+    if (gift?.createdAt) {
+      items.push({
+        ...base,
+        eventKey: `gift_purchase_${String(gift?._id || "")}`,
+        action: "purchased",
+        timestamp: gift.createdAt,
+      });
+    }
+    if (gift?.sentAt) {
+      items.push({
+        ...base,
+        eventKey: `gift_sent_${String(gift?._id || "")}`,
+        action: "sent",
+        recipient:
+          normalizeSearch(gift?.sentToResolved) || normalizeSearch(gift?.sentToValue),
+        timestamp: gift.sentAt,
+      });
+    }
+    return items;
+  });
+
+  const nftItems = acceptedOffers.map((offer) => {
+    const nftId = normalizeSearch(offer?.nftId);
+    const title = normalizeSearch(nftTitleMap.get(nftId)) || "NFT Gift";
+    const timestamp = offer?.acceptedAt || offer?.respondedAt || offer?.createdAt || null;
+    return {
+      _id: `nft_${String(offer?._id || "")}`,
+      type: "nft",
+      eventKey: `nft_trade_${String(offer?._id || "")}`,
+      nftId,
+      title,
+      amountUzs: Number(offer?.offeredPriceUzs || 0),
+      buyerTgUserId: normalizeSearch(offer?.buyerTgUserId),
+      buyerUsername: normalizeSearch(offer?.buyerUsername),
+      buyerProfileName: normalizeSearch(offer?.buyerProfileName),
+      sellerTgUserId: normalizeSearch(offer?.sellerTgUserId),
+      sellerUsername: normalizeSearch(offer?.sellerUsername),
+      sellerProfileName: normalizeSearch(offer?.sellerProfileName),
+      action: "trade",
+      timestamp,
+      createdAt: offer?.createdAt || null,
+      updatedAt: offer?.respondedAt || offer?.acceptedAt || offer?.createdAt || null,
+    };
+  });
+
+  const merged = [...giftItems, ...nftItems].sort(
+    (left, right) => toTimeMs(right?.timestamp) - toTimeMs(left?.timestamp),
+  );
+
+  const totalItems = merged.length;
+  const totalPages = Math.max(1, Math.ceil(Number(totalItems || 0) / limit));
+  const safePage = Math.min(page, totalPages);
+  const items = merged.slice((safePage - 1) * limit, safePage * limit);
+
+  return {
+    items,
+    pagination: {
+      page: safePage,
+      limit,
+      totalItems: Number(totalItems || 0),
+      totalPages,
+    },
+  };
+}
+
 const getHistory = async (req, res) => {
   try {
     await expirePendingOrders();
@@ -480,6 +650,17 @@ const getHistory = async (req, res) => {
       Number.isFinite(requestedPage) && requestedPage > 0
         ? Math.floor(requestedPage)
         : 1;
+
+    if (scope === "nft_gift") {
+      const result = await getNftGiftHistory({ page, limit, search });
+      return response.success(res, "Tarix", {
+        items: result.items,
+        pagination: result.pagination,
+        scope,
+        search,
+      });
+    }
+
     const scopeFilter = buildHistoryFilter(scope);
     const searchFilter = buildSearchFilter(search);
     const parsedOrderId = parseOrderIdSearch(search);
