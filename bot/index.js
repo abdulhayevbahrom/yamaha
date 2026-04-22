@@ -110,7 +110,14 @@ async function startBot({ strict = false } = {}) {
     return null;
   }
 
-  const bot = new TelegramBot(token, { polling: true });
+  const bot = new TelegramBot(token, {
+    polling: {
+      autoStart: true,
+      params: {
+        allowed_updates: ["message", "callback_query", "pre_checkout_query"],
+      },
+    },
+  });
   const firstSeen = new Set();
   const forceJoinPassedUsers = new Set();
   const adminIds = adminNotifyChatId
@@ -182,6 +189,15 @@ async function startBot({ strict = false } = {}) {
   bot.on("webhook_error", (error) => {
     logTelegramTransportError("webhook", error);
   });
+
+  try {
+    await bot.deleteWebHook({ drop_pending_updates: false });
+  } catch (error) {
+    console.warn(
+      "Webhook disable warning:",
+      String(error?.message || error || "").trim(),
+    );
+  }
 
   bot.on(
     "pre_checkout_query",
