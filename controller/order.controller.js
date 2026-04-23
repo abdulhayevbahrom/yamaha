@@ -266,7 +266,7 @@ const createOrder = async (req, res) => {
       );
     }
     const currentUser = await User.findOne({ tgUserId })
-      .select({ isBlocked: 1 })
+      .select({ isBlocked: 1, profileName: 1, username: 1 })
       .lean();
     if (currentUser?.isBlocked) {
       return response.error(res, "Foydalanuvchi bloklangan");
@@ -424,6 +424,13 @@ const createOrder = async (req, res) => {
       String(product || "").toLowerCase() === "star_sell"
         ? await getStarSellPricing()
         : null;
+    const normalizedIncomingProfileName = String(profileName || "").trim();
+    const fallbackProfileName = String(currentUser?.profileName || "").trim();
+    const resolvedProfileName =
+      product === "mlbb"
+        ? `Player ID: ${normalizedPlayerId} | Zone ID: ${normalizedZoneId}`
+        : normalizedIncomingProfileName || fallbackProfileName;
+
     const order = await Order.create({
       orderId: nextOrderId,
       product,
@@ -437,10 +444,7 @@ const createOrder = async (req, res) => {
           : normalizedUsername,
       playerId: normalizedPlayerId,
       zoneId: normalizedZoneId,
-      profileName:
-        product === "mlbb"
-          ? `Player ID: ${normalizedPlayerId} | Zone ID: ${normalizedZoneId}`
-          : profileName,
+      profileName: resolvedProfileName,
       paymentCardId,
       paymentCardSnapshot,
       paymentMethod: normalizedPaymentMethod,

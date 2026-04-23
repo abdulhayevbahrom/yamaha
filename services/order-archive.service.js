@@ -17,8 +17,33 @@ const productLabels = {
 
 function getArchiveCustomerLabel(order) {
   const profileName = String(order?.profileName || "").trim();
-  if (profileName) return profileName;
-  return "-";
+  if (!profileName) return "-";
+
+  const normalize = (value) =>
+    String(value || "")
+      .trim()
+      .replace(/^@+/, "")
+      .toLowerCase();
+
+  const normalizedProfile = normalize(profileName);
+  const normalizedUsername = normalize(order?.username);
+  const normalizedTgUsername = normalize(order?.tgUsername);
+  const normalizedTgUserId = normalize(order?.tgUserId);
+
+  if (
+    !normalizedProfile ||
+    normalizedProfile === normalizedUsername ||
+    normalizedProfile === normalizedTgUsername ||
+    normalizedProfile === normalizedTgUserId
+  ) {
+    return "-";
+  }
+
+  if (profileName.startsWith("@")) {
+    return "-";
+  }
+
+  return profileName;
 }
 
 function getArchiveAmountLabel(order) {
