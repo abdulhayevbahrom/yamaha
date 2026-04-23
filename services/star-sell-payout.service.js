@@ -1,6 +1,7 @@
 const Order = require("../model/order.model");
 const { emitAdminUpdate, emitUserUpdate } = require("../socket");
 const { sendTelegramText, editTelegramText } = require("./telegram-notify.service");
+const { sendOrderArchive } = require("./order-archive.service");
 
 const STAR_SELL_READY_STATUSES = new Set([
   "payment_submitted",
@@ -95,6 +96,7 @@ async function confirmStarSellPayoutById(orderId) {
     },
   };
   await order.save();
+  await sendOrderArchive(order, { statusLabel: "Pul o'tkazildi" });
   await syncAdminNotificationMessages(order, "✅ Holat: Tasdiqlandi");
 
   emitAdminUpdate({

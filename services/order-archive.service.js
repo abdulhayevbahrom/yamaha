@@ -12,6 +12,7 @@ const productLabels = {
   freefire: "Free Fire Diamond",
   mlbb: "MLBB Diamond",
   balance: "Balans to'ldirish",
+  star_sell: "Star Sotish",
 };
 
 async function sendOrderArchive(orderOrId, options = {}) {
