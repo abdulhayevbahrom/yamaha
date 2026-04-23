@@ -589,7 +589,7 @@ async function startBot({ strict = false } = {}) {
       await bot.answerCallbackQuery(query.id, {
         text: result.alreadyCompleted
           ? "Avval tasdiqlangan"
-          : "Payout tasdiqlandi",
+          : "Pul o'tkazish tasdiqlandi",
       });
 
       if (query.message?.message_id) {

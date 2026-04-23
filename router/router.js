@@ -291,6 +291,11 @@ router.post(
   orderController.confirmStarSellPayout,
 );
 router.post(
+  "/admin/orders/:id/cancel-star-sell",
+  authMiddleware,
+  orderController.cancelStarSellPayout,
+);
+router.post(
   "/admin/orders/:id/confirm-uc",
   authMiddleware,
   orderController.confirmUcOrder,

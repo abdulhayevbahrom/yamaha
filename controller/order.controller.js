@@ -27,6 +27,7 @@ const { getTelegramUserFromRequest } = require("../utils/tg-user");
 const { selectPaymentCardForType } = require("../services/payment-card.service");
 const {
   confirmStarSellPayoutById,
+  cancelStarSellPayoutById,
 } = require("../services/star-sell-payout.service");
 
 let sequence = 1;
@@ -36,6 +37,12 @@ const STARS_INVOICE_PRODUCTS = new Set(["uc", "freefire", "mlbb", "star_sell"]);
 
 function normalizeCardNumber(value) {
   return String(value || "").replace(/\D/g, "").slice(0, 16);
+}
+
+function isSupportedUzCardNetwork(cardNumber) {
+  const digits = normalizeCardNumber(cardNumber);
+  if (digits.length < 4) return false;
+  return digits.startsWith("8600") || digits.startsWith("9860");
 }
 
 function getOrderProductLabel(product) {
@@ -314,6 +321,12 @@ const createOrder = async (req, res) => {
       }
       if (sellCardNumber.length !== 16) {
         return response.error(res, "Karta raqami 16 ta bo'lishi kerak");
+      }
+      if (!isSupportedUzCardNetwork(sellCardNumber)) {
+        return response.error(
+          res,
+          "Faqat HUMO yoki UZCARD kartalari qabul qilinadi",
+        );
       }
       resolvedAmount = qty;
       resolvedBasePrice = qty * Number(pricing.pricePerStar || 0);
@@ -1138,7 +1151,7 @@ const confirmStarSellPayout = async (req, res) => {
       if (result.reason === "not_star_sell") {
         return response.error(res, "Bu order star sell orderi emas");
       }
-      return response.error(res, "Order hali payout uchun tayyor emas");
+      return response.error(res, "Order hali pul o'tkazish uchun tayyor emas");
     }
     if (result.alreadyCompleted) {
       return response.success(
@@ -1148,11 +1161,53 @@ const confirmStarSellPayout = async (req, res) => {
       );
     }
 
-    return response.success(res, "Star sell payout tasdiqlandi", result.order);
+    return response.success(
+      res,
+      "Star sell bo'yicha pul o'tkazish tasdiqlandi",
+      result.order,
+    );
   } catch (error) {
     return response.serverError(
       res,
-      "Star sell payout tasdiqlashda xatolik",
+      "Star sell bo'yicha pul o'tkazishni tasdiqlashda xatolik",
+      error.message,
+    );
+  }
+};
+
+const cancelStarSellPayout = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await cancelStarSellPayoutById(id);
+    if (!result.ok) {
+      if (result.reason === "not_found") {
+        return response.notFound(res, "Order topilmadi");
+      }
+      if (result.reason === "not_star_sell") {
+        return response.error(res, "Bu order star sell orderi emas");
+      }
+      if (result.reason === "already_completed") {
+        return response.error(res, "Order allaqachon tasdiqlangan");
+      }
+      return response.error(res, "Orderni bekor qilish hozir mumkin emas");
+    }
+    if (result.alreadyCancelled) {
+      return response.success(
+        res,
+        "Order allaqachon bekor qilingan",
+        result.order,
+      );
+    }
+
+    return response.success(
+      res,
+      "Star sell buyurtmasi bekor qilindi",
+      result.order,
+    );
+  } catch (error) {
+    return response.serverError(
+      res,
+      "Star sell buyurtmasini bekor qilishda xatolik",
       error.message,
     );
   }
@@ -1168,6 +1223,7 @@ module.exports = {
   retryFulfillment,
   markAutobuyOrderCompleted,
   confirmStarSellPayout,
+  cancelStarSellPayout,
   confirmUcOrder,
   cancelUcOrder,
   cancelOrder,

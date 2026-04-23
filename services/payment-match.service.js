@@ -29,10 +29,10 @@ async function notifyAdminsAboutStarSell(order) {
     `✨ Star: ${Number(order?.customAmount || 0).toLocaleString("uz-UZ")}`,
     `💵 To'lov summasi: ${Number(order?.expectedAmount || 0).toLocaleString("uz-UZ")} UZS`,
     `💳 Mijoz kartasi: ${String(order?.sellCardNumber || "-")}`,
-    "Admin paneldan payout qilib, tasdiqlashni bosing.",
+    "Pul o'tkazgach, tasdiqlashni bosing.",
   ].join("\n");
 
-  await Promise.allSettled(
+  const results = await Promise.all(
     adminIds.map((adminId) =>
       sendTelegramText(adminId, text, {
         reply_markup: {
@@ -52,6 +52,30 @@ async function notifyAdminsAboutStarSell(order) {
       }),
     ),
   );
+
+  const sentNotifications = results
+    .filter((item) => item?.ok && Number(item?.messageId || 0) > 0)
+    .map((item) => ({
+      chatId: String(item.chatId || ""),
+      messageId: Number(item.messageId || 0),
+    }))
+    .filter((item) => item.chatId && item.messageId > 0);
+
+  if (!sentNotifications.length || !order?._id) return;
+
+  const fragmentTx =
+    order?.fragmentTx && typeof order.fragmentTx === "object" && !Array.isArray(order.fragmentTx)
+      ? order.fragmentTx
+      : {};
+
+  await Order.findByIdAndUpdate(order._id, {
+    $set: {
+      fragmentTx: {
+        ...fragmentTx,
+        starSellAdminNotifications: sentNotifications,
+      },
+    },
+  });
 }
 
 function parseAmountFromText(text) {

@@ -19,13 +19,38 @@ async function sendTelegramText(chatId, text, extra = {}) {
   }
 
   try {
-    await bot.sendMessage(target, text, extra);
-    return { ok: true };
+    const sent = await bot.sendMessage(target, text, extra);
+    return {
+      ok: true,
+      chatId: String(sent?.chat?.id || target),
+      messageId: Number(sent?.message_id || 0),
+    };
   } catch (error) {
     return { ok: false, reason: error.message || "notify_failed" };
   }
 }
 
+async function editTelegramText(chatId, messageId, text, extra = {}) {
+  const bot = getNotifyBot();
+  const target = String(chatId || "").trim();
+  const msgId = Number(messageId || 0);
+  if (!bot || !target || !text || !msgId) {
+    return { ok: false, reason: "notify_not_configured" };
+  }
+
+  try {
+    await bot.editMessageText(text, {
+      chat_id: target,
+      message_id: msgId,
+      ...extra,
+    });
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, reason: error.message || "notify_edit_failed" };
+  }
+}
+
 module.exports = {
   sendTelegramText,
+  editTelegramText,
 };

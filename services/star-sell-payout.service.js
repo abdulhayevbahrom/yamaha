@@ -1,6 +1,6 @@
 const Order = require("../model/order.model");
 const { emitAdminUpdate, emitUserUpdate } = require("../socket");
-const { sendTelegramText } = require("./telegram-notify.service");
+const { sendTelegramText, editTelegramText } = require("./telegram-notify.service");
 
 const STAR_SELL_READY_STATUSES = new Set([
   "payment_submitted",
@@ -27,6 +27,37 @@ function getSafeFragmentTx(order) {
     !Array.isArray(order.fragmentTx)
     ? order.fragmentTx
     : {};
+}
+
+function buildAdminResolutionText(order, statusText) {
+  const username = String(order?.tgUsername || "").trim();
+  const usernameLabel = username ? `@${username}` : "-";
+  return [
+    "⭐ Star sotish to'lovi qabul qilindi",
+    `🧾 Buyurtma: #${order?.orderId || "-"}`,
+    `👤 Mijoz: ${usernameLabel} (${String(order?.tgUserId || "-")})`,
+    `✨ Star: ${Number(order?.customAmount || 0).toLocaleString("uz-UZ")}`,
+    `💵 To'lov summasi: ${Number(order?.expectedAmount || 0).toLocaleString("uz-UZ")} UZS`,
+    `💳 Mijoz kartasi: ${String(order?.sellCardNumber || "-")}`,
+    statusText,
+  ].join("\n");
+}
+
+async function syncAdminNotificationMessages(order, statusText) {
+  const fragmentTx = getSafeFragmentTx(order);
+  const items = Array.isArray(fragmentTx?.starSellAdminNotifications)
+    ? fragmentTx.starSellAdminNotifications
+    : [];
+  if (!items.length) return;
+
+  const text = buildAdminResolutionText(order, statusText);
+  await Promise.allSettled(
+    items.map((item) =>
+      editTelegramText(item?.chatId, item?.messageId, text, {
+        reply_markup: { inline_keyboard: [] },
+      }),
+    ),
+  );
 }
 
 async function confirmStarSellPayoutById(orderId) {
@@ -64,6 +95,7 @@ async function confirmStarSellPayoutById(orderId) {
     },
   };
   await order.save();
+  await syncAdminNotificationMessages(order, "✅ Holat: Tasdiqlandi");
 
   emitAdminUpdate({
     type: "star_sell_payout_confirmed",
@@ -85,7 +117,7 @@ async function confirmStarSellPayoutById(orderId) {
     });
 
     const msg = [
-      "✅ Star sotish buyurtmangiz bo'yicha payout tasdiqlandi.",
+      "✅ Star sotish buyurtmangiz bo'yicha pul o'tkazilishi tasdiqlandi.",
       `🧾 Buyurtma: #${order.orderId || "-"}`,
       `✨ Star: ${Number(order.customAmount || 0).toLocaleString("uz-UZ")}`,
       `💵 To'lanadigan summa: ${Number(order.expectedAmount || 0).toLocaleString("uz-UZ")} UZS`,
@@ -136,6 +168,10 @@ async function cancelStarSellPayoutById(orderId) {
     },
   };
   await order.save();
+  await syncAdminNotificationMessages(
+    order,
+    `❌ Holat: Bekor qilindi (support: ${managerUsername})`,
+  );
 
   emitAdminUpdate({
     type: "star_sell_payout_cancelled",
