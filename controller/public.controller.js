@@ -15,6 +15,7 @@ const {
   checkTelegramPremium,
   isTelegramPremiumCheckConfigured,
 } = require("../services/telegram-premium-check.service");
+const { normalizeCardBin, lookupCardBinInfo } = require("../services/card-bin.service");
 // const { ensureDefaultPlans } = require("../services/plan.service");
 
 const categoryNames = {
@@ -153,18 +154,6 @@ function buildTopSalesBuyerName(order) {
   return `@${username}`;
 }
 
-function normalizeCardBin(value) {
-  return String(value || "").replace(/\D/g, "").slice(0, 8);
-}
-
-function detectLocalCardNetwork(bin) {
-  const normalized = normalizeCardBin(bin);
-  if (!normalized) return "";
-  if (normalized.startsWith("8600")) return "UZCARD";
-  if (normalized.startsWith("9860")) return "HUMO";
-  return "";
-}
-
 const health = async (_, res) => response.success(res, "API ishlayapti");
 
 const getCatalog = async (_, res) => {
@@ -205,53 +194,18 @@ const getCardBinInfo = async (req, res) => {
     return response.error(res, "BIN kamida 6 ta raqam bo'lishi kerak");
   }
 
-  const localNetwork = detectLocalCardNetwork(bin);
-  const fallbackPayload = {
-    bin,
-    found: false,
-    bankName: "",
-    scheme: localNetwork || "",
-    type: "",
-    country: "",
-    localNetwork,
-  };
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 4500);
-
   try {
-    const external = await fetch(`https://lookup.binlist.net/${encodeURIComponent(bin)}`, {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        "Accept-Version": "3",
-      },
-      signal: controller.signal,
-    });
-
-    if (!external.ok) {
-      return response.success(res, "BIN info", fallbackPayload);
-    }
-
-    const data = await external.json().catch(() => null);
-    const bankName = String(data?.bank?.name || "").trim();
-    const scheme = String(data?.scheme || localNetwork || "").trim().toUpperCase();
-    const type = String(data?.type || "").trim();
-    const country = String(data?.country?.name || "").trim();
-
+    const payload = await lookupCardBinInfo(bin);
+    return response.success(res, "BIN info", payload);
+  } catch (_) {
     return response.success(res, "BIN info", {
       bin,
-      found: Boolean(bankName || scheme || type || country),
-      bankName,
-      scheme,
-      type,
-      country,
-      localNetwork,
+      found: false,
+      bankName: "",
+      scheme: "",
+      type: "",
+      country: "",
     });
-  } catch (_) {
-    return response.success(res, "BIN info", fallbackPayload);
-  } finally {
-    clearTimeout(timer);
   }
 };
 
