@@ -47,6 +47,7 @@ const integrationRateLimit = createRateLimit({
 router.get("/health", publicController.health);
 router.get("/catalog", publicController.getCatalog);
 router.get("/settings", publicController.getSettings);
+router.get("/card-bin/:bin", publicController.getCardBinInfo);
 router.get("/top-sales", publicController.getTopSales);
 router.get("/force-join/check", publicController.checkForceJoin);
 router.get("/lookup-profile", publicController.lookupProfile);
