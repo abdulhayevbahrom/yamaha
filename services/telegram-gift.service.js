@@ -910,6 +910,140 @@ function detectImageContentType(buffer) {
   return "";
 }
 
+function readUInt24LE(buffer, offset) {
+  return (
+    (buffer[offset] || 0) |
+    ((buffer[offset + 1] || 0) << 8) |
+    ((buffer[offset + 2] || 0) << 16)
+  );
+}
+
+function detectPngDimensions(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 24) return null;
+  if (
+    buffer[0] !== 0x89 ||
+    buffer[1] !== 0x50 ||
+    buffer[2] !== 0x4e ||
+    buffer[3] !== 0x47
+  ) {
+    return null;
+  }
+  const width = buffer.readUInt32BE(16);
+  const height = buffer.readUInt32BE(20);
+  if (!width || !height) return null;
+  return { width, height };
+}
+
+function detectGifDimensions(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 10) return null;
+  if (buffer.slice(0, 3).toString("ascii") !== "GIF") return null;
+  const width = buffer.readUInt16LE(6);
+  const height = buffer.readUInt16LE(8);
+  if (!width || !height) return null;
+  return { width, height };
+}
+
+function detectJpegDimensions(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 4) return null;
+  if (buffer[0] !== 0xff || buffer[1] !== 0xd8) return null;
+
+  let offset = 2;
+  while (offset + 9 < buffer.length) {
+    if (buffer[offset] !== 0xff) {
+      offset += 1;
+      continue;
+    }
+
+    const marker = buffer[offset + 1];
+    if (marker === 0xd8 || marker === 0xd9) {
+      offset += 2;
+      continue;
+    }
+
+    if (offset + 4 > buffer.length) break;
+    const segmentLength = buffer.readUInt16BE(offset + 2);
+    if (segmentLength < 2) break;
+
+    const isSofMarker =
+      (marker >= 0xc0 && marker <= 0xc3) ||
+      (marker >= 0xc5 && marker <= 0xc7) ||
+      (marker >= 0xc9 && marker <= 0xcb) ||
+      (marker >= 0xcd && marker <= 0xcf);
+
+    if (isSofMarker && offset + 9 < buffer.length) {
+      const height = buffer.readUInt16BE(offset + 5);
+      const width = buffer.readUInt16BE(offset + 7);
+      if (width && height) return { width, height };
+    }
+
+    offset += 2 + segmentLength;
+  }
+
+  return null;
+}
+
+function detectWebpDimensions(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 30) return null;
+  if (
+    buffer.slice(0, 4).toString("ascii") !== "RIFF" ||
+    buffer.slice(8, 12).toString("ascii") !== "WEBP"
+  ) {
+    return null;
+  }
+
+  let offset = 12;
+  while (offset + 8 <= buffer.length) {
+    const chunkType = buffer.slice(offset, offset + 4).toString("ascii");
+    const chunkSize = buffer.readUInt32LE(offset + 4);
+    const chunkDataStart = offset + 8;
+    const chunkDataEnd = chunkDataStart + chunkSize;
+    if (chunkDataEnd > buffer.length) break;
+
+    if (chunkType === "VP8X" && chunkSize >= 10) {
+      const width = readUInt24LE(buffer, chunkDataStart + 4) + 1;
+      const height = readUInt24LE(buffer, chunkDataStart + 7) + 1;
+      if (width && height) return { width, height };
+    }
+
+    if (chunkType === "VP8 " && chunkSize >= 10) {
+      const frameStart = chunkDataStart + 3;
+      if (
+        frameStart + 7 < buffer.length &&
+        buffer[frameStart + 3] === 0x9d &&
+        buffer[frameStart + 4] === 0x01 &&
+        buffer[frameStart + 5] === 0x2a
+      ) {
+        const width = buffer.readUInt16LE(frameStart + 6) & 0x3fff;
+        const height = buffer.readUInt16LE(frameStart + 8) & 0x3fff;
+        if (width && height) return { width, height };
+      }
+    }
+
+    if (chunkType === "VP8L" && chunkSize >= 5) {
+      const b0 = buffer[chunkDataStart + 1];
+      const b1 = buffer[chunkDataStart + 2];
+      const b2 = buffer[chunkDataStart + 3];
+      const b3 = buffer[chunkDataStart + 4];
+      const width = ((b1 & 0x3f) << 8 | b0) + 1;
+      const height = ((b3 & 0x0f) << 10 | b2 << 2 | (b1 & 0xc0) >> 6) + 1;
+      if (width && height) return { width, height };
+    }
+
+    offset = chunkDataEnd + (chunkSize % 2);
+  }
+
+  return null;
+}
+
+function detectImageDimensions(buffer, contentType) {
+  const type = normalizeString(contentType);
+  if (type === "image/png") return detectPngDimensions(buffer);
+  if (type === "image/jpeg") return detectJpegDimensions(buffer);
+  if (type === "image/gif") return detectGifDimensions(buffer);
+  if (type === "image/webp") return detectWebpDimensions(buffer);
+  return null;
+}
+
 function escapeSvgText(value) {
   return String(value || "")
     .replace(/&/g, "&amp;")
@@ -961,6 +1095,7 @@ async function downloadImageFromTelegramDocument(client, document) {
 
   // Try full-resolution media first; fallback to Telegram thumbnails only if needed.
   const thumbOptions = [undefined, "x", "m", 2, 1, 0];
+  let bestCandidate = null;
 
   for (const thumb of thumbOptions) {
     try {
@@ -978,17 +1113,35 @@ async function downloadImageFromTelegramDocument(client, document) {
       if (!contentType) {
         continue;
       }
+      const dimensions = detectImageDimensions(downloaded, contentType);
+      const width = toSafeNumber(dimensions?.width, 0);
+      const height = toSafeNumber(dimensions?.height, 0);
+      const area = width > 0 && height > 0 ? width * height : 0;
+      const score = area > 0 ? area * 1000 + downloaded.length : downloaded.length;
 
-      return {
-        buffer: downloaded,
-        contentType,
-      };
+      if (!bestCandidate || score > bestCandidate.score) {
+        bestCandidate = {
+          buffer: downloaded,
+          contentType,
+          score,
+          area,
+        };
+      }
+
+      // 700x700+ preview is already sharp enough for marketplace cards.
+      if (area >= 490000) {
+        break;
+      }
     } catch (_) {
       // try next thumb option
     }
   }
 
-  return null;
+  if (!bestCandidate) return null;
+  return {
+    buffer: bestCandidate.buffer,
+    contentType: bestCandidate.contentType,
+  };
 }
 
 async function getGiftImageBuffer(giftId) {
