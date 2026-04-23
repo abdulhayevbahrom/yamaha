@@ -15,6 +15,23 @@ const productLabels = {
   star_sell: "Star Sotish",
 };
 
+function getArchiveCustomerLabel(order) {
+  const profileName = String(order?.profileName || "").trim();
+  if (profileName) return profileName;
+  return "-";
+}
+
+function getArchiveAmountLabel(order) {
+  const product = String(order?.product || "").trim().toLowerCase();
+  const customAmount = Number(order?.customAmount || 0);
+
+  if ((product === "star" || product === "star_sell") && customAmount > 0) {
+    return customAmount;
+  }
+
+  return String(order?.planCode || "-");
+}
+
 async function sendOrderArchive(orderOrId, options = {}) {
   try {
     const { statusLabel = "Muvaffaqiyatli" } = options;
@@ -31,16 +48,14 @@ async function sendOrderArchive(orderOrId, options = {}) {
       return { ok: true, skipped: true, reason: "already_archived" };
     }
 
-    const amountValue =
-      order.product === "star" && Number(order.customAmount || 0) > 0
-        ? order.customAmount
-        : order.planCode;
+    const amountValue = getArchiveAmountLabel(order);
+    const customerLabel = getArchiveCustomerLabel(order);
 
     const message = [
       "✅ Muvaffaqiyatli buyurtma",
       `🧾 Buyurtma: <code>${order.orderId}</code>`,
       `📦 Mahsulot: <b>${productLabels[order.product] || order.product}</b>`,
-      `👤 Mijoz: <code>${order.profileName || "-"}</code>`,
+      `👤 Mijoz: <code>${customerLabel}</code>`,
       `🎮 Miqdor: <code>${amountValue}</code>`,
       `💵 Summa: <b>${Number(order.paidAmount || order.expectedAmount || 0)} UZS</b>`,
       `💳 To'lov: <b>${order.paymentMethod || "-"}</b>`,
