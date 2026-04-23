@@ -257,14 +257,7 @@ async function processTelegramStarsPayment({
     return { matched: false, reason: "payload_required" };
   }
 
-  const isStarsOrderPayload = payload.startsWith("stars_order:");
-  const isStarSellPayload = payload.startsWith("stars_sell_order:");
-  if (!isStarsOrderPayload && !isStarSellPayload) {
-    return { matched: false, reason: "payload_invalid" };
-  }
-
-  const payloadPrefix = isStarSellPayload ? "stars_sell_order:" : "stars_order:";
-  const orderId = payload.slice(payloadPrefix.length).split(":")[0]?.trim();
+  const orderId = extractOrderIdFromPayload(payload);
   if (!orderId) {
     return { matched: false, reason: "order_id_missing" };
   }
@@ -385,6 +378,27 @@ async function processTelegramStarsPayment({
     paidStars,
     paidAmountUzs,
   };
+}
+
+function extractOrderIdFromPayload(payload) {
+  const normalized = String(payload || "").trim();
+  if (!normalized) return "";
+
+  const knownPrefixes = [
+    "stars_order:",
+    "stars_sell_order:",
+    "star_sell_order:",
+    "order:",
+  ];
+  for (const prefix of knownPrefixes) {
+    if (normalized.startsWith(prefix)) {
+      const candidate = normalized.slice(prefix.length).split(":")[0]?.trim();
+      if (candidate) return candidate;
+    }
+  }
+
+  const objectIdMatch = normalized.match(/\b[a-f0-9]{24}\b/i);
+  return String(objectIdMatch?.[0] || "").trim();
 }
 
 module.exports = {

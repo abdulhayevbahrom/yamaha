@@ -111,6 +111,27 @@ const buildStarSellAdminSummary = (order, statusText) => {
   ].join("\n");
 };
 
+const extractOrderIdFromInvoicePayload = (rawPayload) => {
+  const payload = String(rawPayload || "").trim();
+  if (!payload) return "";
+
+  const knownPrefixes = [
+    "stars_order:",
+    "stars_sell_order:",
+    "star_sell_order:",
+    "order:",
+  ];
+  for (const prefix of knownPrefixes) {
+    if (payload.startsWith(prefix)) {
+      const candidate = payload.slice(prefix.length).split(":")[0]?.trim();
+      if (candidate) return candidate;
+    }
+  }
+
+  const objectIdMatch = payload.match(/\b[a-f0-9]{24}\b/i);
+  return String(objectIdMatch?.[0] || "").trim();
+};
+
 async function startBot({ strict = false } = {}) {
   const token = process.env.BOT_TOKEN;
   const webAppUrl = process.env.WEB_APP_URL;
@@ -256,19 +277,9 @@ async function startBot({ strict = false } = {}) {
         const totalAmount = Math.floor(Number(query?.total_amount || 0));
         const updateUserId = String(query?.from?.id || "").trim();
 
-        const isStarsOrder = payload.startsWith("stars_order:");
-        const isStarSellOrder = payload.startsWith("stars_sell_order:");
-        if (!isStarsOrder && !isStarSellOrder) {
-          await safeAnswer(false, "Noto'g'ri invoice payload");
-          return;
-        }
-
-        const orderMongoId = payload
-          .replace(isStarSellOrder ? "stars_sell_order:" : "stars_order:", "")
-          .split(":")[0]
-          ?.trim();
+        const orderMongoId = extractOrderIdFromInvoicePayload(payload);
         if (!orderMongoId) {
-          await safeAnswer(false, "Buyurtma topilmadi");
+          await safeAnswer(false, "Noto'g'ri invoice payload");
           return;
         }
 
