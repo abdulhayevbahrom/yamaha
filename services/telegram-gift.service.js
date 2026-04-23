@@ -959,7 +959,8 @@ function withTimeout(promise, timeoutMs, timeoutMessage) {
 async function downloadImageFromTelegramDocument(client, document) {
   if (!client || !document) return null;
 
-  const thumbOptions = [0, 1, 2, "m", "x", undefined];
+  // Try full-resolution media first; fallback to Telegram thumbnails only if needed.
+  const thumbOptions = [undefined, "x", "m", 2, 1, 0];
 
   for (const thumb of thumbOptions) {
     try {
