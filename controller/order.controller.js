@@ -21,18 +21,25 @@ const { emitAdminUpdate, emitUserUpdate } = require("../socket");
 const {
   getStarPricing,
   getGameStarsPaymentConfig,
+  getStarSellPricing,
 } = require("../services/settings.service");
 const { getTelegramUserFromRequest } = require("../utils/tg-user");
 const { selectPaymentCardForType } = require("../services/payment-card.service");
+const { sendTelegramText } = require("../services/telegram-notify.service");
 
 let sequence = 1;
 const PENDING_TTL_MS = 10 * 60 * 1000;
 const ORDER_PAYMENT_METHODS = ["card", "bankomat", "uzumbank", "paynet", "click", "balance", "stars"];
-const STARS_PAYMENT_PRODUCTS = new Set(["uc", "freefire", "mlbb"]);
+const STARS_INVOICE_PRODUCTS = new Set(["uc", "freefire", "mlbb", "star_sell"]);
+
+function normalizeCardNumber(value) {
+  return String(value || "").replace(/\D/g, "").slice(0, 16);
+}
 
 function getOrderProductLabel(product) {
   const key = String(product || "").trim().toLowerCase();
   if (key === "star") return "Telegram Star";
+  if (key === "star_sell") return "Star Sell";
   if (key === "premium") return "Telegram Premium";
   if (key === "uc") return "PUBG UC";
   if (key === "mlbb") return "MLBB Diamond";
@@ -253,7 +260,7 @@ const createOrder = async (req, res) => {
     if (currentUser?.isBlocked) {
       return response.error(res, "Foydalanuvchi bloklangan");
     }
-    if (!["star", "premium", "uc", "freefire", "mlbb"].includes(product)) {
+    if (!["star", "premium", "uc", "freefire", "mlbb", "star_sell"].includes(product)) {
       return response.error(res, "Tanlangan mahsulot noto'g'ri");
     }
     if (!ORDER_PAYMENT_METHODS.includes(normalizedPaymentMethod)) {
@@ -261,12 +268,15 @@ const createOrder = async (req, res) => {
     }
     if (
       normalizedPaymentMethod === "stars" &&
-      !STARS_PAYMENT_PRODUCTS.has(String(product || "").toLowerCase())
+      !STARS_INVOICE_PRODUCTS.has(String(product || "").toLowerCase())
     ) {
       return response.error(
         res,
-        "Stars orqali to'lov faqat PUBG/Free Fire/MLBB orderlari uchun mavjud",
+        "Stars orqali to'lov bu mahsulot uchun mavjud emas",
       );
+    }
+    if (String(product || "").toLowerCase() === "star_sell" && normalizedPaymentMethod !== "stars") {
+      return response.error(res, "Star sotishda to'lov usuli faqat stars bo'lishi kerak");
     }
     const normalizedPlayerId = String(playerId || "").trim();
     const normalizedZoneId = String(zoneId || "").trim();
@@ -276,7 +286,7 @@ const createOrder = async (req, res) => {
       if (!normalizedPlayerId || !normalizedZoneId) {
         return response.error(res, "Player ID va Zone ID kiriting");
       }
-    } else if (!normalizedUsername) {
+    } else if (product !== "star_sell" && !normalizedUsername) {
       return response.error(res, "Username kiriting");
     }
 
@@ -293,7 +303,20 @@ const createOrder = async (req, res) => {
         Number(customAmount || 0) > 0 ||
         /^[0-9]+$/.test(String(planCode || "")));
 
-    if (isCustomStar) {
+    if (String(product || "").toLowerCase() === "star_sell") {
+      const pricing = await getStarSellPricing();
+      const qty = Number(customAmount || 0);
+      const sellCardNumber = normalizeCardNumber(req.body?.sellCardNumber);
+      if (!qty || qty < pricing.min || qty > pricing.max) {
+        return response.error(res, "Tanlangan miqdor noto'g'ri");
+      }
+      if (sellCardNumber.length !== 16) {
+        return response.error(res, "Karta raqami 16 ta bo'lishi kerak");
+      }
+      resolvedAmount = qty;
+      resolvedBasePrice = qty * Number(pricing.pricePerStar || 0);
+      plan = { basePrice: resolvedBasePrice, amount: qty };
+    } else if (isCustomStar) {
       const pricing = await getStarPricing();
       const qty = Number(customAmount || planCode || 0);
       if (!qty || qty < pricing.min || qty > pricing.max) {
@@ -374,13 +397,23 @@ const createOrder = async (req, res) => {
     }
 
     const nextOrderId = await getNextOrderId();
+    const normalizedSellCardNumber =
+      String(product || "").toLowerCase() === "star_sell"
+        ? normalizeCardNumber(req.body?.sellCardNumber)
+        : "";
+    const starSellPricing =
+      String(product || "").toLowerCase() === "star_sell"
+        ? await getStarSellPricing()
+        : null;
     const order = await Order.create({
       orderId: nextOrderId,
       product,
-      planCode,
+      planCode: String(product || "").toLowerCase() === "star_sell" ? "sell" : planCode,
       customAmount: Number(customAmount || 0),
       username:
-        product === "mlbb"
+        String(product || "").toLowerCase() === "star_sell"
+          ? String(tgUsername || normalizedUsername || tgUserId).trim()
+          : product === "mlbb"
           ? `${normalizedPlayerId}:${normalizedZoneId}`
           : normalizedUsername,
       playerId: normalizedPlayerId,
@@ -392,6 +425,12 @@ const createOrder = async (req, res) => {
       paymentCardId,
       paymentCardSnapshot,
       paymentMethod: normalizedPaymentMethod,
+      sellCardNumber: normalizedSellCardNumber,
+      sellPricePerStar: Number(starSellPricing?.pricePerStar || 0),
+      starsAmount:
+        String(product || "").toLowerCase() === "star_sell"
+          ? Math.max(1, Math.floor(Number(customAmount || 0)))
+          : 0,
       expectedAmount: expected,
       paidAmount: paid,
       paidAt,
@@ -505,6 +544,7 @@ function buildSearchFilter(rawSearch) {
     { fulfillmentError: safeRegex },
     { playerId: safeRegex },
     { zoneId: safeRegex },
+    { sellCardNumber: safeRegex },
     { "paymentCardSnapshot.label": safeRegex },
     { "paymentCardSnapshot.cardNumber": safeRegex },
     { "paymentCardSnapshot.cardHolder": safeRegex },
@@ -543,6 +583,12 @@ function buildHistoryFilter(scope) {
     return {
       product: { $in: ["star", "premium"] },
       fulfillmentStatus: { $in: ["failed", "processing"] },
+    };
+  }
+
+  if (scope === "star_sell") {
+    return {
+      product: "star_sell",
     };
   }
 
@@ -806,10 +852,10 @@ const createStarsInvoice = async (req, res) => {
     if (!order) {
       return response.notFound(res, "Stars to'lovli buyurtma topilmadi");
     }
-    if (!STARS_PAYMENT_PRODUCTS.has(String(order.product || "").toLowerCase())) {
+    if (!STARS_INVOICE_PRODUCTS.has(String(order.product || "").toLowerCase())) {
       return response.error(
         res,
-        "Stars invoice faqat PUBG/Free Fire/MLBB orderlari uchun yaratiladi",
+        "Stars invoice bu mahsulot uchun yaratilmaydi",
       );
     }
 
@@ -823,16 +869,26 @@ const createStarsInvoice = async (req, res) => {
       return response.error(res, "Buyurtma muddati tugagan");
     }
 
-    const gameStarsPricing = await getGameStarsPaymentConfig();
-    const pricePerStar = Math.max(
-      1,
-      Number(gameStarsPricing?.pricePerStar || 220),
-    );
-    const starsAmount = Math.max(
-      1,
-      Math.ceil(Number(order.expectedAmount || 0) / pricePerStar),
-    );
-    const payload = `stars_order:${String(order._id)}:${Date.now()}`;
+    let starsAmount = 0;
+    let payloadPrefix = "stars_order";
+    if (String(order.product || "").toLowerCase() === "star_sell") {
+      starsAmount = Math.max(
+        1,
+        Math.floor(Number(order.customAmount || order.starsAmount || 0)),
+      );
+      payloadPrefix = "stars_sell_order";
+    } else {
+      const gameStarsPricing = await getGameStarsPaymentConfig();
+      const pricePerStar = Math.max(
+        1,
+        Number(gameStarsPricing?.pricePerStar || 220),
+      );
+      starsAmount = Math.max(
+        1,
+        Math.ceil(Number(order.expectedAmount || 0) / pricePerStar),
+      );
+    }
+    const payload = `${payloadPrefix}:${String(order._id)}:${Date.now()}`;
     const invoiceLink = await createTelegramStarsInvoiceLink({
       order,
       starsAmount,
@@ -1069,6 +1125,82 @@ const markAutobuyOrderCompleted = async (req, res) => {
   }
 };
 
+const confirmStarSellPayout = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const order = await Order.findById(id);
+    if (!order) return response.notFound(res, "Order topilmadi");
+
+    if (String(order.product || "").toLowerCase() !== "star_sell") {
+      return response.error(res, "Bu order star sell orderi emas");
+    }
+
+    if (!["payment_submitted", "paid_auto_processed", "completed"].includes(String(order.status || ""))) {
+      return response.error(res, "Order hali payout uchun tayyor emas");
+    }
+
+    if (String(order.status || "") === "completed") {
+      return response.success(res, "Order allaqachon tasdiqlangan", order);
+    }
+
+    const now = new Date();
+    const fragmentTx =
+      order.fragmentTx && typeof order.fragmentTx === "object" && !Array.isArray(order.fragmentTx)
+        ? order.fragmentTx
+        : {};
+
+    order.status = "completed";
+    order.fulfillmentStatus = "success";
+    order.completionMode = "manual";
+    order.fulfilledAt = now;
+    order.fulfillmentError = "";
+    order.fragmentTx = {
+      ...fragmentTx,
+      starSellPayout: {
+        confirmedByAdmin: true,
+        confirmedAt: now.toISOString(),
+      },
+    };
+    await order.save();
+
+    emitAdminUpdate({
+      type: "star_sell_payout_confirmed",
+      refreshHistory: true,
+      orderId: order._id,
+      orderCode: order.orderId,
+      product: order.product,
+      tgUserId: order.tgUserId,
+    });
+
+    if (String(order.tgUserId || "").trim()) {
+      emitUserUpdate(String(order.tgUserId), {
+        type: "star_sell_payout_completed",
+        refreshOrders: true,
+        refreshBalance: false,
+        orderId: order._id,
+        status: order.status,
+        product: order.product,
+      });
+
+      const msg = [
+        "✅ Star sotish buyurtmangiz bo'yicha payout tasdiqlandi.",
+        `🧾 Buyurtma: #${order.orderId || "-"}`,
+        `✨ Star: ${Number(order.customAmount || 0).toLocaleString("uz-UZ")}`,
+        `💵 To'lanadigan summa: ${Number(order.expectedAmount || 0).toLocaleString("uz-UZ")} UZS`,
+      ].join("\n");
+      await sendTelegramText(order.tgUserId, msg);
+    }
+
+    return response.success(res, "Star sell payout tasdiqlandi", order);
+  } catch (error) {
+    return response.serverError(
+      res,
+      "Star sell payout tasdiqlashda xatolik",
+      error.message,
+    );
+  }
+};
+
 module.exports = {
   calculatePrice,
   createOrder,
@@ -1078,6 +1210,7 @@ module.exports = {
   processCardPayment,
   retryFulfillment,
   markAutobuyOrderCompleted,
+  confirmStarSellPayout,
   confirmUcOrder,
   cancelUcOrder,
   cancelOrder,

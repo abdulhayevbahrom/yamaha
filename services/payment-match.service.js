@@ -6,6 +6,36 @@ const { emitAdminUpdate, emitUserUpdate } = require("../socket");
 const { notifyGamePaid } = require("./notify.service");
 const { sendOrderArchive } = require("./order-archive.service");
 const { isManualGameProduct } = require("./uc-fulfillment.service");
+const { sendTelegramText } = require("./telegram-notify.service");
+
+function getAdminNotifyIds() {
+  return String(process.env.ADMIN_NOTIFY_CHAT_ID || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+async function notifyAdminsAboutStarSell(order) {
+  if (!order) return;
+  const adminIds = getAdminNotifyIds();
+  if (!adminIds.length) return;
+
+  const username = String(order?.tgUsername || "").trim();
+  const usernameLabel = username ? `@${username}` : "-";
+  const text = [
+    "⭐ Star sotish to'lovi qabul qilindi",
+    `🧾 Buyurtma: #${order?.orderId || "-"}`,
+    `👤 Mijoz: ${usernameLabel} (${String(order?.tgUserId || "-")})`,
+    `✨ Star: ${Number(order?.customAmount || 0).toLocaleString("uz-UZ")}`,
+    `💵 To'lov summasi: ${Number(order?.expectedAmount || 0).toLocaleString("uz-UZ")} UZS`,
+    `💳 Mijoz kartasi: ${String(order?.sellCardNumber || "-")}`,
+    "Admin paneldan payout qilib, tasdiqlashni bosing.",
+  ].join("\n");
+
+  await Promise.allSettled(
+    adminIds.map((adminId) => sendTelegramText(adminId, text)),
+  );
+}
 
 function parseAmountFromText(text) {
   const raw = String(text || "");
@@ -210,12 +240,14 @@ async function processTelegramStarsPayment({
     return { matched: false, reason: "payload_required" };
   }
 
-  const expectedPrefix = "stars_order:";
-  if (!payload.startsWith(expectedPrefix)) {
+  const isStarsOrderPayload = payload.startsWith("stars_order:");
+  const isStarSellPayload = payload.startsWith("stars_sell_order:");
+  if (!isStarsOrderPayload && !isStarSellPayload) {
     return { matched: false, reason: "payload_invalid" };
   }
 
-  const orderId = payload.slice(expectedPrefix.length).split(":")[0]?.trim();
+  const payloadPrefix = isStarSellPayload ? "stars_sell_order:" : "stars_order:";
+  const orderId = payload.slice(payloadPrefix.length).split(":")[0]?.trim();
   if (!orderId) {
     return { matched: false, reason: "order_id_missing" };
   }
@@ -263,11 +295,16 @@ async function processTelegramStarsPayment({
       ? order.fragmentTx
       : {};
 
+  const nextStatus =
+    String(order.product || "").toLowerCase() === "star_sell"
+      ? "payment_submitted"
+      : "paid_auto_processed";
+
   const updated = await Order.findOneAndUpdate(
     { _id: order._id, status: "pending_payment" },
     {
       $set: {
-        status: "paid_auto_processed",
+        status: nextStatus,
         paidAmount: paidAmountUzs,
         paidAt: now,
         starsTelegramChargeId: String(telegramPaymentChargeId || "").trim(),
@@ -289,6 +326,35 @@ async function processTelegramStarsPayment({
 
   if (!updated) {
     return { matched: false, reason: "race_condition", order, duplicate: true };
+  }
+
+  if (String(updated.product || "").toLowerCase() === "star_sell") {
+    emitAdminUpdate({
+      type: "star_sell_paid",
+      refreshHistory: true,
+      orderId: updated._id,
+      orderCode: updated.orderId,
+      product: updated.product,
+      tgUserId: updated.tgUserId,
+    });
+    if (String(updated.tgUserId || "").trim()) {
+      emitUserUpdate(updated.tgUserId, {
+        type: "star_sell_payment_received",
+        refreshOrders: true,
+        refreshBalance: false,
+        orderId: updated._id,
+        status: updated.status,
+        product: updated.product,
+      });
+    }
+    await notifyAdminsAboutStarSell(updated);
+    return {
+      matched: true,
+      order: updated,
+      fulfillment: null,
+      paidStars,
+      paidAmountUzs,
+    };
   }
 
   const { fulfillment } = await handlePostPaymentEffects(updated, paidAmountUzs, {

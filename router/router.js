@@ -285,6 +285,11 @@ router.post(
   orderController.markAutobuyOrderCompleted,
 );
 router.post(
+  "/admin/orders/:id/confirm-star-sell",
+  authMiddleware,
+  orderController.confirmStarSellPayout,
+);
+router.post(
   "/admin/orders/:id/confirm-uc",
   authMiddleware,
   orderController.confirmUcOrder,

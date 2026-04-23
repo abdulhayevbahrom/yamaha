@@ -237,13 +237,15 @@ async function startBot({ strict = false } = {}) {
         const totalAmount = Math.floor(Number(query?.total_amount || 0));
         const updateUserId = String(query?.from?.id || "").trim();
 
-        if (!payload.startsWith("stars_order:")) {
+        const isStarsOrder = payload.startsWith("stars_order:");
+        const isStarSellOrder = payload.startsWith("stars_sell_order:");
+        if (!isStarsOrder && !isStarSellOrder) {
           await safeAnswer(false, "Noto'g'ri invoice payload");
           return;
         }
 
         const orderMongoId = payload
-          .replace("stars_order:", "")
+          .replace(isStarSellOrder ? "stars_sell_order:" : "stars_order:", "")
           .split(":")[0]
           ?.trim();
         if (!orderMongoId) {
@@ -801,10 +803,17 @@ async function startBot({ strict = false } = {}) {
 
       const chatId = msg?.chat?.id;
       if (!chatId) return;
-      await bot.sendMessage(
-        chatId,
-        `✅ To'lov qabul qilindi. Buyurtma #${result?.order?.orderId || "-"} bajarilmoqda.`,
-      );
+      if (String(result?.order?.product || "").toLowerCase() === "star_sell") {
+        await bot.sendMessage(
+          chatId,
+          `✅ Stars qabul qilindi. Buyurtma #${result?.order?.orderId || "-"} admin tekshiruviga yuborildi.`,
+        );
+      } else {
+        await bot.sendMessage(
+          chatId,
+          `✅ To'lov qabul qilindi. Buyurtma #${result?.order?.orderId || "-"} bajarilmoqda.`,
+        );
+      }
     }),
   );
 

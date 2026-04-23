@@ -11,7 +11,7 @@ const orderSchema = new Schema(
     },
     product: {
       type: String,
-      enum: ["star", "premium", "uc", "freefire", "mlbb", "balance"],
+      enum: ["star", "premium", "uc", "freefire", "mlbb", "balance", "star_sell"],
       required: true
     },
     planCode: {
@@ -88,6 +88,14 @@ const orderSchema = new Schema(
       type: String,
       enum: ["card", "bankomat", "uzumbank", "paynet", "click", "balance", "stars"],
       default: "card"
+    },
+    sellCardNumber: {
+      type: String,
+      default: ""
+    },
+    sellPricePerStar: {
+      type: Number,
+      default: 0
     },
     starsAmount: {
       type: Number,

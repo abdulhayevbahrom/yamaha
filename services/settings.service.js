@@ -10,6 +10,12 @@ const DEFAULT_GAME_STARS_PAYMENT_CONFIG = {
   pricePerStar: 220,
 };
 
+const DEFAULT_STAR_SELL_PRICING = {
+  pricePerStar: 220,
+  min: 50,
+  max: 10000,
+};
+
 const DEFAULT_FORCE_JOIN = {
   enabled: false,
   channelId: "",
@@ -76,6 +82,18 @@ async function getGameStarsPaymentConfig() {
   }
   return {
     pricePerStar: configured,
+  };
+}
+
+async function getStarSellPricing() {
+  const doc = await Settings.findOne({ key: "star_sell_pricing" }).lean();
+  if (!doc?.value) return DEFAULT_STAR_SELL_PRICING;
+  return {
+    pricePerStar: Number(
+      doc.value.pricePerStar || DEFAULT_STAR_SELL_PRICING.pricePerStar,
+    ),
+    min: Number(doc.value.min || DEFAULT_STAR_SELL_PRICING.min),
+    max: Number(doc.value.max || DEFAULT_STAR_SELL_PRICING.max),
   };
 }
 
@@ -436,9 +454,40 @@ async function updateNftMarketplaceConfig(payload) {
   };
 }
 
+async function updateStarSellPricing(payload) {
+  const pricePerStar = Number(payload.pricePerStar);
+  const min = Number(payload.min);
+  const max = Number(payload.max);
+
+  if (!Number.isFinite(pricePerStar) || pricePerStar <= 0) {
+    throw new Error("starSell pricePerStar noto'g'ri");
+  }
+  if (!Number.isFinite(min) || min <= 0) {
+    throw new Error("starSell min noto'g'ri");
+  }
+  if (!Number.isFinite(max) || max <= min) {
+    throw new Error("starSell max noto'g'ri");
+  }
+
+  const doc = await Settings.findOneAndUpdate(
+    { key: "star_sell_pricing" },
+    { value: { pricePerStar, min, max } },
+    { new: true, upsert: true },
+  ).lean();
+
+  return {
+    pricePerStar: Number(
+      doc?.value?.pricePerStar ?? DEFAULT_STAR_SELL_PRICING.pricePerStar,
+    ),
+    min: Number(doc?.value?.min ?? DEFAULT_STAR_SELL_PRICING.min),
+    max: Number(doc?.value?.max ?? DEFAULT_STAR_SELL_PRICING.max),
+  };
+}
+
 module.exports = {
   getStarPricing,
   getGameStarsPaymentConfig,
+  getStarSellPricing,
   getForceJoin,
   getBotStatus,
   getBotBroadcastConfig,
@@ -448,6 +497,7 @@ module.exports = {
   getNftMarketplaceConfig,
   updateStarPricing,
   updateGameStarsPaymentConfig,
+  updateStarSellPricing,
   updateForceJoin,
   updateBotStatus,
   updateBotBroadcastConfig,

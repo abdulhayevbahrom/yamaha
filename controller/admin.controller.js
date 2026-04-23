@@ -11,6 +11,7 @@ const UserBalanceAdjustment = require("../model/user-balance-adjustment.model");
 const {
   getStarPricing,
   getGameStarsPaymentConfig,
+  getStarSellPricing,
   getForceJoin,
   getBotStatus,
   getBotBroadcastConfig,
@@ -20,6 +21,7 @@ const {
   getNftMarketplaceConfig,
   updateStarPricing,
   updateGameStarsPaymentConfig,
+  updateStarSellPricing,
   updateForceJoin,
   updateBotStatus,
   updateBotBroadcastConfig,
@@ -592,6 +594,7 @@ const getSettings = async (_, res) => {
   try {
     const starPricing = await getStarPricing();
     const gameStarsPaymentConfig = await getGameStarsPaymentConfig();
+    const starSellPricing = await getStarSellPricing();
     const forceJoin = await getForceJoin();
     const botStatus = await getBotStatus();
     const botBroadcastConfig = await getBotBroadcastConfig();
@@ -603,6 +606,7 @@ const getSettings = async (_, res) => {
     return response.success(res, "Settings", {
       starPricing,
       gameStarsPaymentConfig,
+      starSellPricing,
       forceJoin,
       botStatus,
       botBroadcastConfig,
@@ -621,6 +625,7 @@ const updateSettings = async (req, res) => {
     const {
       starPricing,
       gameStarsPaymentConfig,
+      starSellPricing,
       forceJoin,
       botStatus,
       botBroadcastConfig,
@@ -633,6 +638,7 @@ const updateSettings = async (req, res) => {
     if (
       !starPricing &&
       !gameStarsPaymentConfig &&
+      !starSellPricing &&
       !forceJoin &&
       !botStatus &&
       !botBroadcastConfig &&
@@ -643,7 +649,7 @@ const updateSettings = async (req, res) => {
     ) {
       return response.error(
         res,
-        "starPricing yoki gameStarsPaymentConfig yoki forceJoin yoki botStatus yoki botBroadcastConfig yoki paymentCardConfig yoki bankomatTopupConfig yoki referralConfig yoki nftMarketplaceConfig required",
+        "starPricing yoki gameStarsPaymentConfig yoki starSellPricing yoki forceJoin yoki botStatus yoki botBroadcastConfig yoki paymentCardConfig yoki bankomatTopupConfig yoki referralConfig yoki nftMarketplaceConfig required",
       );
     }
 
@@ -655,6 +661,9 @@ const updateSettings = async (req, res) => {
       out.gameStarsPaymentConfig = await updateGameStarsPaymentConfig(
         gameStarsPaymentConfig,
       );
+    }
+    if (starSellPricing) {
+      out.starSellPricing = await updateStarSellPricing(starSellPricing);
     }
     if (forceJoin) out.forceJoin = await updateForceJoin(forceJoin);
     if (botStatus) out.botStatus = await updateBotStatus(botStatus);
