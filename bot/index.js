@@ -132,6 +132,13 @@ const extractOrderIdFromInvoicePayload = (rawPayload) => {
   return String(objectIdMatch?.[0] || "").trim();
 };
 
+const normalizeTelegramEntities = (entities) => {
+  if (!Array.isArray(entities)) return [];
+  return entities
+    .filter((entity) => entity && typeof entity === "object")
+    .map((entity) => ({ ...entity }));
+};
+
 async function startBot({ strict = false } = {}) {
   const token = process.env.BOT_TOKEN;
   const webAppUrl = process.env.WEB_APP_URL;
@@ -764,6 +771,7 @@ async function startBot({ strict = false } = {}) {
 
       if (pending.mode === "edit") {
         const newText = String(msg.text || "").trim();
+        const newEntities = normalizeTelegramEntities(msg.entities);
         if (!newText) {
           await bot.sendMessage(chatId, "❗ Matn kiriting.");
           return;
@@ -774,7 +782,12 @@ async function startBot({ strict = false } = {}) {
           pendingByAdmin.delete(String(chatId));
           return;
         }
-        await Broadcast.findByIdAndUpdate(broadcast._id, { text: newText });
+        await Broadcast.findByIdAndUpdate(broadcast._id, {
+          text: newText,
+          ...(broadcast.type === "photo"
+            ? { captionEntities: newEntities, entities: [] }
+            : { entities: newEntities, captionEntities: [] }),
+        });
         const deliveries = await BroadcastDelivery.find({
           broadcastId: broadcast._id,
         }).lean();
@@ -784,11 +797,15 @@ async function startBot({ strict = false } = {}) {
               await bot.editMessageCaption(newText, {
                 chat_id: delivery.tgUserId,
                 message_id: delivery.messageId,
+                ...(newEntities.length
+                  ? { caption_entities: newEntities }
+                  : {}),
               });
             } else {
               await bot.editMessageText(newText, {
                 chat_id: delivery.tgUserId,
                 message_id: delivery.messageId,
+                ...(newEntities.length ? { entities: newEntities } : {}),
               });
             }
           } catch (_) {
@@ -807,18 +824,27 @@ async function startBot({ strict = false } = {}) {
         if (msg.photo?.length) {
           const fileId = msg.photo[msg.photo.length - 1]?.file_id;
           const caption = String(msg.caption || "").trim();
+          const captionEntities = normalizeTelegramEntities(msg.caption_entities);
           const broadcast = await Broadcast.create({
             adminChatId: String(chatId),
             type: "photo",
             text: caption,
             photoFileId: fileId,
+            captionEntities,
           });
           for (const tgUserId of users) {
             try {
               const sent = await bot.sendPhoto(
                 tgUserId,
                 fileId,
-                caption ? { caption } : undefined,
+                caption
+                  ? {
+                      caption,
+                      ...(captionEntities.length
+                        ? { caption_entities: captionEntities }
+                        : {}),
+                    }
+                  : undefined,
               );
               await BroadcastDelivery.create({
                 broadcastId: broadcast._id,
@@ -857,14 +883,18 @@ async function startBot({ strict = false } = {}) {
 
         if (msg.text && !msg.text.startsWith("/")) {
           const payload = msg.text.trim();
+          const entities = normalizeTelegramEntities(msg.entities);
           const broadcast = await Broadcast.create({
             adminChatId: String(chatId),
             type: "text",
             text: payload,
+            entities,
           });
           for (const tgUserId of users) {
             try {
-              const sent = await bot.sendMessage(tgUserId, payload);
+              const sent = await bot.sendMessage(tgUserId, payload, {
+                ...(entities.length ? { entities } : {}),
+              });
               await BroadcastDelivery.create({
                 broadcastId: broadcast._id,
                 tgUserId,
