@@ -9,6 +9,11 @@ const {
 const { onGamePaid } = require("../services/notify.service");
 const { confirmGameOrderById } = require("../services/uc-fulfillment.service");
 const {
+  confirmStarSellPayoutById,
+  cancelStarSellPayoutById,
+  getManagerUsername,
+} = require("../services/star-sell-payout.service");
+const {
   checkForceJoinMembership,
   buildJoinUrl,
 } = require("../services/force-join.service");
@@ -90,6 +95,20 @@ const buildGameAccountLines = ({ product, username, playerId, zoneId }) => {
     lines.push(`🗺 Zone ID: <code>${resolvedZoneId}</code>`);
   }
   return lines;
+};
+
+const buildStarSellAdminSummary = (order, statusText) => {
+  const username = String(order?.tgUsername || "").trim();
+  const usernameLabel = username ? `@${username}` : "-";
+  return [
+    "⭐ Star sotish to'lovi qabul qilindi",
+    `🧾 Buyurtma: #${order?.orderId || "-"}`,
+    `👤 Mijoz: ${usernameLabel} (${String(order?.tgUserId || "-")})`,
+    `✨ Star: ${Number(order?.customAmount || 0).toLocaleString("uz-UZ")}`,
+    `💵 To'lov summasi: ${Number(order?.expectedAmount || 0).toLocaleString("uz-UZ")} UZS`,
+    `💳 Mijoz kartasi: ${String(order?.sellCardNumber || "-")}`,
+    statusText,
+  ].join("\n");
 };
 
 async function startBot({ strict = false } = {}) {
@@ -530,6 +549,103 @@ async function startBot({ strict = false } = {}) {
           show_alert: true,
         });
       }
+    }
+
+    if (query.data?.startsWith("CONFIRM_STAR_SELL:")) {
+      if (!isAdmin(chatId)) {
+        await bot.answerCallbackQuery(query.id, {
+          text: "Ruxsat yo'q",
+          show_alert: true,
+        });
+        return;
+      }
+
+      const orderId = query.data.replace("CONFIRM_STAR_SELL:", "").trim();
+      const result = await confirmStarSellPayoutById(orderId);
+      if (!result.ok) {
+        await bot.answerCallbackQuery(query.id, {
+          text:
+            result.reason === "not_found"
+              ? "Buyurtma topilmadi"
+              : result.reason === "not_star_sell"
+              ? "Bu star sell emas"
+              : "Tasdiqlash xatolik",
+          show_alert: true,
+        });
+        return;
+      }
+
+      await bot.answerCallbackQuery(query.id, {
+        text: result.alreadyCompleted
+          ? "Avval tasdiqlangan"
+          : "Payout tasdiqlandi",
+      });
+
+      if (query.message?.message_id) {
+        await bot.editMessageText(
+          buildStarSellAdminSummary(
+            result.order,
+            result.alreadyCompleted
+              ? "✅ Holat: Avval tasdiqlangan"
+              : "✅ Holat: Tasdiqlandi",
+          ),
+          {
+            chat_id: chatId,
+            message_id: query.message.message_id,
+            reply_markup: { inline_keyboard: [] },
+          },
+        );
+      }
+      return;
+    }
+
+    if (query.data?.startsWith("CANCEL_STAR_SELL:")) {
+      if (!isAdmin(chatId)) {
+        await bot.answerCallbackQuery(query.id, {
+          text: "Ruxsat yo'q",
+          show_alert: true,
+        });
+        return;
+      }
+
+      const orderId = query.data.replace("CANCEL_STAR_SELL:", "").trim();
+      const result = await cancelStarSellPayoutById(orderId);
+      if (!result.ok) {
+        const message =
+          result.reason === "not_found"
+            ? "Buyurtma topilmadi"
+            : result.reason === "not_star_sell"
+            ? "Bu star sell emas"
+            : result.reason === "already_completed"
+            ? "Buyurtma allaqachon tasdiqlangan"
+            : "Bekor qilish xatolik";
+        await bot.answerCallbackQuery(query.id, {
+          text: message,
+          show_alert: true,
+        });
+        return;
+      }
+
+      await bot.answerCallbackQuery(query.id, {
+        text: result.alreadyCancelled
+          ? "Avval bekor qilingan"
+          : "Buyurtma bekor qilindi",
+      });
+
+      if (query.message?.message_id) {
+        await bot.editMessageText(
+          buildStarSellAdminSummary(
+            result.order,
+            `❌ Holat: Bekor qilindi (support: ${getManagerUsername()})`,
+          ),
+          {
+            chat_id: chatId,
+            message_id: query.message.message_id,
+            reply_markup: { inline_keyboard: [] },
+          },
+        );
+      }
+      return;
     }
 
     if (query.data?.startsWith("COPY_UC_ID:")) {

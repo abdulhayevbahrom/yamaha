@@ -33,7 +33,24 @@ async function notifyAdminsAboutStarSell(order) {
   ].join("\n");
 
   await Promise.allSettled(
-    adminIds.map((adminId) => sendTelegramText(adminId, text)),
+    adminIds.map((adminId) =>
+      sendTelegramText(adminId, text, {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: "Tasdiqlash",
+                callback_data: `CONFIRM_STAR_SELL:${String(order?._id || "")}`,
+              },
+              {
+                text: "Bekor qilish",
+                callback_data: `CANCEL_STAR_SELL:${String(order?._id || "")}`,
+              },
+            ],
+          ],
+        },
+      }),
+    ),
   );
 }
 

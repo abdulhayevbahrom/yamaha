@@ -25,7 +25,9 @@ const {
 } = require("../services/settings.service");
 const { getTelegramUserFromRequest } = require("../utils/tg-user");
 const { selectPaymentCardForType } = require("../services/payment-card.service");
-const { sendTelegramText } = require("../services/telegram-notify.service");
+const {
+  confirmStarSellPayoutById,
+} = require("../services/star-sell-payout.service");
 
 let sequence = 1;
 const PENDING_TTL_MS = 10 * 60 * 1000;
@@ -1128,70 +1130,25 @@ const markAutobuyOrderCompleted = async (req, res) => {
 const confirmStarSellPayout = async (req, res) => {
   try {
     const { id } = req.params;
-    const order = await Order.findById(id);
-    if (!order) return response.notFound(res, "Order topilmadi");
-
-    if (String(order.product || "").toLowerCase() !== "star_sell") {
-      return response.error(res, "Bu order star sell orderi emas");
-    }
-
-    if (!["payment_submitted", "paid_auto_processed", "completed"].includes(String(order.status || ""))) {
+    const result = await confirmStarSellPayoutById(id);
+    if (!result.ok) {
+      if (result.reason === "not_found") {
+        return response.notFound(res, "Order topilmadi");
+      }
+      if (result.reason === "not_star_sell") {
+        return response.error(res, "Bu order star sell orderi emas");
+      }
       return response.error(res, "Order hali payout uchun tayyor emas");
     }
-
-    if (String(order.status || "") === "completed") {
-      return response.success(res, "Order allaqachon tasdiqlangan", order);
+    if (result.alreadyCompleted) {
+      return response.success(
+        res,
+        "Order allaqachon tasdiqlangan",
+        result.order,
+      );
     }
 
-    const now = new Date();
-    const fragmentTx =
-      order.fragmentTx && typeof order.fragmentTx === "object" && !Array.isArray(order.fragmentTx)
-        ? order.fragmentTx
-        : {};
-
-    order.status = "completed";
-    order.fulfillmentStatus = "success";
-    order.completionMode = "manual";
-    order.fulfilledAt = now;
-    order.fulfillmentError = "";
-    order.fragmentTx = {
-      ...fragmentTx,
-      starSellPayout: {
-        confirmedByAdmin: true,
-        confirmedAt: now.toISOString(),
-      },
-    };
-    await order.save();
-
-    emitAdminUpdate({
-      type: "star_sell_payout_confirmed",
-      refreshHistory: true,
-      orderId: order._id,
-      orderCode: order.orderId,
-      product: order.product,
-      tgUserId: order.tgUserId,
-    });
-
-    if (String(order.tgUserId || "").trim()) {
-      emitUserUpdate(String(order.tgUserId), {
-        type: "star_sell_payout_completed",
-        refreshOrders: true,
-        refreshBalance: false,
-        orderId: order._id,
-        status: order.status,
-        product: order.product,
-      });
-
-      const msg = [
-        "✅ Star sotish buyurtmangiz bo'yicha payout tasdiqlandi.",
-        `🧾 Buyurtma: #${order.orderId || "-"}`,
-        `✨ Star: ${Number(order.customAmount || 0).toLocaleString("uz-UZ")}`,
-        `💵 To'lanadigan summa: ${Number(order.expectedAmount || 0).toLocaleString("uz-UZ")} UZS`,
-      ].join("\n");
-      await sendTelegramText(order.tgUserId, msg);
-    }
-
-    return response.success(res, "Star sell payout tasdiqlandi", order);
+    return response.success(res, "Star sell payout tasdiqlandi", result.order);
   } catch (error) {
     return response.serverError(
       res,

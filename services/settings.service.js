@@ -12,9 +12,10 @@ const DEFAULT_GAME_STARS_PAYMENT_CONFIG = {
 
 const DEFAULT_STAR_SELL_PRICING = {
   pricePerStar: 220,
-  min: 50,
+  min: 1,
   max: 10000,
 };
+const MIN_STAR_SELL_PAYOUT_UZS = 1000;
 
 const DEFAULT_FORCE_JOIN = {
   enabled: false,
@@ -87,14 +88,7 @@ async function getGameStarsPaymentConfig() {
 
 async function getStarSellPricing() {
   const doc = await Settings.findOne({ key: "star_sell_pricing" }).lean();
-  if (!doc?.value) return DEFAULT_STAR_SELL_PRICING;
-  return {
-    pricePerStar: Number(
-      doc.value.pricePerStar || DEFAULT_STAR_SELL_PRICING.pricePerStar,
-    ),
-    min: Number(doc.value.min || DEFAULT_STAR_SELL_PRICING.min),
-    max: Number(doc.value.max || DEFAULT_STAR_SELL_PRICING.max),
-  };
+  return normalizeStarSellPricing(doc?.value);
 }
 
 async function getBotStatus() {
@@ -456,16 +450,13 @@ async function updateNftMarketplaceConfig(payload) {
 
 async function updateStarSellPricing(payload) {
   const pricePerStar = Number(payload.pricePerStar);
-  const min = Number(payload.min);
   const max = Number(payload.max);
 
   if (!Number.isFinite(pricePerStar) || pricePerStar <= 0) {
     throw new Error("starSell pricePerStar noto'g'ri");
   }
-  if (!Number.isFinite(min) || min <= 0) {
-    throw new Error("starSell min noto'g'ri");
-  }
-  if (!Number.isFinite(max) || max <= min) {
+  const min = resolveStarSellMinByPrice(pricePerStar);
+  if (!Number.isFinite(max) || max < min) {
     throw new Error("starSell max noto'g'ri");
   }
 
@@ -475,12 +466,36 @@ async function updateStarSellPricing(payload) {
     { new: true, upsert: true },
   ).lean();
 
+  return normalizeStarSellPricing(doc?.value);
+}
+
+function resolveStarSellMinByPrice(pricePerStar) {
+  const numericPrice = Number(pricePerStar);
+  const safePrice =
+    Number.isFinite(numericPrice) && numericPrice > 0
+      ? numericPrice
+      : DEFAULT_STAR_SELL_PRICING.pricePerStar;
+  return Math.max(1, Math.ceil(MIN_STAR_SELL_PAYOUT_UZS / safePrice));
+}
+
+function normalizeStarSellPricing(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const rawPrice = Number(source.pricePerStar);
+  const pricePerStar =
+    Number.isFinite(rawPrice) && rawPrice > 0
+      ? rawPrice
+      : DEFAULT_STAR_SELL_PRICING.pricePerStar;
+  const min = resolveStarSellMinByPrice(pricePerStar);
+  const rawMax = Number(source.max);
+  const defaultMax = Number(DEFAULT_STAR_SELL_PRICING.max);
+  const maxCandidate =
+    Number.isFinite(rawMax) && rawMax > 0 ? Math.floor(rawMax) : defaultMax;
+  const max = Math.max(min, maxCandidate);
+
   return {
-    pricePerStar: Number(
-      doc?.value?.pricePerStar ?? DEFAULT_STAR_SELL_PRICING.pricePerStar,
-    ),
-    min: Number(doc?.value?.min ?? DEFAULT_STAR_SELL_PRICING.min),
-    max: Number(doc?.value?.max ?? DEFAULT_STAR_SELL_PRICING.max),
+    pricePerStar,
+    min,
+    max,
   };
 }
 
