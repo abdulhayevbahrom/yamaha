@@ -1526,7 +1526,8 @@ const getDiagnostics = async (_, res) => {
       balanceTopupRows,
       nftWithdrawalRows,
       giftsTurnoverRows,
-      nftTradeTurnoverRows,
+      nftOfferTradeTurnoverRows,
+      nftMarketTradeTurnoverRows,
     ] = await Promise.all([
       User.countDocuments({}),
       User.countDocuments({ isBlocked: true }),
@@ -1602,6 +1603,20 @@ const getDiagnostics = async (_, res) => {
           },
         },
       ]),
+      UserNft.aggregate([
+        {
+          $match: {
+            lastSoldPriceUzs: { $gt: 0 },
+            lastSoldAt: { $ne: null },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            totalUzs: { $sum: "$lastSoldPriceUzs" },
+          },
+        },
+      ]),
     ]);
 
     const orderCreateSeconds = await measureSingleOrderCreateSeconds();
@@ -1611,7 +1626,9 @@ const getDiagnostics = async (_, res) => {
     const balanceTopupUzs = Number(balanceTopupRows?.[0]?.totalUzs || 0);
     const nftWithdrawalUzs = Number(nftWithdrawalRows?.[0]?.totalUzs || 0);
     const giftsTurnoverUzs = Number(giftsTurnoverRows?.[0]?.totalUzs || 0);
-    const nftTurnoverUzs = Number(nftTradeTurnoverRows?.[0]?.totalUzs || 0);
+    const nftOfferTurnoverUzs = Number(nftOfferTradeTurnoverRows?.[0]?.totalUzs || 0);
+    const nftMarketTurnoverUzs = Number(nftMarketTradeTurnoverRows?.[0]?.totalUzs || 0);
+    const nftTurnoverUzs = nftOfferTurnoverUzs + nftMarketTurnoverUzs;
     const turnoverUzs =
       ordersTurnoverUzs +
       starSellTurnoverUzs +
