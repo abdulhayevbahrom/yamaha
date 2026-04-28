@@ -1705,7 +1705,9 @@ const getActiveUsers = async (req, res) => {
         product: normalizeString(row?.product),
         tgUserId,
         username: normalizeString(user?.username),
-        profileName: normalizeString(user?.profileName),
+        profileName:
+          normalizeString(row?.profileName) ||
+          normalizeString(user?.profileName),
         displayName: normalizeDisplayName({ ...user, tgUserId }),
         totalSpent: Number(row?.expectedAmount || 0),
         ordersCount: 1,
