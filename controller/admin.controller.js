@@ -1663,35 +1663,28 @@ const getActiveUsers = async (req, res) => {
     if (period === "today") {
       start.setHours(0, 0, 0, 0);
     } else if (period === "week") {
-      start.setDate(start.getDate() - 7);
+      const day = start.getDay();
+      const diff = day === 0 ? 6 : day - 1;
+      start.setDate(start.getDate() - diff);
+      start.setHours(0, 0, 0, 0);
     } else if (period === "month") {
-      start.setMonth(start.getMonth() - 1);
+      start.setDate(1);
+      start.setHours(0, 0, 0, 0);
     } else {
       return response.error(res, "period noto'g'ri");
     }
 
-    const rows = await Order.aggregate([
-      {
-        $match: {
-          status: { $in: ["paid_auto_processed", "completed"] },
-          paidAmount: { $gt: 0 },
-          createdAt: { $gte: start },
-          tgUserId: { $exists: true, $ne: "" },
-        },
-      },
-      {
-        $group: {
-          _id: "$tgUserId",
-          totalSpent: { $sum: "$paidAmount" },
-          ordersCount: { $sum: 1 },
-          lastOrderAt: { $max: "$createdAt" },
-        },
-      },
-      { $sort: { totalSpent: -1, ordersCount: -1, lastOrderAt: -1 } },
-      { $limit: limit },
-    ]);
+    const rows = await Order.find({
+      product: { $in: ["star", "premium", "uc", "freefire", "mlbb"] },
+      status: { $in: ["paid_auto_processed", "completed"] },
+      $or: [{ paidAt: { $gte: start } }, { createdAt: { $gte: start } }],
+      tgUserId: { $exists: true, $ne: "" },
+    })
+      .sort({ expectedAmount: -1, paidAt: -1, createdAt: -1 })
+      .limit(limit)
+      .lean();
 
-    const ids = rows.map((r) => normalizeString(r?._id)).filter(Boolean);
+    const ids = rows.map((r) => normalizeString(r?.tgUserId)).filter(Boolean);
     const users = ids.length
       ? await User.find({ tgUserId: { $in: ids } })
           .select({ tgUserId: 1, username: 1, profileName: 1 })
@@ -1700,7 +1693,7 @@ const getActiveUsers = async (req, res) => {
     const userMap = new Map(users.map((u) => [normalizeString(u?.tgUserId), u]));
 
     const items = rows.map((row, index) => {
-      const tgUserId = normalizeString(row?._id);
+      const tgUserId = normalizeString(row?.tgUserId);
       const user = userMap.get(tgUserId) || {};
       const username = normalizeString(user?.username).replace(/^@+/, "");
       const telegramUrl = username
@@ -1708,13 +1701,15 @@ const getActiveUsers = async (req, res) => {
         : `tg://user?id=${tgUserId}`;
       return {
         rank: index + 1,
+        orderId: Number(row?.orderId || 0),
+        product: normalizeString(row?.product),
         tgUserId,
         username: normalizeString(user?.username),
         profileName: normalizeString(user?.profileName),
         displayName: normalizeDisplayName({ ...user, tgUserId }),
-        totalSpent: Number(row?.totalSpent || 0),
-        ordersCount: Number(row?.ordersCount || 0),
-        lastOrderAt: row?.lastOrderAt || null,
+        totalSpent: Number(row?.expectedAmount || 0),
+        ordersCount: 1,
+        lastOrderAt: row?.paidAt || row?.createdAt || null,
         telegramUrl,
       };
     });
