@@ -157,15 +157,7 @@ function buildTopSalesBuyerName(order) {
 }
 
 function buildTopSalesActorName(order) {
-  const profileName = sanitizeProfileDisplay(order?.profileName) || "-";
-  const usernameRaw = sanitizeProfileDisplay(order?.tgUsername || order?.username);
-  const username = usernameRaw
-    ? usernameRaw.startsWith("@")
-      ? usernameRaw
-      : `@${usernameRaw}`
-    : "-";
-  const tgUserId = sanitizeProfileDisplay(order?.tgUserId) || "-";
-  return `${profileName} | ${username} | ${tgUserId}`;
+  return sanitizeProfileDisplay(order?.profileName) || "-";
 }
 
 const health = async (_, res) => response.success(res, "API ishlayapti");
