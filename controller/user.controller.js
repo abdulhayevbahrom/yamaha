@@ -527,7 +527,7 @@ async function getMyOrders(req, res) {
       { $set: { status: "cancelled" } },
     );
 
-    const [orders, userGifts, acceptedOffers] = await Promise.all([
+    const [orders, userGifts, acceptedOffers, marketSales] = await Promise.all([
       Order.find({ tgUserId: tgUser.tgUserId }).sort({ createdAt: -1 }).limit(250).lean(),
       UserGift.find({ tgUserId: tgUser.tgUserId })
         .sort({ createdAt: -1 })
@@ -566,6 +566,24 @@ async function getMyOrders(req, res) {
           respondedAt: 1,
           createdAt: 1,
           updatedAt: 1,
+        })
+        .lean(),
+      UserNft.find({
+        lastSoldAt: { $ne: null },
+        $or: [
+          { lastBuyerTgUserId: tgUser.tgUserId },
+          { lastSellerTgUserId: tgUser.tgUserId },
+        ],
+      })
+        .sort({ lastSoldAt: -1, updatedAt: -1 })
+        .limit(250)
+        .select({
+          nftId: 1,
+          title: 1,
+          lastSoldAt: 1,
+          lastSoldPriceUzs: 1,
+          lastBuyerTgUserId: 1,
+          lastSellerTgUserId: 1,
         })
         .lean(),
     ]);
@@ -631,7 +649,27 @@ async function getMyOrders(req, res) {
       };
     });
 
-    const allItems = [...orderItems, ...giftItems, ...nftItems]
+    const nftMarketItems = marketSales.map((trade) => {
+      const isBuyer = normalizeString(trade?.lastBuyerTgUserId) === normalizeString(tgUser.tgUserId);
+      const sourceType = isBuyer ? "nft_buy_market" : "nft_sell_market";
+      return {
+        _id: `nft_market_${normalizeString(trade?.nftId)}_${toDateMs(trade?.lastSoldAt)}`,
+        orderId: buildVirtualOrderId(isBuyer ? "NFT-BUY" : "NFT-SELL", `${trade?.nftId || ""}_${toDateMs(trade?.lastSoldAt)}`),
+        status: "completed",
+        product: "nft",
+        planCode: normalizeString(trade?.title) || "NFT Gift",
+        expectedAmount: Number(trade?.lastSoldPriceUzs || 0),
+        paidAmount: Number(trade?.lastSoldPriceUzs || 0),
+        paymentGrossAmount: Number(trade?.lastSoldPriceUzs || 0),
+        paymentMethod: "balance",
+        createdAt: trade?.lastSoldAt || trade?.updatedAt || null,
+        updatedAt: trade?.lastSoldAt || trade?.updatedAt || null,
+        sourceType,
+        nftId: normalizeString(trade?.nftId),
+      };
+    });
+
+    const allItems = [...orderItems, ...giftItems, ...nftItems, ...nftMarketItems]
       .sort((a, b) => toDateMs(b?.createdAt || b?.updatedAt) - toDateMs(a?.createdAt || a?.updatedAt))
       .slice(0, 300);
 

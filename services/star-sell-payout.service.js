@@ -2,6 +2,7 @@ const Order = require("../model/order.model");
 const { emitAdminUpdate, emitUserUpdate } = require("../socket");
 const { sendTelegramText, editTelegramText } = require("./telegram-notify.service");
 const { sendOrderArchive } = require("./order-archive.service");
+const { getSupportConfig } = require("./settings.service");
 
 const STAR_SELL_READY_STATUSES = new Set([
   "payment_submitted",
@@ -152,7 +153,8 @@ async function cancelStarSellPayoutById(orderId) {
   }
 
   const now = new Date();
-  const managerUsername = getManagerUsername();
+  const supportConfig = await getSupportConfig().catch(() => null);
+  const managerUsername = String(supportConfig?.username || getManagerUsername()).trim();
   const managerUrl = getManagerUrl(managerUsername);
   const fragmentTx = getSafeFragmentTx(order);
 

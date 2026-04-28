@@ -56,6 +56,9 @@ const DEFAULT_NFT_WITHDRAWAL_CONFIG = {
   enabled: true,
   feePercent: 5,
 };
+const DEFAULT_SUPPORT_CONFIG = {
+  username: "@manager_premium",
+};
 
 async function getStarPricing() {
   const doc = await Settings.findOne({ key: "star_pricing" }).lean();
@@ -224,6 +227,16 @@ async function getNftWithdrawalConfig() {
       Number.isFinite(feePercent) && feePercent >= 0 && feePercent < 100
         ? feePercent
         : DEFAULT_NFT_WITHDRAWAL_CONFIG.feePercent,
+  };
+}
+
+async function getSupportConfig() {
+  const doc = await Settings.findOne({ key: "support_config" }).lean();
+  const configured = String(doc?.value?.username || "").trim();
+  const fallback = String(DEFAULT_SUPPORT_CONFIG.username || "").trim();
+  const normalized = configured || fallback;
+  return {
+    username: normalized.startsWith("@") ? normalized : `@${normalized.replace(/^@+/, "")}`,
   };
 }
 
@@ -498,6 +511,23 @@ async function updateNftWithdrawalConfig(payload) {
   };
 }
 
+async function updateSupportConfig(payload) {
+  const username = String(payload?.username || "").trim().replace(/^@+/, "");
+  if (!username) {
+    throw new Error("support username required");
+  }
+  const normalized = `@${username}`;
+  const doc = await Settings.findOneAndUpdate(
+    { key: "support_config" },
+    { value: { username: normalized } },
+    { new: true, upsert: true },
+  ).lean();
+  const saved = String(doc?.value?.username || normalized).trim();
+  return {
+    username: saved.startsWith("@") ? saved : `@${saved.replace(/^@+/, "")}`,
+  };
+}
+
 async function updateStarSellPricing(payload) {
   const pricePerStar = Number(payload.pricePerStar);
   const max = Number(payload.max);
@@ -561,6 +591,7 @@ module.exports = {
   getReferralConfig,
   getNftMarketplaceConfig,
   getNftWithdrawalConfig,
+  getSupportConfig,
   updateStarPricing,
   updateGameStarsPaymentConfig,
   updateStarSellPricing,
@@ -572,4 +603,5 @@ module.exports = {
   updateReferralConfig,
   updateNftMarketplaceConfig,
   updateNftWithdrawalConfig,
+  updateSupportConfig,
 };

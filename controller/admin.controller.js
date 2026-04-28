@@ -20,6 +20,7 @@ const {
   getReferralConfig,
   getNftMarketplaceConfig,
   getNftWithdrawalConfig,
+  getSupportConfig,
   updateStarPricing,
   updateGameStarsPaymentConfig,
   updateStarSellPricing,
@@ -31,6 +32,7 @@ const {
   updateReferralConfig,
   updateNftMarketplaceConfig,
   updateNftWithdrawalConfig,
+  updateSupportConfig,
 } = require("../services/settings.service");
 const {
   broadcastBotResumed,
@@ -605,6 +607,7 @@ const getSettings = async (_, res) => {
     const referralConfig = await getReferralConfig();
     const nftMarketplaceConfig = await getNftMarketplaceConfig();
     const nftWithdrawalConfig = await getNftWithdrawalConfig();
+    const supportConfig = await getSupportConfig();
 
     return response.success(res, "Settings", {
       starPricing,
@@ -618,6 +621,7 @@ const getSettings = async (_, res) => {
       referralConfig,
       nftMarketplaceConfig,
       nftWithdrawalConfig,
+      supportConfig,
     });
   } catch (error) {
     return response.serverError(res, "Settings xatolik", error.message);
@@ -638,6 +642,7 @@ const updateSettings = async (req, res) => {
       referralConfig,
       nftMarketplaceConfig,
       nftWithdrawalConfig,
+      supportConfig,
     } = req.body || {};
 
     if (
@@ -651,11 +656,12 @@ const updateSettings = async (req, res) => {
       !bankomatTopupConfig &&
       !referralConfig &&
       !nftMarketplaceConfig &&
-      !nftWithdrawalConfig
+      !nftWithdrawalConfig &&
+      !supportConfig
     ) {
       return response.error(
         res,
-        "starPricing yoki gameStarsPaymentConfig yoki starSellPricing yoki forceJoin yoki botStatus yoki botBroadcastConfig yoki paymentCardConfig yoki bankomatTopupConfig yoki referralConfig yoki nftMarketplaceConfig yoki nftWithdrawalConfig required",
+        "starPricing yoki gameStarsPaymentConfig yoki starSellPricing yoki forceJoin yoki botStatus yoki botBroadcastConfig yoki paymentCardConfig yoki bankomatTopupConfig yoki referralConfig yoki nftMarketplaceConfig yoki nftWithdrawalConfig yoki supportConfig required",
       );
     }
 
@@ -696,6 +702,9 @@ const updateSettings = async (req, res) => {
       out.nftWithdrawalConfig = await updateNftWithdrawalConfig(
         nftWithdrawalConfig,
       );
+    }
+    if (supportConfig) {
+      out.supportConfig = await updateSupportConfig(supportConfig);
     }
 
     const shouldBroadcastResume = Boolean(
@@ -1512,9 +1521,12 @@ const getDiagnostics = async (_, res) => {
     const [
       totalUsers,
       blockedUsers,
-      ordersTurnoverRows,
+      purchaseTurnoverRows,
+      starSellTurnoverRows,
+      balanceTopupRows,
+      nftWithdrawalRows,
       giftsTurnoverRows,
-      nftTurnoverRows,
+      nftTradeTurnoverRows,
     ] = await Promise.all([
       User.countDocuments({}),
       User.countDocuments({ isBlocked: true }),
@@ -1532,6 +1544,36 @@ const getDiagnostics = async (_, res) => {
             totalUzs: { $sum: "$paidAmount" },
           },
         },
+      ]),
+      Order.aggregate([
+        {
+          $match: {
+            product: "star_sell",
+            status: { $in: ["payment_submitted", "completed"] },
+            expectedAmount: { $gt: 0 },
+          },
+        },
+        { $group: { _id: null, totalUzs: { $sum: "$expectedAmount" } } },
+      ]),
+      Order.aggregate([
+        {
+          $match: {
+            product: "balance",
+            status: { $in: PAID_STATUSES },
+            paidAmount: { $gt: 0 },
+          },
+        },
+        { $group: { _id: null, totalUzs: { $sum: "$paidAmount" } } },
+      ]),
+      Order.aggregate([
+        {
+          $match: {
+            product: "nft_withdrawal",
+            status: { $in: ["payment_submitted", "completed"] },
+            expectedAmount: { $gt: 0 },
+          },
+        },
+        { $group: { _id: null, totalUzs: { $sum: "$expectedAmount" } } },
       ]),
       UserGift.aggregate([
         {
@@ -1564,10 +1606,19 @@ const getDiagnostics = async (_, res) => {
 
     const orderCreateSeconds = await measureSingleOrderCreateSeconds();
 
-    const ordersTurnoverUzs = Number(ordersTurnoverRows?.[0]?.totalUzs || 0);
+    const ordersTurnoverUzs = Number(purchaseTurnoverRows?.[0]?.totalUzs || 0);
+    const starSellTurnoverUzs = Number(starSellTurnoverRows?.[0]?.totalUzs || 0);
+    const balanceTopupUzs = Number(balanceTopupRows?.[0]?.totalUzs || 0);
+    const nftWithdrawalUzs = Number(nftWithdrawalRows?.[0]?.totalUzs || 0);
     const giftsTurnoverUzs = Number(giftsTurnoverRows?.[0]?.totalUzs || 0);
-    const nftTurnoverUzs = Number(nftTurnoverRows?.[0]?.totalUzs || 0);
-    const turnoverUzs = ordersTurnoverUzs + giftsTurnoverUzs + nftTurnoverUzs;
+    const nftTurnoverUzs = Number(nftTradeTurnoverRows?.[0]?.totalUzs || 0);
+    const turnoverUzs =
+      ordersTurnoverUzs +
+      starSellTurnoverUzs +
+      balanceTopupUzs +
+      nftWithdrawalUzs +
+      giftsTurnoverUzs +
+      nftTurnoverUzs;
     const blocked = Number(blockedUsers || 0);
     const total = Number(totalUsers || 0);
 
@@ -1581,6 +1632,9 @@ const getDiagnostics = async (_, res) => {
       turnover: {
         totalUzs: Math.max(0, Math.round(turnoverUzs)),
         ordersUzs: Math.max(0, Math.round(ordersTurnoverUzs)),
+        starSellUzs: Math.max(0, Math.round(starSellTurnoverUzs)),
+        balanceTopupUzs: Math.max(0, Math.round(balanceTopupUzs)),
+        nftWithdrawalUzs: Math.max(0, Math.round(nftWithdrawalUzs)),
         giftsUzs: Math.max(0, Math.round(giftsTurnoverUzs)),
         nftUzs: Math.max(0, Math.round(nftTurnoverUzs)),
       },
@@ -1590,6 +1644,91 @@ const getDiagnostics = async (_, res) => {
     return response.serverError(
       res,
       "Diagnostika ma'lumotlarini olishda xatolik",
+      error.message,
+    );
+  }
+};
+
+const getActiveUsers = async (req, res) => {
+  try {
+    const period = String(req.query?.period || "today").trim().toLowerCase();
+    const limitRaw = Number(req.query?.limit || 20);
+    const limit =
+      Number.isFinite(limitRaw) && limitRaw > 0
+        ? Math.min(100, Math.floor(limitRaw))
+        : 20;
+
+    const now = new Date();
+    const start = new Date(now);
+    if (period === "today") {
+      start.setHours(0, 0, 0, 0);
+    } else if (period === "week") {
+      start.setDate(start.getDate() - 7);
+    } else if (period === "month") {
+      start.setMonth(start.getMonth() - 1);
+    } else {
+      return response.error(res, "period noto'g'ri");
+    }
+
+    const rows = await Order.aggregate([
+      {
+        $match: {
+          status: { $in: ["paid_auto_processed", "completed"] },
+          paidAmount: { $gt: 0 },
+          createdAt: { $gte: start },
+          tgUserId: { $exists: true, $ne: "" },
+        },
+      },
+      {
+        $group: {
+          _id: "$tgUserId",
+          totalSpent: { $sum: "$paidAmount" },
+          ordersCount: { $sum: 1 },
+          lastOrderAt: { $max: "$createdAt" },
+        },
+      },
+      { $sort: { totalSpent: -1, ordersCount: -1, lastOrderAt: -1 } },
+      { $limit: limit },
+    ]);
+
+    const ids = rows.map((r) => normalizeString(r?._id)).filter(Boolean);
+    const users = ids.length
+      ? await User.find({ tgUserId: { $in: ids } })
+          .select({ tgUserId: 1, username: 1, profileName: 1 })
+          .lean()
+      : [];
+    const userMap = new Map(users.map((u) => [normalizeString(u?.tgUserId), u]));
+
+    const items = rows.map((row, index) => {
+      const tgUserId = normalizeString(row?._id);
+      const user = userMap.get(tgUserId) || {};
+      const username = normalizeString(user?.username).replace(/^@+/, "");
+      const telegramUrl = username
+        ? `https://t.me/${username}`
+        : `tg://user?id=${tgUserId}`;
+      return {
+        rank: index + 1,
+        tgUserId,
+        username: normalizeString(user?.username),
+        profileName: normalizeString(user?.profileName),
+        displayName: normalizeDisplayName({ ...user, tgUserId }),
+        totalSpent: Number(row?.totalSpent || 0),
+        ordersCount: Number(row?.ordersCount || 0),
+        lastOrderAt: row?.lastOrderAt || null,
+        telegramUrl,
+      };
+    });
+
+    return response.success(res, "Active users", {
+      period,
+      from: start.toISOString(),
+      to: now.toISOString(),
+      items,
+    });
+  } catch (error) {
+    return response.serverError(
+      res,
+      "Aktiv foydalanuvchilarni olishda xatolik",
       error.message,
     );
   }
@@ -1619,6 +1758,7 @@ module.exports = {
   topupUserBalance,
   updateUserBlockStatus,
   getDiagnostics,
+  getActiveUsers,
 };
 
 

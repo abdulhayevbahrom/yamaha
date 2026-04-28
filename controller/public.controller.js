@@ -10,6 +10,7 @@ const {
   getReferralConfig,
   getBotStatus,
   getNftWithdrawalConfig,
+  getSupportConfig,
 } = require("../services/settings.service");
 const { checkForceJoinMembership } = require("../services/force-join.service");
 const {
@@ -155,6 +156,18 @@ function buildTopSalesBuyerName(order) {
   return `@${username}`;
 }
 
+function buildTopSalesActorName(order) {
+  const profileName = sanitizeProfileDisplay(order?.profileName) || "-";
+  const usernameRaw = sanitizeProfileDisplay(order?.tgUsername || order?.username);
+  const username = usernameRaw
+    ? usernameRaw.startsWith("@")
+      ? usernameRaw
+      : `@${usernameRaw}`
+    : "-";
+  const tgUserId = sanitizeProfileDisplay(order?.tgUserId) || "-";
+  return `${profileName} | ${username} | ${tgUserId}`;
+}
+
 const health = async (_, res) => response.success(res, "API ishlayapti");
 
 const getCatalog = async (_, res) => {
@@ -176,6 +189,7 @@ const getSettings = async (_, res) => {
     const referralConfig = await getReferralConfig();
     const botStatus = await getBotStatus();
     const nftWithdrawalConfig = await getNftWithdrawalConfig();
+    const supportConfig = await getSupportConfig();
     return response.success(res, "Settings", {
       starPricing,
       gameStarsPaymentConfig,
@@ -185,6 +199,7 @@ const getSettings = async (_, res) => {
       referralConfig,
       botStatus,
       nftWithdrawalConfig,
+      supportConfig,
     });
   } catch (error) {
     return response.serverError(res, "Settings olishda xatolik", error.message);
@@ -221,10 +236,7 @@ const getTopSales = async (req, res) => {
     const orders = await Order.find({
       product: { $in: TOP_SALES_PRODUCTS },
       status: { $in: ["paid_auto_processed", "completed"] },
-      $or: [
-        { paidAt: { $gte: startDate } },
-        { createdAt: { $gte: startDate } },
-      ],
+      $or: [{ paidAt: { $gte: startDate } }, { createdAt: { $gte: startDate } }],
     })
       .sort({ expectedAmount: -1, paidAt: -1, createdAt: -1 })
       .limit(10)
@@ -233,7 +245,7 @@ const getTopSales = async (req, res) => {
     const items = orders.map((order) => ({
       orderId: order.orderId,
       product: order.product,
-      buyerProfileName: buildTopSalesBuyerName(order),
+      buyerProfileName: buildTopSalesActorName(order) || buildTopSalesBuyerName(order),
       amount: Number(order.expectedAmount || 0),
       paidAt: order.paidAt || null,
       createdAt: order.createdAt || null,

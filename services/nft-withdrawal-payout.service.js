@@ -4,6 +4,7 @@ const { emitAdminUpdate, emitUserUpdate } = require("../socket");
 const { sendTelegramText, editTelegramText } = require("./telegram-notify.service");
 const { sendOrderArchive } = require("./order-archive.service");
 const { getManagerUsername, getManagerUrl } = require("./star-sell-payout.service");
+const { getSupportConfig } = require("./settings.service");
 
 const READY_STATUSES = new Set([
   "payment_submitted",
@@ -109,7 +110,8 @@ async function cancelNftWithdrawalById(orderId) {
 
   const amount = Math.max(0, Math.round(Number(order.expectedAmount || 0)));
   const now = new Date();
-  const managerUsername = getManagerUsername();
+  const supportConfig = await getSupportConfig().catch(() => null);
+  const managerUsername = String(supportConfig?.username || getManagerUsername()).trim();
   const managerUrl = getManagerUrl(managerUsername);
   const fragmentTx = getSafeFragmentTx(order);
 
@@ -160,4 +162,3 @@ module.exports = {
   cancelNftWithdrawalById,
   buildAdminText,
 };
-

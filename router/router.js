@@ -231,6 +231,11 @@ router.get(
   authMiddleware,
   adminController.getDiagnostics,
 );
+router.get(
+  "/admin/active-users",
+  authMiddleware,
+  adminController.getActiveUsers,
+);
 router.put("/admin/settings", authMiddleware, adminController.updateSettings);
 router.get("/admin/users/search", authMiddleware, adminController.searchUsers);
 router.get("/admin/assets/search", authMiddleware, adminController.searchAssets);

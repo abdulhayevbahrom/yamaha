@@ -659,7 +659,7 @@ async function startBot({ strict = false } = {}) {
         await bot.editMessageText(
           buildStarSellAdminSummary(
             result.order,
-            `❌ Holat: Bekor qilindi (support: ${getManagerUsername()})`,
+            `❌ Holat: Bekor qilindi (support: ${String(result?.order?.fragmentTx?.starSellPayout?.managerUsername || getManagerUsername())})`,
           ),
           {
             chat_id: chatId,
@@ -711,7 +711,7 @@ async function startBot({ strict = false } = {}) {
         await bot.editMessageText(
           buildAdminText(
             result.order,
-            `❌ Holat: Bekor qilindi (support: ${getManagerUsername()})`,
+            `❌ Holat: Bekor qilindi (support: ${String(result?.order?.fragmentTx?.nftWithdrawal?.managerUsername || getManagerUsername())})`,
           ),
           { chat_id: chatId, message_id: query.message.message_id, reply_markup: { inline_keyboard: [] } },
         );
