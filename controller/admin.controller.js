@@ -1560,6 +1560,8 @@ const getDiagnostics = async (_, res) => {
         {
           $match: {
             product: "balance",
+            paymentMethod: { $in: ["card", "bankomat"] },
+            planCode: { $in: ["card_topup", "bankomat"] },
             status: { $in: PAID_STATUSES },
             paidAmount: { $gt: 0 },
           },
