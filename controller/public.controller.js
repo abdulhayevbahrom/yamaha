@@ -9,6 +9,7 @@ const {
   getBankomatTopupConfig,
   getReferralConfig,
   getBotStatus,
+  getNftWithdrawalConfig,
 } = require("../services/settings.service");
 const { checkForceJoinMembership } = require("../services/force-join.service");
 const {
@@ -174,6 +175,7 @@ const getSettings = async (_, res) => {
     const bankomatTopupConfig = await getBankomatTopupConfig();
     const referralConfig = await getReferralConfig();
     const botStatus = await getBotStatus();
+    const nftWithdrawalConfig = await getNftWithdrawalConfig();
     return response.success(res, "Settings", {
       starPricing,
       gameStarsPaymentConfig,
@@ -182,6 +184,7 @@ const getSettings = async (_, res) => {
       bankomatTopupConfig,
       referralConfig,
       botStatus,
+      nftWithdrawalConfig,
     });
   } catch (error) {
     return response.serverError(res, "Settings olishda xatolik", error.message);

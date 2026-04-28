@@ -52,6 +52,10 @@ const DEFAULT_NFT_MARKETPLACE_CONFIG = {
   feePercent: 5,
   withdrawFeeUzs: 0,
 };
+const DEFAULT_NFT_WITHDRAWAL_CONFIG = {
+  enabled: true,
+  feePercent: 5,
+};
 
 async function getStarPricing() {
   const doc = await Settings.findOne({ key: "star_pricing" }).lean();
@@ -204,6 +208,22 @@ async function getNftMarketplaceConfig() {
       Number.isFinite(withdrawFeeUzs) && withdrawFeeUzs >= 0
         ? Math.round(withdrawFeeUzs)
         : DEFAULT_NFT_MARKETPLACE_CONFIG.withdrawFeeUzs,
+  };
+}
+
+async function getNftWithdrawalConfig() {
+  const doc = await Settings.findOne({ key: "nft_withdrawal_config" }).lean();
+  if (!doc?.value) return DEFAULT_NFT_WITHDRAWAL_CONFIG;
+  const feePercent = Number(doc.value.feePercent);
+  return {
+    enabled:
+      typeof doc.value.enabled === "boolean"
+        ? doc.value.enabled
+        : DEFAULT_NFT_WITHDRAWAL_CONFIG.enabled,
+    feePercent:
+      Number.isFinite(feePercent) && feePercent >= 0 && feePercent < 100
+        ? feePercent
+        : DEFAULT_NFT_WITHDRAWAL_CONFIG.feePercent,
   };
 }
 
@@ -448,6 +468,36 @@ async function updateNftMarketplaceConfig(payload) {
   };
 }
 
+async function updateNftWithdrawalConfig(payload) {
+  const current = await getNftWithdrawalConfig();
+  const enabled =
+    typeof payload?.enabled === "boolean" ? payload.enabled : current.enabled;
+  const feePercent =
+    payload?.feePercent === undefined
+      ? Number(current.feePercent)
+      : Number(payload.feePercent);
+
+  if (!Number.isFinite(feePercent) || feePercent < 0 || feePercent >= 100) {
+    throw new Error("feePercent noto'g'ri");
+  }
+
+  const doc = await Settings.findOneAndUpdate(
+    { key: "nft_withdrawal_config" },
+    { value: { enabled: Boolean(enabled), feePercent } },
+    { new: true, upsert: true },
+  ).lean();
+
+  return {
+    enabled:
+      typeof doc?.value?.enabled === "boolean"
+        ? doc.value.enabled
+        : DEFAULT_NFT_WITHDRAWAL_CONFIG.enabled,
+    feePercent: Number(
+      doc?.value?.feePercent ?? DEFAULT_NFT_WITHDRAWAL_CONFIG.feePercent,
+    ),
+  };
+}
+
 async function updateStarSellPricing(payload) {
   const pricePerStar = Number(payload.pricePerStar);
   const max = Number(payload.max);
@@ -510,6 +560,7 @@ module.exports = {
   getBankomatTopupConfig,
   getReferralConfig,
   getNftMarketplaceConfig,
+  getNftWithdrawalConfig,
   updateStarPricing,
   updateGameStarsPaymentConfig,
   updateStarSellPricing,
@@ -520,4 +571,5 @@ module.exports = {
   updateBankomatTopupConfig,
   updateReferralConfig,
   updateNftMarketplaceConfig,
+  updateNftWithdrawalConfig,
 };

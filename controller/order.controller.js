@@ -30,6 +30,10 @@ const {
   confirmStarSellPayoutById,
   cancelStarSellPayoutById,
 } = require("../services/star-sell-payout.service");
+const {
+  confirmNftWithdrawalById,
+  cancelNftWithdrawalById,
+} = require("../services/nft-withdrawal-payout.service");
 
 let sequence = 1;
 const PENDING_TTL_MS = 10 * 60 * 1000;
@@ -51,6 +55,7 @@ function getOrderProductLabel(product) {
   const key = String(product || "").trim().toLowerCase();
   if (key === "star") return "Telegram Star";
   if (key === "star_sell") return "Star Sell";
+  if (key === "nft_withdrawal") return "NFT Yechib Olish";
   if (key === "premium") return "Telegram Premium";
   if (key === "uc") return "PUBG UC";
   if (key === "mlbb") return "MLBB Diamond";
@@ -589,7 +594,16 @@ function buildSearchFilter(rawSearch) {
 }
 
 function buildHistoryFilter(scope) {
-  if (scope === "sales" || scope === "reports") {
+  if (scope === "sales") {
+    return {
+      $or: [
+        { status: { $in: ["paid_auto_processed", "completed"] } },
+        { product: { $in: ["star_sell", "nft_withdrawal"] } },
+      ],
+    };
+  }
+
+  if (scope === "reports") {
     return {
       status: { $in: ["paid_auto_processed", "completed"] },
     };
@@ -1183,6 +1197,22 @@ const confirmStarSellPayout = async (req, res) => {
   }
 };
 
+const confirmNftWithdrawalPayout = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await confirmNftWithdrawalById(id);
+    if (!result.ok) {
+      if (result.reason === "not_found") return response.notFound(res, "Order topilmadi");
+      if (result.reason === "not_nft_withdrawal") return response.error(res, "Bu order NFT yechib olish orderi emas");
+      return response.error(res, "Order hali tasdiqlash uchun tayyor emas");
+    }
+    if (result.alreadyCompleted) return response.success(res, "Order allaqachon tasdiqlangan", result.order);
+    return response.success(res, "NFT yechib olish bo'yicha pul o'tkazish tasdiqlandi", result.order);
+  } catch (error) {
+    return response.serverError(res, "NFT yechib olish tasdiqlashda xatolik", error.message);
+  }
+};
+
 const cancelStarSellPayout = async (req, res) => {
   try {
     const { id } = req.params;
@@ -1221,6 +1251,23 @@ const cancelStarSellPayout = async (req, res) => {
   }
 };
 
+const cancelNftWithdrawalPayout = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await cancelNftWithdrawalById(id);
+    if (!result.ok) {
+      if (result.reason === "not_found") return response.notFound(res, "Order topilmadi");
+      if (result.reason === "not_nft_withdrawal") return response.error(res, "Bu order NFT yechib olish orderi emas");
+      if (result.reason === "already_completed") return response.error(res, "Order allaqachon tasdiqlangan");
+      return response.error(res, "Orderni bekor qilish hozir mumkin emas");
+    }
+    if (result.alreadyCancelled) return response.success(res, "Order allaqachon bekor qilingan", result.order);
+    return response.success(res, "NFT yechib olish buyurtmasi bekor qilindi", result.order);
+  } catch (error) {
+    return response.serverError(res, "NFT yechib olishni bekor qilishda xatolik", error.message);
+  }
+};
+
 module.exports = {
   calculatePrice,
   createOrder,
@@ -1232,6 +1279,8 @@ module.exports = {
   markAutobuyOrderCompleted,
   confirmStarSellPayout,
   cancelStarSellPayout,
+  confirmNftWithdrawalPayout,
+  cancelNftWithdrawalPayout,
   confirmUcOrder,
   cancelUcOrder,
   cancelOrder,

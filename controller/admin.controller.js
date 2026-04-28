@@ -19,6 +19,7 @@ const {
   getBankomatTopupConfig,
   getReferralConfig,
   getNftMarketplaceConfig,
+  getNftWithdrawalConfig,
   updateStarPricing,
   updateGameStarsPaymentConfig,
   updateStarSellPricing,
@@ -29,6 +30,7 @@ const {
   updateBankomatTopupConfig,
   updateReferralConfig,
   updateNftMarketplaceConfig,
+  updateNftWithdrawalConfig,
 } = require("../services/settings.service");
 const {
   broadcastBotResumed,
@@ -602,6 +604,7 @@ const getSettings = async (_, res) => {
     const bankomatTopupConfig = await getBankomatTopupConfig();
     const referralConfig = await getReferralConfig();
     const nftMarketplaceConfig = await getNftMarketplaceConfig();
+    const nftWithdrawalConfig = await getNftWithdrawalConfig();
 
     return response.success(res, "Settings", {
       starPricing,
@@ -614,6 +617,7 @@ const getSettings = async (_, res) => {
       bankomatTopupConfig,
       referralConfig,
       nftMarketplaceConfig,
+      nftWithdrawalConfig,
     });
   } catch (error) {
     return response.serverError(res, "Settings xatolik", error.message);
@@ -633,6 +637,7 @@ const updateSettings = async (req, res) => {
       bankomatTopupConfig,
       referralConfig,
       nftMarketplaceConfig,
+      nftWithdrawalConfig,
     } = req.body || {};
 
     if (
@@ -645,11 +650,12 @@ const updateSettings = async (req, res) => {
       !paymentCardConfig &&
       !bankomatTopupConfig &&
       !referralConfig &&
-      !nftMarketplaceConfig
+      !nftMarketplaceConfig &&
+      !nftWithdrawalConfig
     ) {
       return response.error(
         res,
-        "starPricing yoki gameStarsPaymentConfig yoki starSellPricing yoki forceJoin yoki botStatus yoki botBroadcastConfig yoki paymentCardConfig yoki bankomatTopupConfig yoki referralConfig yoki nftMarketplaceConfig required",
+        "starPricing yoki gameStarsPaymentConfig yoki starSellPricing yoki forceJoin yoki botStatus yoki botBroadcastConfig yoki paymentCardConfig yoki bankomatTopupConfig yoki referralConfig yoki nftMarketplaceConfig yoki nftWithdrawalConfig required",
       );
     }
 
@@ -684,6 +690,11 @@ const updateSettings = async (req, res) => {
     if (nftMarketplaceConfig) {
       out.nftMarketplaceConfig = await updateNftMarketplaceConfig(
         nftMarketplaceConfig,
+      );
+    }
+    if (nftWithdrawalConfig) {
+      out.nftWithdrawalConfig = await updateNftWithdrawalConfig(
+        nftWithdrawalConfig,
       );
     }
 

@@ -13,6 +13,7 @@ const productLabels = {
   mlbb: "MLBB Diamond",
   balance: "Balans to'ldirish",
   star_sell: "Star Sotish",
+  nft_withdrawal: "NFT Yechib Olish",
 };
 
 function getArchiveCustomerLabel(order) {

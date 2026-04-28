@@ -11,7 +11,7 @@ const orderSchema = new Schema(
     },
     product: {
       type: String,
-      enum: ["star", "premium", "uc", "freefire", "mlbb", "balance", "star_sell"],
+      enum: ["star", "premium", "uc", "freefire", "mlbb", "balance", "star_sell", "nft_withdrawal"],
       required: true
     },
     planCode: {

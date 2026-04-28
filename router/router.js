@@ -81,6 +81,13 @@ router.post(
   botActiveMiddleware,
   userController.createBalanceTopup,
 );
+router.post(
+  "/balance/nft-withdraw",
+  telegramAuthMiddleware,
+  userWriteRateLimit,
+  botActiveMiddleware,
+  userController.createNftWithdrawalRequest,
+);
 
 router.get("/gifts/catalog", giftController.getGiftCatalog);
 router.get("/gifts/image/:giftId", giftController.getGiftImage);
@@ -294,6 +301,16 @@ router.post(
   "/admin/orders/:id/cancel-star-sell",
   authMiddleware,
   orderController.cancelStarSellPayout,
+);
+router.post(
+  "/admin/orders/:id/confirm-nft-withdrawal",
+  authMiddleware,
+  orderController.confirmNftWithdrawalPayout,
+);
+router.post(
+  "/admin/orders/:id/cancel-nft-withdrawal",
+  authMiddleware,
+  orderController.cancelNftWithdrawalPayout,
 );
 router.post(
   "/admin/orders/:id/confirm-uc",

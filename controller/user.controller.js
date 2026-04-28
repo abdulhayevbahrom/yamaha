@@ -20,7 +20,12 @@ const {
 const {
   getBankomatTopupConfig,
   getReferralConfig,
+  getNftWithdrawalConfig,
 } = require("../services/settings.service");
+const { lookupCardBinInfo, normalizeScheme } = require("../services/card-bin.service");
+const { sendTelegramText } = require("../services/telegram-notify.service");
+
+const SUPPORTED_SCHEMES = new Set(["HUMOCARD", "HUMO", "UZCARD", "UNIONPAY", "UNIYONPAY"]);
 
 const PENDING_TTL_MS = 10 * 60 * 1000;
 const PURCHASE_ORDER_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb"];
@@ -352,12 +357,130 @@ async function getBalance(req, res) {
 
     const user = await User.findOne({ tgUserId }).lean();
 
+    const nftWithdrawalConfig = await getNftWithdrawalConfig();
     return response.success(res, "Balance", {
       tgUserId,
       balance: Number(user?.balance || 0),
+      nftEarningsBalance: Number(user?.nftEarningsBalance || 0),
+      nftWithdrawalConfig,
     });
   } catch (error) {
     return response.serverError(res, "Balance olishda xatolik", error.message);
+  }
+}
+
+async function createNftWithdrawalRequest(req, res) {
+  try {
+    const tgUser = getTelegramUserFromRequest(req);
+    if (!tgUser?.tgUserId) {
+      return response.error(res, "Telegram profilingiz aniqlanmadi. Ilovani qayta ochib ko'ring.");
+    }
+    const config = await getNftWithdrawalConfig();
+    if (!config?.enabled) {
+      return response.error(res, "Yechib olish xizmati hozircha o'chirilgan");
+    }
+
+    const rawCard = String(req.body?.cardNumber || "").replace(/\D/g, "").slice(0, 16);
+    const amount = Math.round(Number(req.body?.amount || 0));
+    if (rawCard.length !== 16) return response.error(res, "Karta raqami 16 ta bo'lishi kerak");
+    if (!Number.isFinite(amount) || amount <= 0) return response.error(res, "Summani kiriting");
+
+    const binInfo = await lookupCardBinInfo(rawCard);
+    const scheme = normalizeScheme(binInfo?.scheme);
+    if (!SUPPORTED_SCHEMES.has(scheme)) {
+      return response.error(res, "Faqat HUMOCARD, UZCARD yoki UNIONPAY kartalari qabul qilinadi");
+    }
+
+    const feePercent = Number(config.feePercent || 0);
+    const feeAmount = Math.round((amount * feePercent) / 100);
+    const netAmount = Math.max(0, amount - feeAmount);
+
+    const updatedUser = await User.findOneAndUpdate(
+      { tgUserId: tgUser.tgUserId, nftEarningsBalance: { $gte: amount }, balance: { $gte: amount } },
+      { $inc: { nftEarningsBalance: -amount, balance: -amount } },
+      { new: true },
+    ).lean();
+    if (!updatedUser) return response.error(res, "NFT sotuvdan tushgan balans yetarli emas");
+
+    const nextOrderId = await getNextOrderId();
+    const order = await Order.create({
+      orderId: nextOrderId,
+      product: "nft_withdrawal",
+      planCode: "nft_withdrawal",
+      customAmount: amount,
+      username: tgUser.username ? `@${tgUser.username}` : tgUser.tgUserId,
+      tgUserId: tgUser.tgUserId,
+      tgUsername: tgUser.username || "",
+      profileName: tgUser.username ? `@${tgUser.username}` : tgUser.tgUserId,
+      paymentMethod: "card",
+      sellCardNumber: rawCard,
+      expectedAmount: amount,
+      paidAmount: amount,
+      paidAt: new Date(),
+      status: "payment_submitted",
+      sequence: nextOrderId,
+      fragmentTx: {
+        nftWithdrawal: {
+          feePercent,
+          feeAmountUzs: feeAmount,
+          netAmountUzs: netAmount,
+        },
+      },
+    });
+
+    const adminIds = String(process.env.ADMIN_NOTIFY_CHAT_ID || "").split(",").map((v) => String(v).trim()).filter(Boolean);
+    const text = [
+      "💸 NFT sotuv balansini yechib olish so'rovi",
+      `🧾 Buyurtma: #${order.orderId}`,
+      `👤 Mijoz: @${String(order.tgUsername || "").replace(/^@+/, "") || "-"} (${order.tgUserId})`,
+      `💳 Mijoz kartasi: ${rawCard}`,
+      `💰 So'ralgan summa: ${amount.toLocaleString("uz-UZ")} UZS`,
+      `📉 Komissiya: ${feePercent}%`,
+      `✅ Mijozga beriladigan: ${netAmount.toLocaleString("uz-UZ")} UZS`,
+      "Pul o'tkazgach, tasdiqlashni bosing.",
+    ].join("\n");
+    const notifications = await Promise.all(
+      adminIds.map((adminId) =>
+        sendTelegramText(adminId, text, {
+          reply_markup: {
+            inline_keyboard: [[
+              { text: "Tasdiqlash", callback_data: `CONFIRM_NFT_WITHDRAWAL:${String(order._id)}` },
+              { text: "Bekor qilish", callback_data: `CANCEL_NFT_WITHDRAWAL:${String(order._id)}` },
+            ]],
+          },
+        }),
+      ),
+    );
+    const sent = notifications
+      .filter((item) => item?.ok && Number(item?.messageId || 0) > 0)
+      .map((item) => ({ chatId: String(item.chatId || ""), messageId: Number(item.messageId || 0) }))
+      .filter((item) => item.chatId && item.messageId > 0);
+    if (sent.length) {
+      await Order.findByIdAndUpdate(order._id, {
+        $set: { "fragmentTx.nftWithdrawalAdminNotifications": sent },
+      });
+    }
+
+    emitUserUpdate(tgUser.tgUserId, {
+      type: "nft_withdrawal_requested",
+      refreshOrders: true,
+      refreshBalance: true,
+      orderId: order._id,
+      status: order.status,
+      product: order.product,
+    });
+
+    return response.created(res, "NFT sotuv balansi yechib olish so'rovi yuborildi", {
+      orderId: order._id,
+      requestedAmountUzs: amount,
+      feePercent,
+      feeAmountUzs: feeAmount,
+      netAmountUzs: netAmount,
+      balance: Number(updatedUser?.balance || 0),
+      nftEarningsBalance: Number(updatedUser?.nftEarningsBalance || 0),
+    });
+  } catch (error) {
+    return response.serverError(res, "Yechib olish so'rovini yaratishda xatolik", error.message);
   }
 }
 
@@ -621,6 +744,7 @@ module.exports = {
   getMe,
   getMyReferrals,
   getBalance,
+  createNftWithdrawalRequest,
   getMyOrders,
   createBalanceTopup,
 };

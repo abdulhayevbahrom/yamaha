@@ -14,6 +14,11 @@ const {
   getManagerUsername,
 } = require("../services/star-sell-payout.service");
 const {
+  confirmNftWithdrawalById,
+  cancelNftWithdrawalById,
+  buildAdminText,
+} = require("../services/nft-withdrawal-payout.service");
+const {
   checkForceJoinMembership,
   buildJoinUrl,
 } = require("../services/force-join.service");
@@ -661,6 +666,54 @@ async function startBot({ strict = false } = {}) {
             message_id: query.message.message_id,
             reply_markup: { inline_keyboard: [] },
           },
+        );
+      }
+      return;
+    }
+
+    if (query.data?.startsWith("CONFIRM_NFT_WITHDRAWAL:")) {
+      if (!isAdmin(chatId)) {
+        await bot.answerCallbackQuery(query.id, { text: "Ruxsat yo'q", show_alert: true });
+        return;
+      }
+      const orderId = query.data.replace("CONFIRM_NFT_WITHDRAWAL:", "").trim();
+      const result = await confirmNftWithdrawalById(orderId);
+      if (!result.ok) {
+        await bot.answerCallbackQuery(query.id, { text: "Tasdiqlash xatolik", show_alert: true });
+        return;
+      }
+      await bot.answerCallbackQuery(query.id, { text: result.alreadyCompleted ? "Avval tasdiqlangan" : "Pul o'tkazish tasdiqlandi" });
+      if (query.message?.message_id) {
+        await bot.editMessageText(
+          buildAdminText(
+            result.order,
+            result.alreadyCompleted ? "✅ Holat: Avval tasdiqlangan" : "✅ Holat: Tasdiqlandi",
+          ),
+          { chat_id: chatId, message_id: query.message.message_id, reply_markup: { inline_keyboard: [] } },
+        );
+      }
+      return;
+    }
+
+    if (query.data?.startsWith("CANCEL_NFT_WITHDRAWAL:")) {
+      if (!isAdmin(chatId)) {
+        await bot.answerCallbackQuery(query.id, { text: "Ruxsat yo'q", show_alert: true });
+        return;
+      }
+      const orderId = query.data.replace("CANCEL_NFT_WITHDRAWAL:", "").trim();
+      const result = await cancelNftWithdrawalById(orderId);
+      if (!result.ok) {
+        await bot.answerCallbackQuery(query.id, { text: "Bekor qilish xatolik", show_alert: true });
+        return;
+      }
+      await bot.answerCallbackQuery(query.id, { text: result.alreadyCancelled ? "Avval bekor qilingan" : "Buyurtma bekor qilindi" });
+      if (query.message?.message_id) {
+        await bot.editMessageText(
+          buildAdminText(
+            result.order,
+            `❌ Holat: Bekor qilindi (support: ${getManagerUsername()})`,
+          ),
+          { chat_id: chatId, message_id: query.message.message_id, reply_markup: { inline_keyboard: [] } },
         );
       }
       return;

@@ -2284,7 +2284,7 @@ async function buyNftFromMarketplace(req, res) {
     const sellerAfter = await User.findOneAndUpdate(
       { tgUserId: sellerTgUserId },
       {
-        $inc: { balance: sellerNetUzs },
+        $inc: { balance: sellerNetUzs, nftEarningsBalance: sellerNetUzs },
       },
       { new: true },
     ).lean();
