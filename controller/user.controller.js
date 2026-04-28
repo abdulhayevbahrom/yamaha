@@ -355,7 +355,34 @@ async function getBalance(req, res) {
       );
     }
 
-    const user = await User.findOne({ tgUserId }).lean();
+    let user = await User.findOne({ tgUserId }).lean();
+
+    // Legacy users: nftEarningsBalance field was introduced later.
+    // If it's still zero but user has historical NFT sale records, recover it.
+    if (user?.tgUserId && Number(user?.nftEarningsBalance || 0) <= 0) {
+      const legacyRows = await UserNft.aggregate([
+        {
+          $match: {
+            lastSellerTgUserId: String(tgUserId),
+            lastSellerNetUzs: { $gt: 0 },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: "$lastSellerNetUzs" },
+          },
+        },
+      ]);
+      const recovered = Math.max(0, Math.round(Number(legacyRows?.[0]?.total || 0)));
+      if (recovered > 0) {
+        user = await User.findOneAndUpdate(
+          { tgUserId },
+          { $set: { nftEarningsBalance: recovered } },
+          { new: true },
+        ).lean();
+      }
+    }
 
     const nftWithdrawalConfig = await getNftWithdrawalConfig();
     return response.success(res, "Balance", {
