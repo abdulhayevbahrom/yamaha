@@ -214,7 +214,14 @@ async function processIncomingPayment({
   const pending = await Order.findOneAndUpdate(
     {
       status: "pending_payment",
-      expectedAmount: parsedAmount,
+      $or: [
+        { expectedAmount: parsedAmount },
+        {
+          product: "balance",
+          paymentMethod: "bankomat",
+          balanceCreditAmount: parsedAmount,
+        },
+      ],
       expiresAt: { $gt: now },
     },
     {
