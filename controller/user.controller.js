@@ -358,8 +358,10 @@ async function getBalance(req, res) {
     let user = await User.findOne({ tgUserId }).lean();
 
     // Legacy users: nftEarningsBalance field was introduced later.
-    // If it's still zero but user has historical NFT sale records, recover it.
-    if (user?.tgUserId && Number(user?.nftEarningsBalance || 0) <= 0) {
+    // Recover only when the field is missing, not when it is legitimately 0.
+    const hasNftEarningsBalance =
+      user && Object.prototype.hasOwnProperty.call(user, "nftEarningsBalance");
+    if (user?.tgUserId && !hasNftEarningsBalance) {
       const legacyRows = await UserNft.aggregate([
         {
           $match: {
@@ -408,10 +410,8 @@ async function createNftWithdrawalRequest(req, res) {
     }
 
     const rawCard = String(req.body?.cardNumber || "").replace(/\D/g, "").slice(0, 16);
-    const cardHolder = String(req.body?.cardHolder || "").trim();
     const amount = Math.round(Number(req.body?.amount || 0));
     if (rawCard.length !== 16) return response.error(res, "Karta raqami 16 ta bo'lishi kerak");
-    if (cardHolder.length < 3) return response.error(res, "Karta egasini kiriting");
     if (!Number.isFinite(amount) || amount <= 0) return response.error(res, "Summani kiriting");
 
     const binInfo = await lookupCardBinInfo(rawCard);
@@ -447,7 +447,7 @@ async function createNftWithdrawalRequest(req, res) {
         type: "purchase",
         label: "NFT Withdrawal",
         cardNumber: rawCard,
-        cardHolder,
+        cardHolder: "",
         notes: "",
         isFallback: false,
       },
