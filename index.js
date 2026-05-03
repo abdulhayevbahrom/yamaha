@@ -9,6 +9,9 @@ const socket = require("./socket");
 const response = require("./utils/response");
 const { startBot } = require("./bot");
 const { startUserClient } = require("./user-client");
+const { createWebAppOriginGuard } = require("./middleware/webapp-origin.middleware");
+const { createWebAppSessionGuard } = require("./middleware/webapp-session.middleware");
+const { createRequestReplayGuard } = require("./middleware/request-replay.middleware");
 
 //ads
 
@@ -67,10 +70,7 @@ const allowedOrigins = new Set([...staticCorsOrigins, ...envCorsOrigins]);
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin) {
-        callback(null, true);
-        return;
-      }
+      if (!origin) return callback(new Error("CORS not allowed"));
 
       if (allowedOrigins.has(origin)) {
         callback(null, true);
@@ -100,7 +100,21 @@ app.get("/", (_, res) => {
   });
 });
 
-app.use("/api", router);
+app.use(
+  "/api",
+  createWebAppOriginGuard({
+    allowedOrigins: [...allowedOrigins],
+    ignorePrefixes: ["/integrations/"],
+  }),
+  createWebAppSessionGuard({
+    ignorePrefixes: ["/integrations/", "/health"],
+  }),
+  createRequestReplayGuard({
+    windowMs: Number(process.env.REQUEST_REPLAY_WINDOW_MS || 120_000),
+    ignorePrefixes: ["/integrations/", "/health"],
+  }),
+  router,
+);
 
 app.use((_, res) => {
   return response.notFound(res, "Route topilmadi");

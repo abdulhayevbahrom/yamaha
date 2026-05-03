@@ -10,12 +10,6 @@ function toSafeNumber(value, fallback) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function isEnabled(value, fallback = false) {
-  const normalized = normalizeString(value).toLowerCase();
-  if (!normalized) return fallback;
-  return ["1", "true", "yes", "on"].includes(normalized);
-}
-
 function sanitizeProfileName(value) {
   let name = normalizeString(value);
   if (!name) return "";
@@ -143,26 +137,6 @@ function requireTelegramAuth() {
   return (req, res, next) => {
     const initData = req.headers["x-tg-init-data"];
     const parsed = parseInitData(initData);
-    const allowHeaderFallback = isEnabled(
-      process.env.TG_AUTH_ALLOW_HEADER_FALLBACK,
-      false,
-    );
-
-    if (!parsed.ok && allowHeaderFallback) {
-      const fallbackUserId = normalizeString(req.headers["x-tg-user-id"]);
-      if (fallbackUserId) {
-        req.telegramAuth = {
-          verified: false,
-          authDateSec: 0,
-          tgUserId: fallbackUserId,
-          username: normalizeString(req.headers["x-tg-username"]),
-          firstName: normalizeString(req.headers["x-tg-first-name"]),
-          lastName: normalizeString(req.headers["x-tg-last-name"]),
-          profileName: sanitizeProfileName(req.headers["x-tg-profile-name"]),
-        };
-        return next();
-      }
-    }
 
     if (!parsed.ok) {
       return response.unauthorized(
@@ -190,4 +164,5 @@ function requireTelegramAuth() {
 
 module.exports = {
   requireTelegramAuth,
+  parseInitData,
 };

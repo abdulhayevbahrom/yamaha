@@ -10,6 +10,7 @@ const apiKeyMiddleware = require("../middleware/api-key.middleware");
 const signatureMiddleware = require("../middleware/signature.middleware");
 const ipAllowlistMiddleware = require("../middleware/ip-allowlist.middleware");
 const { requireTelegramAuth } = require("../middleware/telegram-auth.middleware");
+const requireRegisteredUser = require("../middleware/registered-user.middleware");
 const { createRateLimit } = require("../middleware/rate-limit.middleware");
 const validate = require("../middleware/validate.middleware");
 const {
@@ -24,14 +25,8 @@ const telegramAuthMiddleware = requireTelegramAuth();
 const userWriteRateLimit = createRateLimit({
   keyPrefix: "user-write",
   windowMs: Number(process.env.RATE_LIMIT_USER_WRITE_WINDOW_MS || 60_000),
-  max: Number(process.env.RATE_LIMIT_USER_WRITE_MAX || 40),
-  keyGenerator: (req) =>
-    String(
-      req?.telegramAuth?.tgUserId ||
-        req.headers["x-tg-user-id"] ||
-        req.ip ||
-        "",
-    ).trim(),
+  max: Number(process.env.RATE_LIMIT_USER_WRITE_MAX || 5),
+  keyGenerator: (req) => String(req?.telegramAuth?.tgUserId || req.ip || "").trim(),
 });
 const adminLoginRateLimit = createRateLimit({
   keyPrefix: "admin-login",
@@ -57,6 +52,7 @@ router.post("/calculate-price", orderController.calculatePrice);
 router.post(
   "/orders",
   telegramAuthMiddleware,
+  requireRegisteredUser,
   userWriteRateLimit,
   botActiveMiddleware,
   orderController.createOrder,
@@ -64,19 +60,31 @@ router.post(
 router.post(
   "/orders/:id/stars-invoice",
   telegramAuthMiddleware,
+  requireRegisteredUser,
   userWriteRateLimit,
   botActiveMiddleware,
   orderController.createStarsInvoice,
 );
 router.get("/reports", authMiddleware, orderController.getReports);
 router.get("/history", authMiddleware, orderController.getHistory);
-router.get("/me", telegramAuthMiddleware, userController.getMe);
-router.get("/balance/:tgUserId", telegramAuthMiddleware, userController.getBalance);
-router.get("/my-orders", telegramAuthMiddleware, userController.getMyOrders);
-router.get("/my-referrals", telegramAuthMiddleware, userController.getMyReferrals);
+router.get("/me", telegramAuthMiddleware, requireRegisteredUser, userController.getMe);
+router.get(
+  "/balance/:tgUserId",
+  telegramAuthMiddleware,
+  requireRegisteredUser,
+  userController.getBalance,
+);
+router.get("/my-orders", telegramAuthMiddleware, requireRegisteredUser, userController.getMyOrders);
+router.get(
+  "/my-referrals",
+  telegramAuthMiddleware,
+  requireRegisteredUser,
+  userController.getMyReferrals,
+);
 router.post(
   "/balance/topup",
   telegramAuthMiddleware,
+  requireRegisteredUser,
   userWriteRateLimit,
   botActiveMiddleware,
   userController.createBalanceTopup,
@@ -84,6 +92,7 @@ router.post(
 router.post(
   "/balance/nft-withdraw",
   telegramAuthMiddleware,
+  requireRegisteredUser,
   userWriteRateLimit,
   botActiveMiddleware,
   userController.createNftWithdrawalRequest,
@@ -93,22 +102,25 @@ router.get("/gifts/catalog", giftController.getGiftCatalog);
 router.get("/gifts/image/:giftId", giftController.getGiftImage);
 router.get("/gifts/nft-image/:nftId", giftController.getNftImage);
 router.get("/gifts/nft-pattern/:nftId", giftController.getNftPattern);
-router.get("/my-gifts", telegramAuthMiddleware, giftController.getMyGifts);
-router.get("/gifts/nft", telegramAuthMiddleware, giftController.getMyNftGifts);
+router.get("/my-gifts", telegramAuthMiddleware, requireRegisteredUser, giftController.getMyGifts);
+router.get("/gifts/nft", telegramAuthMiddleware, requireRegisteredUser, giftController.getMyNftGifts);
 router.get("/gifts/nft/market", giftController.getNftMarketplace);
 router.get(
   "/gifts/nft/offers/incoming",
   telegramAuthMiddleware,
+  requireRegisteredUser,
   giftController.getIncomingNftOffers,
 );
 router.get(
   "/gifts/nft/offers/sent",
   telegramAuthMiddleware,
+  requireRegisteredUser,
   giftController.getMySentNftOffers,
 );
 router.post(
   "/gifts/nft/offers",
   telegramAuthMiddleware,
+  requireRegisteredUser,
   userWriteRateLimit,
   botActiveMiddleware,
   giftController.createNftOffer,
@@ -116,6 +128,7 @@ router.post(
 router.post(
   "/gifts/nft/offers/accept",
   telegramAuthMiddleware,
+  requireRegisteredUser,
   userWriteRateLimit,
   botActiveMiddleware,
   giftController.acceptNftOffer,
@@ -123,6 +136,7 @@ router.post(
 router.post(
   "/gifts/nft/offers/reject",
   telegramAuthMiddleware,
+  requireRegisteredUser,
   userWriteRateLimit,
   botActiveMiddleware,
   giftController.rejectNftOffer,
@@ -130,6 +144,7 @@ router.post(
 router.post(
   "/gifts/nft/offers/cancel",
   telegramAuthMiddleware,
+  requireRegisteredUser,
   userWriteRateLimit,
   botActiveMiddleware,
   giftController.cancelMyNftOffer,
@@ -137,6 +152,7 @@ router.post(
 router.post(
   "/gifts/nft/list",
   telegramAuthMiddleware,
+  requireRegisteredUser,
   userWriteRateLimit,
   botActiveMiddleware,
   giftController.listMyNftForSale,
@@ -144,6 +160,7 @@ router.post(
 router.post(
   "/gifts/nft/unlist",
   telegramAuthMiddleware,
+  requireRegisteredUser,
   userWriteRateLimit,
   botActiveMiddleware,
   giftController.unlistMyNft,
@@ -151,6 +168,7 @@ router.post(
 router.post(
   "/gifts/nft/buy",
   telegramAuthMiddleware,
+  requireRegisteredUser,
   userWriteRateLimit,
   botActiveMiddleware,
   giftController.buyNftFromMarketplace,
@@ -158,6 +176,7 @@ router.post(
 router.post(
   "/gifts/nft/withdraw",
   telegramAuthMiddleware,
+  requireRegisteredUser,
   userWriteRateLimit,
   botActiveMiddleware,
   giftController.withdrawMyNft,
@@ -165,6 +184,7 @@ router.post(
 router.post(
   "/gifts/purchase",
   telegramAuthMiddleware,
+  requireRegisteredUser,
   userWriteRateLimit,
   botActiveMiddleware,
   giftController.purchaseGift,
@@ -172,14 +192,16 @@ router.post(
 router.post(
   "/gifts/send",
   telegramAuthMiddleware,
+  requireRegisteredUser,
   userWriteRateLimit,
   botActiveMiddleware,
   giftController.sendGift,
 );
 
-router.get("/admin/access", adminController.checkAccess);
+router.get("/admin/access", telegramAuthMiddleware, adminController.checkAccess);
 router.post(
   "/admin/login",
+  telegramAuthMiddleware,
   adminLoginRateLimit,
   validate(loginValidation),
   adminController.login,

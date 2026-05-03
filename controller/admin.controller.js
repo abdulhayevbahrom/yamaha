@@ -1,4 +1,5 @@
 const jwt = require("jsonwebtoken");
+const bcrypt = require("bcryptjs");
 const response = require("../utils/response");
 const Plan = require("../model/plan.model");
 const PaymentCard = require("../model/payment-card.model");
@@ -497,7 +498,7 @@ const parseAllowlist = () => {
 const isAllowedAdmin = (req) => {
   const allowlist = parseAllowlist();
   if (allowlist.length === 0) return true;
-  const userId = String(req.headers["x-tg-user-id"] || "");
+  const userId = normalizeString(req?.telegramAuth?.tgUserId);
   return allowlist.includes(userId);
 };
 
@@ -509,15 +510,30 @@ const checkAccess = async (req, res) => {
 };
 
 const login = async (req, res) => {
-  const { username, password } = req.validated;
-  const adminLogin = process.env.ADMIN_LOGIN || "admin";
-  const adminPassword = process.env.ADMIN_PASSWORD || "admin12345";
+  const { username, password, tgUserId } = req.validated;
+  const adminLogin = normalizeString(process.env.ADMIN_LOGIN);
+  const adminPasswordHash = normalizeString(process.env.ADMIN_PASSWORD_HASH);
 
   if (!isAllowedAdmin(req)) {
     return response.unauthorized(res, "Admin ruxsat yo'q");
   }
+  if (normalizeString(tgUserId) !== normalizeString(req?.telegramAuth?.tgUserId)) {
+    return response.unauthorized(res, "Admin Telegram user mos emas");
+  }
 
-  if (username !== adminLogin || password !== adminPassword) {
+  if (!adminLogin || !adminPasswordHash) {
+    return response.serverError(
+      res,
+      "Admin login sozlamalari to'liq emas (ADMIN_LOGIN/ADMIN_PASSWORD_HASH)",
+    );
+  }
+
+  if (!username || username !== adminLogin) {
+    return response.unauthorized(res, "Login yoki parol noto'g'ri");
+  }
+
+  const isValidPassword = await bcrypt.compare(String(password || ""), adminPasswordHash);
+  if (!isValidPassword) {
     return response.unauthorized(res, "Login yoki parol noto'g'ri");
   }
 

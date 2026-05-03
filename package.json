@@ -10,10 +10,12 @@
     "user-client": "node user-client/index.js",
     "user-client:dev": "nodemon --legacy-watch user-client/index.js",
     "session:cardxabar": "node generate-cardxabar-session.js",
-    "inspect:nft-pattern": "node scripts/inspect-nft-pattern.js"
+    "inspect:nft-pattern": "node scripts/inspect-nft-pattern.js",
+    "security:hash-admin-password": "node scripts/admin-password-hash.js"
   },
   "dependencies": {
     "axios": "^1.7.9",
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^4.21.2",

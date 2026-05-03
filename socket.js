@@ -1,5 +1,6 @@
 const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
+const { parseInitData } = require("./middleware/telegram-auth.middleware");
 
 let ioInstance = null;
 
@@ -29,11 +30,17 @@ const connect = (server) => {
   });
 
   io.on("connection", (socket) => {
-    const tgUserId = String(
+    const rawInitData = String(socket.handshake.auth?.initData || "").trim();
+    const parsedInitData = parseInitData(rawInitData);
+    const handshakeTgUserId = String(
       socket.handshake.auth?.tgUserId || socket.handshake.query?.tgUserId || "",
     ).trim();
-    if (tgUserId) {
-      socket.join(userRoom(tgUserId));
+    if (
+      parsedInitData?.ok &&
+      parsedInitData?.user?.tgUserId &&
+      (!handshakeTgUserId || handshakeTgUserId === parsedInitData.user.tgUserId)
+    ) {
+      socket.join(userRoom(parsedInitData.user.tgUserId));
     }
 
     const admin = getAdminPayload(socket.handshake.auth?.token);

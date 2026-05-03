@@ -23,10 +23,11 @@ const validCategories = ["star", "premium", "uc", "freefire", "mlbb"];
 const validPaymentCardTypes = ["purchase", "balance_topup"];
 
 const loginValidation = (req) => {
-  const { username, password } = req.body || {};
+  const { username, password, tgUserId } = req.body || {};
   return {
     username: requireText(username, "username"),
-    password: requireText(password, "password")
+    password: requireText(password, "password"),
+    tgUserId: requireText(tgUserId, "tgUserId"),
   };
 };
 
