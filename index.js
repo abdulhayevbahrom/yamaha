@@ -70,7 +70,7 @@ const allowedOrigins = new Set([...staticCorsOrigins, ...envCorsOrigins]);
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin) return callback(new Error("CORS not allowed"));
+      if (!origin) return callback(null, true);
 
       if (allowedOrigins.has(origin)) {
         callback(null, true);
@@ -105,6 +105,11 @@ app.use(
   createWebAppOriginGuard({
     allowedOrigins: [...allowedOrigins],
     ignorePrefixes: ["/integrations/"],
+    allowNoOriginGetPrefixes: [
+      "/gifts/image/",
+      "/gifts/nft-image/",
+      "/gifts/nft-pattern/",
+    ],
   }),
   createWebAppSessionGuard({
     ignorePrefixes: ["/integrations/", "/health"],
