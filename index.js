@@ -113,6 +113,11 @@ app.use(
   }),
   createWebAppSessionGuard({
     ignorePrefixes: ["/integrations/", "/health"],
+    allowNoInitDataGetPrefixes: [
+      "/gifts/image/",
+      "/gifts/nft-image/",
+      "/gifts/nft-pattern/",
+    ],
   }),
   createRequestReplayGuard({
     windowMs: Number(process.env.REQUEST_REPLAY_WINDOW_MS || 120_000),

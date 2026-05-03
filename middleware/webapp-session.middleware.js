@@ -9,10 +9,23 @@ function createWebAppSessionGuard(options = {}) {
   const ignorePrefixes = Array.isArray(options.ignorePrefixes)
     ? options.ignorePrefixes.map((item) => normalizeString(item)).filter(Boolean)
     : [];
+  const allowNoInitDataGetPrefixes = Array.isArray(options.allowNoInitDataGetPrefixes)
+    ? options.allowNoInitDataGetPrefixes
+        .map((item) => normalizeString(item))
+        .filter(Boolean)
+    : [];
 
   return (req, res, next) => {
     const path = normalizeString(req.path || req.originalUrl || "");
+    const method = normalizeString(req.method).toUpperCase();
     if (ignorePrefixes.some((prefix) => path.startsWith(prefix))) {
+      return next();
+    }
+
+    if (
+      (method === "GET" || method === "HEAD") &&
+      allowNoInitDataGetPrefixes.some((prefix) => path.startsWith(prefix))
+    ) {
       return next();
     }
 
