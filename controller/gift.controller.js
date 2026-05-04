@@ -975,8 +975,23 @@ async function getGiftCatalog(req, res) {
 
     for (const staticGift of staticGifts) {
       const giftId = normalizeGiftId(staticGift?.giftId);
-      if (!giftId || mergedById.has(giftId)) continue;
-      mergedById.set(giftId, buildCatalogGiftFromStatic(staticGift, pricePerStar));
+      if (!giftId) continue;
+
+      const staticItem = buildCatalogGiftFromStatic(staticGift, pricePerStar);
+      const existing = mergedById.get(giftId);
+      if (!existing) {
+        mergedById.set(giftId, staticItem);
+        continue;
+      }
+
+      // Agar static giftda custom imageUrl bo'lsa, Telegram item ustidan ham shu rasmni ishlatamiz.
+      const customImage = normalizeString(staticItem?.imageUrl);
+      if (customImage) {
+        mergedById.set(giftId, {
+          ...existing,
+          imageUrl: customImage,
+        });
+      }
     }
 
     const payload = Array.from(mergedById.values());
