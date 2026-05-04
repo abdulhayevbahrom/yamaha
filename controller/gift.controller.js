@@ -1016,6 +1016,24 @@ async function getGiftImage(req, res) {
   }
 
   try {
+    const staticGift = await StaticGift.findOne({ giftId, isActive: true })
+      .select({ imageUrl: 1 })
+      .lean();
+    const externalImageUrl = normalizeString(staticGift?.imageUrl);
+    if (externalImageUrl) {
+      const external = await fetch(externalImageUrl);
+      if (external.ok) {
+        const arrayBuffer = await external.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const contentType =
+          normalizeString(external.headers.get("content-type")) ||
+          "image/webp";
+        res.setHeader("Cache-Control", "public, max-age=1800");
+        res.setHeader("Content-Type", contentType);
+        return res.status(200).send(buffer);
+      }
+    }
+
     const image = await getGiftImageBuffer(giftId);
 
     res.setHeader("Cache-Control", "public, max-age=300");
