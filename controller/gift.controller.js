@@ -215,6 +215,7 @@ function resolveStaticGiftPrice(staticGift, pricePerStar) {
 function buildCatalogGiftFromStatic(staticGift, pricePerStar) {
   const giftId = normalizeGiftId(staticGift?.giftId);
   const pricing = resolveStaticGiftPrice(staticGift, pricePerStar);
+  const customImageUrl = normalizeString(staticGift?.imageUrl);
 
   return {
     giftId,
@@ -227,7 +228,8 @@ function buildCatalogGiftFromStatic(staticGift, pricePerStar) {
     isAvailable: true,
     availabilityRemains: 0,
     availabilityTotal: 0,
-    imageUrl: `/api/gifts/image/${encodeURIComponent(giftId)}`,
+    imageUrl:
+      customImageUrl || `/api/gifts/image/${encodeURIComponent(giftId)}`,
     source: "static",
   };
 }

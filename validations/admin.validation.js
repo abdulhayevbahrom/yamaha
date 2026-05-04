@@ -127,13 +127,14 @@ const updatePaymentCardValidation = (req) => {
 };
 
 const createStaticGiftValidation = (req) => {
-  const { giftId, title, emoji, stars, isActive, sortOrder } = req.body || {};
+  const { giftId, title, emoji, stars, imageUrl, isActive, sortOrder } = req.body || {};
 
   return {
     giftId: requireText(giftId, "giftId"),
     title: requireText(title, "title"),
     emoji: typeof emoji === "undefined" ? "🎁" : requireText(emoji, "emoji"),
     stars: requireNumber(stars, "stars"),
+    imageUrl: typeof imageUrl === "undefined" ? "" : String(imageUrl).trim(),
     isActive: typeof isActive === "boolean" ? isActive : true,
     sortOrder:
       typeof sortOrder === "undefined" ? 0 : requireNumber(sortOrder, "sortOrder"),
@@ -141,13 +142,14 @@ const createStaticGiftValidation = (req) => {
 };
 
 const updateStaticGiftValidation = (req) => {
-  const { giftId, title, emoji, stars, isActive, sortOrder } = req.body || {};
+  const { giftId, title, emoji, stars, imageUrl, isActive, sortOrder } = req.body || {};
   const payload = {};
 
   if (typeof giftId !== "undefined") payload.giftId = requireText(giftId, "giftId");
   if (typeof title !== "undefined") payload.title = requireText(title, "title");
   if (typeof emoji !== "undefined") payload.emoji = requireText(emoji, "emoji");
   if (typeof stars !== "undefined") payload.stars = requireNumber(stars, "stars");
+  if (typeof imageUrl !== "undefined") payload.imageUrl = String(imageUrl).trim();
   if (typeof isActive !== "undefined") payload.isActive = Boolean(isActive);
   if (typeof sortOrder !== "undefined") {
     payload.sortOrder = requireNumber(sortOrder, "sortOrder");

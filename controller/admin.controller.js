@@ -1219,6 +1219,7 @@ function mapStaticGift(doc) {
     title: normalizeString(doc?.title) || "Gift",
     emoji: normalizeString(doc?.emoji) || "🎁",
     stars: Number(doc?.stars || 0),
+    imageUrl: normalizeString(doc?.imageUrl),
     isActive: Boolean(doc?.isActive),
     sortOrder: Number(doc?.sortOrder || 0),
     createdAt: doc?.createdAt || null,
