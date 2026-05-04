@@ -3,6 +3,7 @@ const User = require("../model/user.model");
 const UserGift = require("../model/user-gift.model");
 const UserNft = require("../model/user-nft.model");
 const NftOffer = require("../model/nft-offer.model");
+const StaticGift = require("../model/static-gift.model");
 const { emitUserUpdate } = require("../socket");
 const { getTelegramUserFromRequest } = require("../utils/tg-user");
 const { getTelegramCredentials } = require("../config/telegram-credentials");
@@ -199,6 +200,35 @@ function buildCatalogGift(gift, pricePerStar) {
     availabilityRemains: toSafeNumber(gift?.availabilityRemains, 0),
     availabilityTotal: toSafeNumber(gift?.availabilityTotal, 0),
     imageUrl: `/api/gifts/image/${encodeURIComponent(normalizeGiftId(gift?.giftId))}`,
+  };
+}
+
+function resolveStaticGiftPrice(staticGift, pricePerStar) {
+  const stars = Math.max(0, Math.round(toSafeNumber(staticGift?.stars, 0)));
+  const calcPrice = Math.max(0, Math.round(stars * toSafeNumber(pricePerStar, 0)));
+  return {
+    stars,
+    priceUzs: calcPrice,
+  };
+}
+
+function buildCatalogGiftFromStatic(staticGift, pricePerStar) {
+  const giftId = normalizeGiftId(staticGift?.giftId);
+  const pricing = resolveStaticGiftPrice(staticGift, pricePerStar);
+
+  return {
+    giftId,
+    title: normalizeString(staticGift?.title) || "Gift",
+    emoji: normalizeString(staticGift?.emoji) || "🎁",
+    stars: pricing.stars,
+    priceUzs: pricing.priceUzs,
+    limited: false,
+    soldOut: false,
+    isAvailable: true,
+    availabilityRemains: 0,
+    availabilityTotal: 0,
+    imageUrl: `/api/gifts/image/${encodeURIComponent(giftId)}`,
+    source: "static",
   };
 }
 
@@ -924,13 +954,30 @@ async function maybeSyncOwnedNftsFromTelegram({ force = false } = {}) {
 
 async function getGiftCatalog(req, res) {
   try {
-    const [pricing, gifts] = await Promise.all([
+    const [pricing, gifts, staticGifts] = await Promise.all([
       getStarPricing(),
       getStarGiftsCatalog({ includeSoldOut: false }),
+      StaticGift.find({ isActive: true })
+        .sort({ sortOrder: 1, createdAt: -1 })
+        .lean(),
     ]);
 
     const pricePerStar = toSafeNumber(pricing?.pricePerStar, 0);
-    const payload = gifts.map((gift) => buildCatalogGift(gift, pricePerStar));
+    const telegramPayload = gifts.map((gift) => ({
+      ...buildCatalogGift(gift, pricePerStar),
+      source: "telegram",
+    }));
+    const mergedById = new Map(
+      telegramPayload.map((item) => [normalizeGiftId(item?.giftId), item]),
+    );
+
+    for (const staticGift of staticGifts) {
+      const giftId = normalizeGiftId(staticGift?.giftId);
+      if (!giftId || mergedById.has(giftId)) continue;
+      mergedById.set(giftId, buildCatalogGiftFromStatic(staticGift, pricePerStar));
+    }
+
+    const payload = Array.from(mergedById.values());
 
     return response.success(res, "Gift catalog", {
       pricePerStar,
@@ -2644,17 +2691,21 @@ async function purchaseGift(req, res) {
       return failPurchase("Foydalanuvchi bloklangan");
     }
 
-    const [pricing, gift] = await Promise.all([
+    const [pricing, gift, staticGift] = await Promise.all([
       getStarPricing(),
       getGiftById(giftId, { includeSoldOut: false }),
+      StaticGift.findOne({ giftId, isActive: true }).lean(),
     ]);
 
-    if (!gift) {
+    const selectedGift = gift || staticGift;
+    if (!selectedGift) {
       return failPurchase("Gift topilmadi yoki hozircha available emas");
     }
-    notifyGiftTitle = normalizeString(gift.title) || "Gift";
+    notifyGiftTitle = normalizeString(selectedGift.title) || "Gift";
 
-    const { stars, priceUzs } = resolveGiftPrice(gift, pricing?.pricePerStar);
+    const { stars, priceUzs } = gift
+      ? resolveGiftPrice(gift, pricing?.pricePerStar)
+      : resolveStaticGiftPrice(staticGift, pricing?.pricePerStar);
     notifyPriceUzs = priceUzs;
     if (!priceUzs || priceUzs <= 0) {
       return failPurchase("Gift narxini aniqlab bo'lmadi");
@@ -2683,8 +2734,8 @@ async function purchaseGift(req, res) {
         giftId,
         stars,
         priceUzs,
-        emoji: normalizeString(gift.emoji) || "🎁",
-        title: normalizeString(gift.title) || "Gift",
+        emoji: normalizeString(selectedGift.emoji) || "🎁",
+        title: normalizeString(selectedGift.title) || "Gift",
       });
     } catch (error) {
       await User.updateOne({ tgUserId: user.tgUserId }, { $inc: { balance: priceUzs } });
@@ -2711,8 +2762,8 @@ async function purchaseGift(req, res) {
     return response.created(res, "Gift sotib olindi", {
       userGiftId: String(createdGift._id),
       giftId,
-      title: normalizeString(gift.title) || "Gift",
-      emoji: normalizeString(gift.emoji) || "🎁",
+      title: normalizeString(selectedGift.title) || "Gift",
+      emoji: normalizeString(selectedGift.emoji) || "🎁",
       stars,
       priceUzs,
       balance: toSafeNumber(updatedUser.balance, 0),

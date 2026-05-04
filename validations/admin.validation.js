@@ -126,10 +126,46 @@ const updatePaymentCardValidation = (req) => {
   return payload;
 };
 
+const createStaticGiftValidation = (req) => {
+  const { giftId, title, emoji, stars, isActive, sortOrder } = req.body || {};
+
+  return {
+    giftId: requireText(giftId, "giftId"),
+    title: requireText(title, "title"),
+    emoji: typeof emoji === "undefined" ? "🎁" : requireText(emoji, "emoji"),
+    stars: requireNumber(stars, "stars"),
+    isActive: typeof isActive === "boolean" ? isActive : true,
+    sortOrder:
+      typeof sortOrder === "undefined" ? 0 : requireNumber(sortOrder, "sortOrder"),
+  };
+};
+
+const updateStaticGiftValidation = (req) => {
+  const { giftId, title, emoji, stars, isActive, sortOrder } = req.body || {};
+  const payload = {};
+
+  if (typeof giftId !== "undefined") payload.giftId = requireText(giftId, "giftId");
+  if (typeof title !== "undefined") payload.title = requireText(title, "title");
+  if (typeof emoji !== "undefined") payload.emoji = requireText(emoji, "emoji");
+  if (typeof stars !== "undefined") payload.stars = requireNumber(stars, "stars");
+  if (typeof isActive !== "undefined") payload.isActive = Boolean(isActive);
+  if (typeof sortOrder !== "undefined") {
+    payload.sortOrder = requireNumber(sortOrder, "sortOrder");
+  }
+
+  if (Object.keys(payload).length === 0) {
+    throw new Error("Yangilash uchun kamida bitta field yuboring");
+  }
+
+  return payload;
+};
+
 module.exports = {
   loginValidation,
   createPlanValidation,
   updatePlanValidation,
   createPaymentCardValidation,
   updatePaymentCardValidation,
+  createStaticGiftValidation,
+  updateStaticGiftValidation,
 };

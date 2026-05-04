@@ -3,6 +3,7 @@ const bcrypt = require("bcryptjs");
 const response = require("../utils/response");
 const Plan = require("../model/plan.model");
 const PaymentCard = require("../model/payment-card.model");
+const StaticGift = require("../model/static-gift.model");
 const User = require("../model/user.model");
 const Order = require("../model/order.model");
 const UserGift = require("../model/user-gift.model");
@@ -52,6 +53,17 @@ const PAID_STATUSES = ["paid_auto_processed", "completed"];
 
 function normalizeString(value) {
   return String(value || "").trim();
+}
+
+function normalizeGiftId(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) return "";
+  try {
+    if (/^\d+$/.test(normalized)) return BigInt(normalized).toString();
+  } catch (_) {
+    // ignore
+  }
+  return normalized;
 }
 
 function normalizeUsername(value) {
@@ -1200,6 +1212,104 @@ const searchAssets = async (req, res) => {
   }
 };
 
+function mapStaticGift(doc) {
+  return {
+    _id: String(doc?._id || ""),
+    giftId: normalizeString(doc?.giftId),
+    title: normalizeString(doc?.title) || "Gift",
+    emoji: normalizeString(doc?.emoji) || "🎁",
+    stars: Number(doc?.stars || 0),
+    isActive: Boolean(doc?.isActive),
+    sortOrder: Number(doc?.sortOrder || 0),
+    createdAt: doc?.createdAt || null,
+    updatedAt: doc?.updatedAt || null,
+  };
+}
+
+const getStaticGifts = async (_, res) => {
+  try {
+    const items = await StaticGift.find({})
+      .sort({ sortOrder: 1, createdAt: -1 })
+      .lean();
+    return response.success(res, "Static gifts", items.map(mapStaticGift));
+  } catch (error) {
+    return response.serverError(
+      res,
+      "Static giftlarni olishda xatolik",
+      error.message,
+    );
+  }
+};
+
+const createStaticGift = async (req, res) => {
+  try {
+    const payload = {
+      ...req.validated,
+      giftId: normalizeGiftId(req.validated?.giftId),
+    };
+    const exists = await StaticGift.findOne({ giftId: payload.giftId }).lean();
+    if (exists) {
+      return response.error(res, "Bu giftId allaqachon mavjud");
+    }
+    const created = await StaticGift.create(payload);
+    return response.created(res, "Static gift qo'shildi", mapStaticGift(created));
+  } catch (error) {
+    return response.serverError(
+      res,
+      "Static gift qo'shishda xatolik",
+      error.message,
+    );
+  }
+};
+
+const updateStaticGift = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const payload = {
+      ...req.validated,
+    };
+    if (typeof payload.giftId !== "undefined") {
+      payload.giftId = normalizeGiftId(payload.giftId);
+    }
+    if (payload.giftId) {
+      const exists = await StaticGift.findOne({
+        giftId: payload.giftId,
+        _id: { $ne: id },
+      }).lean();
+      if (exists) {
+        return response.error(res, "Bu giftId allaqachon mavjud");
+      }
+    }
+    const updated = await StaticGift.findByIdAndUpdate(id, payload, {
+      new: true,
+      runValidators: true,
+    }).lean();
+    if (!updated) return response.notFound(res, "Static gift topilmadi");
+    return response.success(res, "Static gift yangilandi", mapStaticGift(updated));
+  } catch (error) {
+    return response.serverError(
+      res,
+      "Static gift yangilashda xatolik",
+      error.message,
+    );
+  }
+};
+
+const deleteStaticGift = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const deleted = await StaticGift.findByIdAndDelete(id).lean();
+    if (!deleted) return response.notFound(res, "Static gift topilmadi");
+    return response.success(res, "Static gift o'chirildi", mapStaticGift(deleted));
+  } catch (error) {
+    return response.serverError(
+      res,
+      "Static gift o'chirishda xatolik",
+      error.message,
+    );
+  }
+};
+
 const getUserProfilePhoto = async (req, res) => {
   try {
     const tgUserId = normalizeString(req.params.tgUserId);
@@ -1776,9 +1886,13 @@ module.exports = {
   getSettings,
   updateSettings,
   getPaymentCards,
+  getStaticGifts,
   createPaymentCard,
+  createStaticGift,
   updatePaymentCard,
+  updateStaticGift,
   deletePaymentCard,
+  deleteStaticGift,
   resetPaymentCardLimit,
   searchUsers,
   searchAssets,

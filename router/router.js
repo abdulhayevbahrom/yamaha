@@ -19,6 +19,8 @@ const {
   updatePlanValidation,
   createPaymentCardValidation,
   updatePaymentCardValidation,
+  createStaticGiftValidation,
+  updateStaticGiftValidation,
 } = require("../validations/admin.validation");
 
 const telegramAuthMiddleware = requireTelegramAuth();
@@ -212,6 +214,7 @@ router.get(
   authMiddleware,
   adminController.getPaymentCards,
 );
+router.get("/admin/static-gifts", authMiddleware, adminController.getStaticGifts);
 router.post(
   "/admin/plans",
   authMiddleware,
@@ -223,6 +226,12 @@ router.post(
   authMiddleware,
   validate(createPaymentCardValidation),
   adminController.createPaymentCard,
+);
+router.post(
+  "/admin/static-gifts",
+  authMiddleware,
+  validate(createStaticGiftValidation),
+  adminController.createStaticGift,
 );
 router.patch(
   "/admin/plans/:id",
@@ -236,11 +245,22 @@ router.patch(
   validate(updatePaymentCardValidation),
   adminController.updatePaymentCard,
 );
+router.patch(
+  "/admin/static-gifts/:id",
+  authMiddleware,
+  validate(updateStaticGiftValidation),
+  adminController.updateStaticGift,
+);
 router.delete("/admin/plans/:id", authMiddleware, adminController.deletePlan);
 router.delete(
   "/admin/payment-cards/:id",
   authMiddleware,
   adminController.deletePaymentCard,
+);
+router.delete(
+  "/admin/static-gifts/:id",
+  authMiddleware,
+  adminController.deleteStaticGift,
 );
 router.post(
   "/admin/payment-cards/:id/reset-limit",
