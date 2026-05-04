@@ -230,18 +230,56 @@ const getTopSales = async (req, res) => {
       status: { $in: ["paid_auto_processed", "completed"] },
       $or: [{ paidAt: { $gte: startDate } }, { createdAt: { $gte: startDate } }],
     })
-      .sort({ expectedAmount: -1, paidAt: -1, createdAt: -1 })
-      .limit(10)
+      .sort({ paidAt: -1, createdAt: -1 })
       .lean();
 
-    const items = orders.map((order) => ({
-      orderId: order.orderId,
-      product: order.product,
-      buyerProfileName: buildTopSalesActorName(order) || buildTopSalesBuyerName(order),
-      amount: Number(order.expectedAmount || 0),
-      paidAt: order.paidAt || null,
-      createdAt: order.createdAt || null,
-    }));
+    const groupedByBuyer = new Map();
+    orders.forEach((order) => {
+      const buyerName =
+        buildTopSalesActorName(order) || buildTopSalesBuyerName(order) || "-";
+      const amount = Number(order.expectedAmount || 0);
+      const paidAt = order?.paidAt ? new Date(order.paidAt).getTime() : 0;
+      const createdAt = order?.createdAt ? new Date(order.createdAt).getTime() : 0;
+      const orderTime = paidAt || createdAt || 0;
+      const current = groupedByBuyer.get(buyerName);
+
+      if (!current) {
+        groupedByBuyer.set(buyerName, {
+          orderId: order.orderId,
+          product: order.product,
+          buyerProfileName: buyerName,
+          amount,
+          paidAt: order.paidAt || null,
+          createdAt: order.createdAt || null,
+          sortTime: orderTime,
+        });
+        return;
+      }
+
+      current.amount += amount;
+      if (orderTime > current.sortTime) {
+        current.sortTime = orderTime;
+        current.orderId = order.orderId;
+        current.product = order.product;
+        current.paidAt = order.paidAt || null;
+        current.createdAt = order.createdAt || null;
+      }
+    });
+
+    const items = Array.from(groupedByBuyer.values())
+      .sort((a, b) => {
+        if (b.amount !== a.amount) return b.amount - a.amount;
+        return b.sortTime - a.sortTime;
+      })
+      .slice(0, 10)
+      .map((item) => ({
+        orderId: item.orderId,
+        product: item.product,
+        buyerProfileName: item.buyerProfileName,
+        amount: Number(item.amount || 0),
+        paidAt: item.paidAt || null,
+        createdAt: item.createdAt || null,
+      }));
 
     return response.success(res, "Top sales", {
       period,
