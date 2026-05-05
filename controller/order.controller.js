@@ -34,6 +34,7 @@ const {
   confirmNftWithdrawalById,
   cancelNftWithdrawalById,
 } = require("../services/nft-withdrawal-payout.service");
+const { sendTelegramText } = require("../services/telegram-notify.service");
 
 let sequence = 1;
 const PENDING_TTL_MS = 10 * 60 * 1000;
@@ -61,6 +62,76 @@ function getOrderProductLabel(product) {
   if (key === "mlbb") return "MLBB Diamond";
   if (key === "freefire") return "Free Fire Diamond";
   return "Buyurtma";
+}
+
+function getAdminNotifyIds() {
+  return String(process.env.ADMIN_NOTIFY_CHAT_ID || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function getGameProductLabel(product) {
+  const key = String(product || "").trim().toLowerCase();
+  if (key === "mlbb") return "MLBB";
+  if (key === "freefire") return "Free Fire";
+  if (key === "uc") return "PUBG UC";
+  return "O'yin";
+}
+
+function splitMlbbAccount(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return { playerId: "", zoneId: "" };
+  const separatorIndex = raw.indexOf(":");
+  if (separatorIndex < 0) return { playerId: raw, zoneId: "" };
+  return {
+    playerId: raw.slice(0, separatorIndex).trim(),
+    zoneId: raw.slice(separatorIndex + 1).trim(),
+  };
+}
+
+function buildGameAccountLines(order) {
+  const key = String(order?.product || "").trim().toLowerCase();
+  if (key !== "mlbb") {
+    return [`🆔 ID: ${String(order?.username || "").trim() || "-"}`];
+  }
+  const parsed = splitMlbbAccount(order?.username);
+  const playerId = String(order?.playerId || "").trim() || parsed.playerId;
+  const zoneId = String(order?.zoneId || "").trim() || parsed.zoneId;
+  const lines = [`🆔 ID: ${playerId || "-"}`];
+  if (zoneId) lines.push(`🗺 Zone ID: ${zoneId}`);
+  return lines;
+}
+
+async function notifyAdminsAboutManualGame(order) {
+  if (!order || !isManualGameProduct(order.product)) return;
+  const adminIds = getAdminNotifyIds();
+  if (!adminIds.length) return;
+
+  const productLabel = getGameProductLabel(order.product);
+  const text = [
+    `💬 ${productLabel} to'lov tushdi`,
+    `🧾 Buyurtma: #${String(order?.orderId || "-")}`,
+    ...buildGameAccountLines(order),
+    `🎮 Miqdor: ${String(order?.planCode || "-")}`,
+    `💵 Summa: ${Number(order?.expectedAmount || 0).toLocaleString("uz-UZ")} UZS`,
+    `💳 To'lov: ${String(order?.paymentMethod || "-")}`,
+  ].join("\n");
+
+  await Promise.allSettled(
+    adminIds.map((adminId) =>
+      sendTelegramText(adminId, text, {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "Tasdiqlash", callback_data: `CONFIRM_GAME:${String(order?._id || "")}` },
+              { text: "Bekor qilish", callback_data: `CANCEL_GAME:${String(order?._id || "")}` },
+            ],
+          ],
+        },
+      }),
+    ),
+  );
 }
 
 async function createTelegramStarsInvoiceLink({
@@ -494,6 +565,7 @@ const createOrder = async (req, res) => {
           expectedAmount: order.expectedAmount,
           paymentMethod: order.paymentMethod,
         });
+        await notifyAdminsAboutManualGame(order);
       }
 
       if (product === "star" || product === "premium") {
