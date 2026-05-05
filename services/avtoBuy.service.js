@@ -275,19 +275,12 @@ async function markFulfillmentFailure(order, error) {
 
       if (String(order?.paymentMethod || "").trim() === "balance") {
         nextErrorMessage =
-          "Fragment hamyonida TON yetarli emas. Mablag'ingiz balansga qaytarildi. Admin balansni to'ldirgach qayta urinish mumkin.";
+          "Texnik sababga ko'ra buyurtma vaqtincha bajarilmadi. Mablag'ingiz balansda saqlanib turibdi, keyinroq qayta urinib ko'ring.";
       } else {
         nextStatus = "cancelled";
         nextFulfillmentStatus = "skipped";
         nextErrorMessage =
-          "Fragment hamyonida TON yetarli emas. To'lovingiz webapp balansiga qaytarildi.";
-      }
-
-      if (order?.tgUserId) {
-        await sendTelegramText(
-          order.tgUserId,
-          nextErrorMessage,
-        );
+          "Texnik sababga ko'ra to'lovingiz webapp balansiga qaytarildi.";
       }
     }
   }

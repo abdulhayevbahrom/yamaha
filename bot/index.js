@@ -7,7 +7,10 @@ const {
   processTelegramStarsPayment,
 } = require("../services/payment-match.service");
 const { onGamePaid } = require("../services/notify.service");
-const { confirmGameOrderById } = require("../services/uc-fulfillment.service");
+const {
+  confirmGameOrderById,
+  cancelGameOrderById,
+} = require("../services/uc-fulfillment.service");
 const {
   confirmStarSellPayoutById,
   cancelStarSellPayoutById,
@@ -574,6 +577,61 @@ async function startBot({ strict = false } = {}) {
       }
     }
 
+    if (query.data?.startsWith("CANCEL_GAME:")) {
+      if (!isAdmin(chatId)) {
+        await bot.answerCallbackQuery(query.id, {
+          text: "Ruxsat yo'q",
+          show_alert: true,
+        });
+        return;
+      }
+
+      const orderId = query.data.replace("CANCEL_GAME:", "").trim();
+      const result = await cancelGameOrderById(orderId);
+      const productLabel = getGameProductLabel(result?.order?.product);
+      if (result.ok) {
+        await bot.answerCallbackQuery(query.id, {
+          text: `${productLabel} order bekor qilindi`,
+        });
+        const updatedMessage = [
+          `💬 ${productLabel} to'lov tushdi`,
+          `🧾 Buyurtma: <code>${String(result.order.orderId)}</code>`,
+          ...buildGameAccountLines({
+            product: result?.order?.product,
+            username: result?.order?.username,
+            playerId: result?.order?.playerId,
+            zoneId: result?.order?.zoneId,
+          }),
+          `🎮 Miqdor: <code>${result.order.planCode}</code>`,
+          `💵 Summa: <b>${result.order.expectedAmount} UZS</b>`,
+          "❌ Holat: <b>Bekor qilindi</b>",
+        ].join("\n");
+
+        if (query.message?.message_id) {
+          await bot.editMessageText(updatedMessage, {
+            chat_id: chatId,
+            message_id: query.message.message_id,
+            parse_mode: "HTML",
+            reply_markup: { inline_keyboard: [] },
+          });
+        }
+      } else {
+        await bot.answerCallbackQuery(query.id, {
+          text:
+            result.reason === "not_found"
+              ? "Buyurtma topilmadi"
+              : result.reason === "not_game"
+              ? "Bu o'yin orderi emas"
+              : result.reason === "not_paid"
+              ? "Order hali bekor qilib bo'lmaydigan holatda"
+              : result.reason === "refund_not_available"
+              ? "Qaytarish ma'lumoti yetarli emas"
+              : "Bekor qilish xatolik",
+          show_alert: true,
+        });
+      }
+    }
+
     if (query.data?.startsWith("CONFIRM_STAR_SELL:")) {
       if (!isAdmin(chatId)) {
         await bot.answerCallbackQuery(query.id, {
@@ -1080,6 +1138,10 @@ async function startBot({ strict = false } = {}) {
                 {
                   text: "Tasdiqlash",
                   callback_data: `CONFIRM_GAME:${payload.orderId}`,
+                },
+                {
+                  text: "Bekor qilish",
+                  callback_data: `CANCEL_GAME:${payload.orderId}`,
                 },
               ],
             ],
