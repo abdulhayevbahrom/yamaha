@@ -105,6 +105,62 @@ const buildGameAccountLines = ({ product, username, playerId, zoneId }) => {
   return lines;
 };
 
+const getSafeFragmentTx = (order) =>
+  order?.fragmentTx &&
+  typeof order.fragmentTx === "object" &&
+  !Array.isArray(order.fragmentTx)
+    ? order.fragmentTx
+    : {};
+
+const syncGameAdminMessages = async ({
+  order,
+  statusLine,
+  fallbackChatId = null,
+  fallbackMessageId = null,
+}) => {
+  const updatedMessage = [
+    `💬 ${getGameProductLabel(order?.product)} to'lov tushdi`,
+    `🧾 Buyurtma: <code>${String(order?.orderId || "-")}</code>`,
+    ...buildGameAccountLines({
+      product: order?.product,
+      username: order?.username,
+      playerId: order?.playerId,
+      zoneId: order?.zoneId,
+    }),
+    `🎮 Miqdor: <code>${order?.planCode || "-"}</code>`,
+    `💵 Summa: <b>${order?.expectedAmount || 0} UZS</b>`,
+    statusLine,
+  ].join("\n");
+
+  const fragmentTx = getSafeFragmentTx(order);
+  const items = Array.isArray(fragmentTx?.gameAdminNotifications)
+    ? fragmentTx.gameAdminNotifications
+    : [];
+
+  if (items.length) {
+    await Promise.allSettled(
+      items.map((item) =>
+        bot.editMessageText(updatedMessage, {
+          chat_id: item?.chatId,
+          message_id: item?.messageId,
+          parse_mode: "HTML",
+          reply_markup: { inline_keyboard: [] },
+        }),
+      ),
+    );
+    return;
+  }
+
+  if (fallbackChatId && fallbackMessageId) {
+    await bot.editMessageText(updatedMessage, {
+      chat_id: fallbackChatId,
+      message_id: fallbackMessageId,
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: [] },
+    });
+  }
+};
+
 const buildStarSellAdminSummary = (order, statusText) => {
   const username = String(order?.tgUsername || "").trim();
   const usernameLabel = username ? `@${username}` : "-";
@@ -545,30 +601,14 @@ async function startBot({ strict = false } = {}) {
             ? `${productLabel} order avval tasdiqlangan`
             : `${productLabel} order yakunlandi`,
         });
-        const updatedMessage = [
-          `💬 ${productLabel} to'lov tushdi`,
-          `🧾 Buyurtma: <code>${String(result.order.orderId)}</code>`,
-          ...buildGameAccountLines({
-            product: result?.order?.product,
-            username: result?.order?.username,
-            playerId: result?.order?.playerId,
-            zoneId: result?.order?.zoneId,
-          }),
-          `🎮 Miqdor: <code>${result.order.planCode}</code>`,
-          `💵 Summa: <b>${result.order.expectedAmount} UZS</b>`,
-          result.alreadyCompleted
+        await syncGameAdminMessages({
+          order: result.order,
+          statusLine: result.alreadyCompleted
             ? "✅ Holat: <b>Avval tasdiqlangan</b>"
             : "✅ Holat: <b>Tasdiqlandi</b>",
-        ].join("\n");
-
-        if (query.message?.message_id) {
-          await bot.editMessageText(updatedMessage, {
-            chat_id: chatId,
-            message_id: query.message.message_id,
-            parse_mode: "HTML",
-            reply_markup: { inline_keyboard: [] },
-          });
-        }
+          fallbackChatId: chatId,
+          fallbackMessageId: query.message?.message_id,
+        });
       } else {
         await bot.answerCallbackQuery(query.id, {
           text: "Tasdiqlash xatolik",
@@ -593,28 +633,12 @@ async function startBot({ strict = false } = {}) {
         await bot.answerCallbackQuery(query.id, {
           text: `${productLabel} order bekor qilindi`,
         });
-        const updatedMessage = [
-          `💬 ${productLabel} to'lov tushdi`,
-          `🧾 Buyurtma: <code>${String(result.order.orderId)}</code>`,
-          ...buildGameAccountLines({
-            product: result?.order?.product,
-            username: result?.order?.username,
-            playerId: result?.order?.playerId,
-            zoneId: result?.order?.zoneId,
-          }),
-          `🎮 Miqdor: <code>${result.order.planCode}</code>`,
-          `💵 Summa: <b>${result.order.expectedAmount} UZS</b>`,
-          "❌ Holat: <b>Bekor qilindi</b>",
-        ].join("\n");
-
-        if (query.message?.message_id) {
-          await bot.editMessageText(updatedMessage, {
-            chat_id: chatId,
-            message_id: query.message.message_id,
-            parse_mode: "HTML",
-            reply_markup: { inline_keyboard: [] },
-          });
-        }
+        await syncGameAdminMessages({
+          order: result.order,
+          statusLine: "❌ Holat: <b>Bekor qilindi</b>",
+          fallbackChatId: chatId,
+          fallbackMessageId: query.message?.message_id,
+        });
       } else {
         await bot.answerCallbackQuery(query.id, {
           text:

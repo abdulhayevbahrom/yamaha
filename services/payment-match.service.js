@@ -61,7 +61,7 @@ async function notifyAdminsAboutManualGame(order) {
     `💵 Summa: ${Number(order?.expectedAmount || 0).toLocaleString("uz-UZ")} UZS`,
   ].join("\n");
 
-  await Promise.allSettled(
+  const results = await Promise.allSettled(
     adminIds.map((adminId) =>
       sendTelegramText(adminId, text, {
         reply_markup: {
@@ -81,6 +81,32 @@ async function notifyAdminsAboutManualGame(order) {
       }),
     ),
   );
+
+  const sentNotifications = results
+    .filter((item) => item.status === "fulfilled" && item.value?.ok)
+    .map((item) => item.value)
+    .filter((item) => Number(item?.messageId || 0) > 0)
+    .map((item) => ({
+      chatId: String(item.chatId || ""),
+      messageId: Number(item.messageId || 0),
+    }))
+    .filter((item) => item.chatId && item.messageId > 0);
+
+  if (!sentNotifications.length || !order?._id) return;
+
+  const fragmentTx =
+    order?.fragmentTx && typeof order.fragmentTx === "object" && !Array.isArray(order.fragmentTx)
+      ? order.fragmentTx
+      : {};
+
+  await Order.findByIdAndUpdate(order._id, {
+    $set: {
+      fragmentTx: {
+        ...fragmentTx,
+        gameAdminNotifications: sentNotifications,
+      },
+    },
+  });
 }
 
 async function notifyAdminsAboutStarSell(order) {
