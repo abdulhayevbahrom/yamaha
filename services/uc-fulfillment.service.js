@@ -20,38 +20,58 @@ async function confirmGameOrderById(orderId) {
   if (order.status === "completed") {
     return { ok: true, order, alreadyCompleted: true };
   }
+  if (order.status === "cancelled") {
+    return { ok: false, reason: "already_cancelled" };
+  }
   if (order.status !== "paid_auto_processed") {
     return { ok: false, reason: "not_paid" };
   }
 
-  order.status = "completed";
-  order.fulfillmentStatus = "success";
-  order.completionMode = "manual";
-  order.fulfilledAt = new Date();
-  order.fulfillmentError = "";
-  await order.save();
-  await sendOrderArchive(order, { statusLabel: "Tasdiqlandi" });
-  if (order.tgUserId) {
-    emitUserUpdate(order.tgUserId, {
+  const lockedOrder = await Order.findOneAndUpdate(
+    { _id: orderId, status: "paid_auto_processed" },
+    { $set: { status: "admin_action_processing" } },
+    { new: true },
+  );
+  if (!lockedOrder) {
+    const latest = await Order.findById(orderId);
+    if (!latest) return { ok: false, reason: "not_found" };
+    if (latest.status === "completed") {
+      return { ok: true, order: latest, alreadyCompleted: true };
+    }
+    if (latest.status === "cancelled") {
+      return { ok: false, reason: "already_cancelled" };
+    }
+    return { ok: false, reason: "already_processed" };
+  }
+
+  lockedOrder.status = "completed";
+  lockedOrder.fulfillmentStatus = "success";
+  lockedOrder.completionMode = "manual";
+  lockedOrder.fulfilledAt = new Date();
+  lockedOrder.fulfillmentError = "";
+  await lockedOrder.save();
+  await sendOrderArchive(lockedOrder, { statusLabel: "Tasdiqlandi" });
+  if (lockedOrder.tgUserId) {
+    emitUserUpdate(lockedOrder.tgUserId, {
       type: "game_order_confirmed",
       refreshOrders: true,
-      orderId: order._id,
-      status: order.status,
-      product: order.product,
+      orderId: lockedOrder._id,
+      status: lockedOrder.status,
+      product: lockedOrder.product,
     });
   }
 
   try {
-    await awardReferralCommissionForOrder(order);
+    await awardReferralCommissionForOrder(lockedOrder);
   } catch (error) {
     console.error(
       "Referral commission apply error:",
-      order._id?.toString?.() || order._id,
+      lockedOrder._id?.toString?.() || lockedOrder._id,
       error.message,
     );
   }
 
-  return { ok: true, order };
+  return { ok: true, order: lockedOrder };
 }
 
 async function cancelGameOrderById(orderId) {
@@ -60,37 +80,63 @@ async function cancelGameOrderById(orderId) {
   if (!isManualGameProduct(order.product)) {
     return { ok: false, reason: "not_game" };
   }
-  if (!["paid_auto_processed", "completed"].includes(order.status)) {
+  if (order.status === "cancelled") {
+    return { ok: true, order, alreadyCancelled: true };
+  }
+  if (order.status === "completed") {
+    return { ok: false, reason: "already_completed" };
+  }
+  if (order.status !== "paid_auto_processed") {
     return { ok: false, reason: "not_paid" };
   }
 
-  const refundResult = await refundToBalance(order);
+  const lockedOrder = await Order.findOneAndUpdate(
+    { _id: orderId, status: "paid_auto_processed" },
+    { $set: { status: "admin_action_processing" } },
+    { new: true },
+  );
+  if (!lockedOrder) {
+    const latest = await Order.findById(orderId);
+    if (!latest) return { ok: false, reason: "not_found" };
+    if (latest.status === "cancelled") {
+      return { ok: true, order: latest, alreadyCancelled: true };
+    }
+    if (latest.status === "completed") {
+      return { ok: false, reason: "already_completed" };
+    }
+    return { ok: false, reason: "already_processed" };
+  }
+
+  const refundResult = await refundToBalance(lockedOrder);
   if (!refundResult.ok) {
+    await Order.findByIdAndUpdate(lockedOrder._id, {
+      $set: { status: "paid_auto_processed" },
+    });
     return { ok: false, reason: refundResult.reason };
   }
 
-  order.status = "cancelled";
-  order.fulfillmentStatus = "skipped";
-  order.fulfillmentError = "Game order cancelled by admin. Balance refunded.";
-  order.fulfilledAt = new Date();
-  await order.save();
+  lockedOrder.status = "cancelled";
+  lockedOrder.fulfillmentStatus = "skipped";
+  lockedOrder.fulfillmentError = "Game order cancelled by admin. Balance refunded.";
+  lockedOrder.fulfilledAt = new Date();
+  await lockedOrder.save();
 
-  if (order.tgUserId) {
+  if (lockedOrder.tgUserId) {
     await sendTelegramText(
-      order.tgUserId,
+      lockedOrder.tgUserId,
       "Xatolik tufayli buyurtma bekor qilindi. To'lovingiz botdagi profilingizga qaytarildi.",
     );
-    emitUserUpdate(order.tgUserId, {
+    emitUserUpdate(lockedOrder.tgUserId, {
       type: "game_order_cancelled_refund",
       refreshBalance: true,
       refreshOrders: true,
-      orderId: order._id,
-      status: order.status,
-      product: order.product,
+      orderId: lockedOrder._id,
+      status: lockedOrder.status,
+      product: lockedOrder.product,
     });
   }
 
-  return { ok: true, order, refundedAmount: Number(order.paidAmount || 0) };
+  return { ok: true, order: lockedOrder, refundedAmount: Number(lockedOrder.paidAmount || 0) };
 }
 
 async function confirmUcOrderById(orderId) {

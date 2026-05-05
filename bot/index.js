@@ -418,13 +418,26 @@ async function startBot({ strict = false } = {}) {
     return false;
   };
   const sendToAdmins = async (text, extra = {}) => {
+    const results = [];
     for (const adminId of adminIds) {
       try {
-        await bot.sendMessage(adminId, text, extra);
+        const sent = await bot.sendMessage(adminId, text, extra);
+        results.push({
+          ok: true,
+          chatId: String(sent?.chat?.id || adminId),
+          messageId: Number(sent?.message_id || 0),
+        });
       } catch (error) {
         console.error("Admin notify error:", adminId, error.message);
+        results.push({
+          ok: false,
+          chatId: String(adminId),
+          messageId: 0,
+          reason: String(error?.message || "send_failed"),
+        });
       }
     }
+    return results;
   };
 
   const ensureUser = async (msg, startPayload = "") => {
@@ -611,7 +624,16 @@ async function startBot({ strict = false } = {}) {
         });
       } else {
         await bot.answerCallbackQuery(query.id, {
-          text: "Tasdiqlash xatolik",
+          text:
+            result.reason === "not_found"
+              ? "Buyurtma topilmadi"
+              : result.reason === "not_game"
+              ? "Bu o'yin orderi emas"
+              : result.reason === "already_cancelled"
+              ? "Buyurtma avval bekor qilingan"
+              : result.reason === "already_processed"
+              ? "Buyurtma bo'yicha amal allaqachon bajarilgan"
+              : "Tasdiqlash xatolik",
           show_alert: true,
         });
       }
@@ -631,11 +653,15 @@ async function startBot({ strict = false } = {}) {
       const productLabel = getGameProductLabel(result?.order?.product);
       if (result.ok) {
         await bot.answerCallbackQuery(query.id, {
-          text: `${productLabel} order bekor qilindi`,
+          text: result.alreadyCancelled
+            ? `${productLabel} order avval bekor qilingan`
+            : `${productLabel} order bekor qilindi`,
         });
         await syncGameAdminMessages({
           order: result.order,
-          statusLine: "❌ Holat: <b>Bekor qilindi</b>",
+          statusLine: result.alreadyCancelled
+            ? "❌ Holat: <b>Avval bekor qilingan</b>"
+            : "❌ Holat: <b>Bekor qilindi</b>",
           fallbackChatId: chatId,
           fallbackMessageId: query.message?.message_id,
         });
@@ -646,6 +672,12 @@ async function startBot({ strict = false } = {}) {
               ? "Buyurtma topilmadi"
               : result.reason === "not_game"
               ? "Bu o'yin orderi emas"
+              : result.reason === "already_cancelled"
+              ? "Buyurtma avval bekor qilingan"
+              : result.reason === "already_completed"
+              ? "Buyurtma allaqachon tasdiqlangan"
+              : result.reason === "already_processed"
+              ? "Buyurtma bo'yicha amal allaqachon bajarilgan"
               : result.reason === "not_paid"
               ? "Order hali bekor qilib bo'lmaydigan holatda"
               : result.reason === "refund_not_available"
@@ -1154,7 +1186,7 @@ async function startBot({ strict = false } = {}) {
           `💳 To'lov: <b>${getPaymentMethodLabel(payload?.paymentMethod)}</b>`,
         ].join("\n");
 
-        await sendToAdmins(message, {
+        const notifyResults = await sendToAdmins(message, {
           parse_mode: "HTML",
           reply_markup: {
             inline_keyboard: [
@@ -1171,6 +1203,35 @@ async function startBot({ strict = false } = {}) {
             ],
           },
         });
+
+        const sentNotifications = notifyResults
+          .filter((item) => item?.ok && Number(item?.messageId || 0) > 0)
+          .map((item) => ({
+            chatId: String(item.chatId || ""),
+            messageId: Number(item.messageId || 0),
+          }))
+          .filter((item) => item.chatId && item.messageId > 0);
+
+        if (sentNotifications.length && payload?.orderId) {
+          const currentOrder = await Order.findById(payload.orderId)
+            .select({ fragmentTx: 1 })
+            .lean();
+          const fragmentTx =
+            currentOrder?.fragmentTx &&
+            typeof currentOrder.fragmentTx === "object" &&
+            !Array.isArray(currentOrder.fragmentTx)
+              ? currentOrder.fragmentTx
+              : {};
+
+          await Order.findByIdAndUpdate(payload.orderId, {
+            $set: {
+              fragmentTx: {
+                ...fragmentTx,
+                gameAdminNotifications: sentNotifications,
+              },
+            },
+          });
+        }
       } catch (err) {
         console.error("Admin notify error:", err.message);
       }
