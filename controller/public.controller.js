@@ -235,8 +235,8 @@ const getTopSales = async (req, res) => {
 
     const groupedByBuyer = new Map();
     orders.forEach((order) => {
-      const buyerName =
-        buildTopSalesActorName(order) || buildTopSalesBuyerName(order) || "-";
+      const actorName = sanitizeProfileDisplay(order?.profileName);
+      const buyerName = actorName || buildTopSalesBuyerName(order) || "-";
       const amount = Number(order.expectedAmount || 0);
       const paidAt = order?.paidAt ? new Date(order.paidAt).getTime() : 0;
       const createdAt = order?.createdAt ? new Date(order.createdAt).getTime() : 0;

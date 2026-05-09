@@ -1826,8 +1826,7 @@ const getActiveUsers = async (req, res) => {
       $or: [{ paidAt: { $gte: start } }, { createdAt: { $gte: start } }],
       tgUserId: { $exists: true, $ne: "" },
     })
-      .sort({ expectedAmount: -1, paidAt: -1, createdAt: -1 })
-      .limit(limit)
+      .sort({ paidAt: -1, createdAt: -1 })
       .lean();
 
     const ids = rows.map((r) => normalizeString(r?.tgUserId)).filter(Boolean);
@@ -1838,29 +1837,69 @@ const getActiveUsers = async (req, res) => {
       : [];
     const userMap = new Map(users.map((u) => [normalizeString(u?.tgUserId), u]));
 
-    const items = rows.map((row, index) => {
+    const grouped = new Map();
+    rows.forEach((row) => {
       const tgUserId = normalizeString(row?.tgUserId);
+      if (!tgUserId) return;
       const user = userMap.get(tgUserId) || {};
-      const username = normalizeString(user?.username).replace(/^@+/, "");
-      const telegramUrl = username
-        ? `https://t.me/${username}`
-        : `tg://user?id=${tgUserId}`;
-      return {
-        rank: index + 1,
-        orderId: Number(row?.orderId || 0),
-        product: normalizeString(row?.product),
-        tgUserId,
-        username: normalizeString(user?.username),
-        profileName:
-          normalizeString(row?.profileName) ||
-          normalizeString(user?.profileName),
-        displayName: normalizeDisplayName({ ...user, tgUserId }),
-        totalSpent: Number(row?.expectedAmount || 0),
-        ordersCount: 1,
-        lastOrderAt: row?.paidAt || row?.createdAt || null,
-        telegramUrl,
-      };
+      const amount = Number(row?.expectedAmount || 0);
+      const paidAtMs = row?.paidAt ? new Date(row.paidAt).getTime() : 0;
+      const createdAtMs = row?.createdAt ? new Date(row.createdAt).getTime() : 0;
+      const orderTime = paidAtMs || createdAtMs || 0;
+      const existing = grouped.get(tgUserId);
+
+      if (!existing) {
+        grouped.set(tgUserId, {
+          orderId: Number(row?.orderId || 0),
+          product: normalizeString(row?.product),
+          tgUserId,
+          username: normalizeString(user?.username),
+          profileName:
+            normalizeString(row?.profileName) || normalizeString(user?.profileName),
+          displayName: normalizeDisplayName({ ...user, tgUserId }),
+          totalSpent: amount,
+          ordersCount: 1,
+          lastOrderAt: row?.paidAt || row?.createdAt || null,
+          sortTime: orderTime,
+        });
+        return;
+      }
+
+      existing.totalSpent += amount;
+      existing.ordersCount += 1;
+      if (orderTime > existing.sortTime) {
+        existing.sortTime = orderTime;
+        existing.lastOrderAt = row?.paidAt || row?.createdAt || null;
+        existing.orderId = Number(row?.orderId || existing.orderId || 0);
+        existing.product = normalizeString(row?.product) || existing.product;
+      }
     });
+
+    const items = Array.from(grouped.values())
+      .sort((a, b) => {
+        if (b.totalSpent !== a.totalSpent) return b.totalSpent - a.totalSpent;
+        return (b.sortTime || 0) - (a.sortTime || 0);
+      })
+      .slice(0, limit)
+      .map((item, index) => {
+        const username = normalizeString(item?.username).replace(/^@+/, "");
+        const telegramUrl = username
+          ? `https://t.me/${username}`
+          : `tg://user?id=${normalizeString(item?.tgUserId)}`;
+        return {
+          rank: index + 1,
+          orderId: Number(item?.orderId || 0),
+          product: normalizeString(item?.product),
+          tgUserId: normalizeString(item?.tgUserId),
+          username: normalizeString(item?.username),
+          profileName: normalizeString(item?.profileName),
+          displayName: normalizeString(item?.displayName),
+          totalSpent: Number(item?.totalSpent || 0),
+          ordersCount: Number(item?.ordersCount || 0),
+          lastOrderAt: item?.lastOrderAt || null,
+          telegramUrl,
+        };
+      });
 
     return response.success(res, "Active users", {
       period,
