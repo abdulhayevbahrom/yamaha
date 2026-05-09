@@ -10,6 +10,9 @@ const apiKeyMiddleware = require("../middleware/api-key.middleware");
 const signatureMiddleware = require("../middleware/signature.middleware");
 const ipAllowlistMiddleware = require("../middleware/ip-allowlist.middleware");
 const { requireTelegramAuth } = require("../middleware/telegram-auth.middleware");
+const {
+  createFreshTelegramAuthMiddleware,
+} = require("../middleware/fresh-telegram-auth.middleware");
 const requireRegisteredUser = require("../middleware/registered-user.middleware");
 const { createRateLimit } = require("../middleware/rate-limit.middleware");
 const validate = require("../middleware/validate.middleware");
@@ -24,6 +27,9 @@ const {
 } = require("../validations/admin.validation");
 
 const telegramAuthMiddleware = requireTelegramAuth();
+const freshTelegramWriteAuth = createFreshTelegramAuthMiddleware({
+  maxAgeSec: Number(process.env.TG_INIT_DATA_MAX_AGE_SEC_CRITICAL || 300),
+});
 const userWriteRateLimit = createRateLimit({
   keyPrefix: "user-write",
   windowMs: Number(process.env.RATE_LIMIT_USER_WRITE_WINDOW_MS || 60_000),
@@ -122,6 +128,7 @@ router.get(
 router.post(
   "/gifts/nft/offers",
   telegramAuthMiddleware,
+  freshTelegramWriteAuth,
   requireRegisteredUser,
   userWriteRateLimit,
   botActiveMiddleware,
@@ -130,6 +137,7 @@ router.post(
 router.post(
   "/gifts/nft/offers/accept",
   telegramAuthMiddleware,
+  freshTelegramWriteAuth,
   requireRegisteredUser,
   userWriteRateLimit,
   botActiveMiddleware,
@@ -138,6 +146,7 @@ router.post(
 router.post(
   "/gifts/nft/offers/reject",
   telegramAuthMiddleware,
+  freshTelegramWriteAuth,
   requireRegisteredUser,
   userWriteRateLimit,
   botActiveMiddleware,
@@ -146,6 +155,7 @@ router.post(
 router.post(
   "/gifts/nft/offers/cancel",
   telegramAuthMiddleware,
+  freshTelegramWriteAuth,
   requireRegisteredUser,
   userWriteRateLimit,
   botActiveMiddleware,
@@ -154,6 +164,7 @@ router.post(
 router.post(
   "/gifts/nft/list",
   telegramAuthMiddleware,
+  freshTelegramWriteAuth,
   requireRegisteredUser,
   userWriteRateLimit,
   botActiveMiddleware,
@@ -162,6 +173,7 @@ router.post(
 router.post(
   "/gifts/nft/unlist",
   telegramAuthMiddleware,
+  freshTelegramWriteAuth,
   requireRegisteredUser,
   userWriteRateLimit,
   botActiveMiddleware,
@@ -170,6 +182,7 @@ router.post(
 router.post(
   "/gifts/nft/buy",
   telegramAuthMiddleware,
+  freshTelegramWriteAuth,
   requireRegisteredUser,
   userWriteRateLimit,
   botActiveMiddleware,
@@ -178,6 +191,7 @@ router.post(
 router.post(
   "/gifts/nft/withdraw",
   telegramAuthMiddleware,
+  freshTelegramWriteAuth,
   requireRegisteredUser,
   userWriteRateLimit,
   botActiveMiddleware,

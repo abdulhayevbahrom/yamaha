@@ -142,6 +142,40 @@ function pickFirstNonEmpty(...values) {
   return "";
 }
 
+function buildRequestMeta(req) {
+  const forwardedFor = normalizeString(req?.headers?.["x-forwarded-for"]);
+  const realIp = normalizeString(req?.headers?.["x-real-ip"]);
+  const ip =
+    normalizeString(forwardedFor.split(",")[0]) ||
+    normalizeString(realIp) ||
+    normalizeString(req?.ip) ||
+    normalizeString(req?.socket?.remoteAddress) ||
+    "unknown";
+
+  return {
+    ip,
+    userAgent: normalizeString(req?.headers?.["user-agent"]),
+  };
+}
+
+function logNftWithdrawSecurity(event, payload = {}) {
+  try {
+    const safePayload = {
+      at: new Date().toISOString(),
+      event: normalizeString(event) || "nft_withdraw_event",
+      tgUserId: normalizeString(payload?.tgUserId),
+      nftId: normalizeString(payload?.nftId),
+      recipient: normalizeString(payload?.recipient),
+      ip: normalizeString(payload?.ip),
+      userAgent: normalizeString(payload?.userAgent),
+      reason: normalizeString(payload?.reason),
+    };
+    console.warn("[NFT_WITHDRAW_SECURITY]", JSON.stringify(safePayload));
+  } catch (_) {
+    // log xatoligi business flowni to'xtatmasin
+  }
+}
+
 async function runInBatches(items, batchSize, worker) {
   const list = Array.isArray(items) ? items : [];
   const size = Math.min(Math.max(Math.trunc(toSafeNumber(batchSize, 20)), 1), 200);
@@ -2461,6 +2495,19 @@ async function buyNftFromMarketplace(req, res) {
 
 async function withdrawMyNft(req, res) {
   try {
+    if (String(process.env.NFT_WITHDRAW_ENABLED || "true").trim().toLowerCase() === "false") {
+      const requestMeta = buildRequestMeta(req);
+      logNftWithdrawSecurity("blocked_by_emergency_switch", {
+        ip: requestMeta.ip,
+        userAgent: requestMeta.userAgent,
+        reason: "NFT_WITHDRAW_ENABLED=false",
+      });
+      return response.error(
+        res,
+        "NFT yechib olish vaqtincha o'chirilgan. Administratorga murojaat qiling.",
+      );
+    }
+
     const tgUser = getTelegramUserFromRequest(req);
     if (!tgUser?.tgUserId) {
       return response.error(
@@ -2478,6 +2525,13 @@ async function withdrawMyNft(req, res) {
     }
 
     const nftId = normalizeString(req.body?.nftId);
+    const requestMeta = buildRequestMeta(req);
+    logNftWithdrawSecurity("request_started", {
+      tgUserId: normalizeString(tgUser?.tgUserId || user?.tgUserId),
+      nftId,
+      ip: requestMeta.ip,
+      userAgent: requestMeta.userAgent,
+    });
     if (!nftId) {
       return response.error(res, "nftId required");
     }
@@ -2586,7 +2640,22 @@ async function withdrawMyNft(req, res) {
         msgId: transferMsgId,
         recipientIdentifier,
       });
+      logNftWithdrawSecurity("telegram_transfer_success", {
+        tgUserId: normalizeString(user?.tgUserId),
+        nftId,
+        recipient: recipientIdentifier,
+        ip: requestMeta.ip,
+        userAgent: requestMeta.userAgent,
+      });
     } catch (transferError) {
+      logNftWithdrawSecurity("telegram_transfer_failed", {
+        tgUserId: normalizeString(user?.tgUserId),
+        nftId,
+        recipient: recipientIdentifier,
+        ip: requestMeta.ip,
+        userAgent: requestMeta.userAgent,
+        reason: normalizeString(transferError?.errorMessage || transferError?.message),
+      });
       if (isGiftServiceLowStarsError(transferError)) {
         await notifyAdminsAboutGiftServiceLowStars({
           action: "nft_withdraw",
@@ -2677,6 +2746,14 @@ async function withdrawMyNft(req, res) {
       balance: toSafeNumber(updatedUser?.balance, toSafeNumber(user?.balance, 0)),
     });
   } catch (error) {
+    const requestMeta = buildRequestMeta(req);
+    logNftWithdrawSecurity("request_crashed", {
+      tgUserId: normalizeString(req?.telegramAuth?.tgUserId),
+      nftId: normalizeString(req?.body?.nftId),
+      ip: requestMeta.ip,
+      userAgent: requestMeta.userAgent,
+      reason: normalizeString(error?.message),
+    });
     return response.serverError(
       res,
       "NFT ni yechib olishda xatolik",
