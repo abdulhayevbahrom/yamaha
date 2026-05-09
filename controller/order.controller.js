@@ -25,7 +25,6 @@ const {
 } = require("../services/settings.service");
 const { getTelegramUserFromRequest } = require("../utils/tg-user");
 const { selectPaymentCardForType } = require("../services/payment-card.service");
-const { lookupCardBinInfo, normalizeScheme } = require("../services/card-bin.service");
 const {
   confirmStarSellPayoutById,
   cancelStarSellPayoutById,
@@ -43,13 +42,6 @@ const STARS_INVOICE_PRODUCTS = new Set(["uc", "freefire", "mlbb", "star_sell"]);
 
 function normalizeCardNumber(value) {
   return String(value || "").replace(/\D/g, "").slice(0, 16);
-}
-
-function isSupportedStarSellScheme(scheme) {
-  const normalized = normalizeScheme(scheme);
-  return ["HUMOCARD", "HUMO", "UZCARD", "UNIONPAY", "UNIYONPAY"].includes(
-    normalized,
-  );
 }
 
 function getOrderProductLabel(product) {
@@ -425,14 +417,6 @@ const createOrder = async (req, res) => {
       }
       if (sellCardNumber.length !== 16) {
         return response.error(res, "Karta raqami 16 ta bo'lishi kerak");
-      }
-      const binInfo = await lookupCardBinInfo(sellCardNumber);
-      const scheme = normalizeScheme(binInfo?.scheme);
-      if (!isSupportedStarSellScheme(scheme)) {
-        return response.error(
-          res,
-          "Faqat HUMOCARD, UZCARD yoki UNIONPAY kartalari qabul qilinadi",
-        );
       }
       resolvedAmount = qty;
       resolvedBasePrice = qty * Number(pricing.pricePerStar || 0);
