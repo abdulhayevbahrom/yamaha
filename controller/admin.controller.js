@@ -1849,13 +1849,19 @@ const getActiveUsers = async (req, res) => {
       const existing = grouped.get(tgUserId);
 
       if (!existing) {
+        const userProfileName = normalizeString(user?.profileName);
+        const fallbackProfileName = userProfileName
+          ? userProfileName
+          : normalizeString(user?.username)
+            ? `@${normalizeUsername(user?.username)}`
+            : "";
+
         grouped.set(tgUserId, {
           orderId: Number(row?.orderId || 0),
           product: normalizeString(row?.product),
           tgUserId,
           username: normalizeString(user?.username),
-          profileName:
-            normalizeString(row?.profileName) || normalizeString(user?.profileName),
+          profileName: fallbackProfileName,
           displayName: normalizeDisplayName({ ...user, tgUserId }),
           totalSpent: amount,
           ordersCount: 1,

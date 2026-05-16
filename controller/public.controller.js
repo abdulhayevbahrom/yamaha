@@ -1,6 +1,7 @@
 const response = require("../utils/response");
 const Plan = require("../model/plan.model");
 const Order = require("../model/order.model");
+const User = require("../model/user.model");
 const {
   getStarPricing,
   getGameStarsPaymentConfig,
@@ -150,18 +151,32 @@ function sanitizeProfileDisplay(value) {
   return text;
 }
 
-function buildTopSalesBuyerName(order) {
-  const profileName = sanitizeProfileDisplay(order?.profileName);
-  if (profileName) return profileName;
-
-  const username = sanitizeProfileDisplay(order?.username || order?.tgUsername);
-  if (!username) return sanitizeProfileDisplay(order?.tgUserId) || "-";
-  if (/^@/.test(username) || /^\d+$/.test(username)) return username;
-  return `@${username}`;
+function normalizeUsername(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^@+/, "");
 }
 
-function buildTopSalesActorName(order) {
-  return sanitizeProfileDisplay(order?.profileName) || "-";
+function resolveTopSalesActor(order, user) {
+  const tgUserId = sanitizeProfileDisplay(order?.tgUserId || user?.tgUserId);
+  const usernameRaw = sanitizeProfileDisplay(user?.username || order?.tgUsername);
+  const username = normalizeUsername(usernameRaw);
+  const profileName = sanitizeProfileDisplay(user?.profileName);
+
+  const displayName =
+    profileName ||
+    (username ? `@${username}` : "") ||
+    tgUserId ||
+    "-";
+
+  const key = tgUserId || (username ? `u:${username.toLowerCase()}` : `o:${String(order?._id || "")}`);
+
+  return {
+    key,
+    tgUserId,
+    username,
+    displayName,
+  };
 }
 
 const health = async (_, res) => response.success(res, "API ishlayapti");
@@ -237,21 +252,33 @@ const getTopSales = async (req, res) => {
       .sort({ paidAt: -1, createdAt: -1 })
       .lean();
 
-    const groupedByBuyer = new Map();
+    const actorIds = orders
+      .map((order) => sanitizeProfileDisplay(order?.tgUserId))
+      .filter(Boolean);
+    const users = actorIds.length
+      ? await User.find({ tgUserId: { $in: actorIds } })
+          .select({ tgUserId: 1, username: 1, profileName: 1 })
+          .lean()
+      : [];
+    const userMap = new Map(users.map((u) => [sanitizeProfileDisplay(u?.tgUserId), u]));
+
+    const groupedByActor = new Map();
     orders.forEach((order) => {
-      const actorName = sanitizeProfileDisplay(order?.profileName);
-      const buyerName = actorName || buildTopSalesBuyerName(order) || "-";
+      const user = userMap.get(sanitizeProfileDisplay(order?.tgUserId)) || null;
+      const actor = resolveTopSalesActor(order, user);
       const amount = Number(order.expectedAmount || 0);
       const paidAt = order?.paidAt ? new Date(order.paidAt).getTime() : 0;
       const createdAt = order?.createdAt ? new Date(order.createdAt).getTime() : 0;
       const orderTime = paidAt || createdAt || 0;
-      const current = groupedByBuyer.get(buyerName);
+      const current = groupedByActor.get(actor.key);
 
       if (!current) {
-        groupedByBuyer.set(buyerName, {
+        groupedByActor.set(actor.key, {
           orderId: order.orderId,
           product: order.product,
-          buyerProfileName: buyerName,
+          tgUserId: actor.tgUserId,
+          username: actor.username,
+          buyerProfileName: actor.displayName,
           amount,
           paidAt: order.paidAt || null,
           createdAt: order.createdAt || null,
@@ -270,7 +297,7 @@ const getTopSales = async (req, res) => {
       }
     });
 
-    const items = Array.from(groupedByBuyer.values())
+    const items = Array.from(groupedByActor.values())
       .sort((a, b) => {
         if (b.amount !== a.amount) return b.amount - a.amount;
         return b.sortTime - a.sortTime;
@@ -279,6 +306,8 @@ const getTopSales = async (req, res) => {
       .map((item) => ({
         orderId: item.orderId,
         product: item.product,
+        tgUserId: item.tgUserId || "",
+        username: item.username || "",
         buyerProfileName: item.buyerProfileName,
         amount: Number(item.amount || 0),
         paidAt: item.paidAt || null,

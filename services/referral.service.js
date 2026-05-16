@@ -132,8 +132,17 @@ async function bindReferralFromStart({
   profileName = "",
   startPayload = "",
 }) {
+  const normalizedUserId = normalizeString(tgUserId);
+  const existingUserBeforeStart = normalizedUserId
+    ? await User.exists({ tgUserId: normalizedUserId })
+    : null;
+
   const user = await ensureReferralIdentity({ tgUserId, username, profileName });
   if (!user?.tgUserId) return null;
+
+  // Referral only for users who are entering bot for the first time.
+  // If user already existed before this /start, do not bind referral.
+  if (existingUserBeforeStart) return user;
 
   const referralCode = parseReferralPayload(startPayload);
   if (!referralCode) return user;
