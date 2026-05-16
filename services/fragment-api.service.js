@@ -116,7 +116,28 @@ async function buyPremium(username, duration) {
   };
 }
 
+async function getTelegramUserInfo(username) {
+  const cleaned = normalizeUsername(username);
+  if (!cleaned) {
+    throw new Error("Username kiriting");
+  }
+
+  const payload = await post("/getInfo", {
+    username: cleaned,
+  });
+
+  const result = payload?.result && typeof payload.result === "object" ? payload.result : null;
+  const profileName = String(result?.name || "").trim();
+
+  return {
+    raw: payload,
+    result,
+    profileName,
+  };
+}
+
 module.exports = {
   buyStars,
   buyPremium,
+  getTelegramUserInfo,
 };

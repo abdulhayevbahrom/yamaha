@@ -16,9 +16,9 @@ const { checkForceJoinMembership } = require("../services/force-join.service");
 const {
   checkTelegramPremium,
   isTelegramPremiumCheckConfigured,
-  lookupTelegramProfile,
 } = require("../services/telegram-premium-check.service");
 const { normalizeCardBin, lookupCardBinInfo } = require("../services/card-bin.service");
+const { getTelegramUserInfo } = require("../services/fragment-api.service");
 // const { ensureDefaultPlans } = require("../services/plan.service");
 
 const categoryNames = {
@@ -80,22 +80,17 @@ async function fetchProfileLookup(username) {
   const normalizedUsername = normalizeLookupUsername(username);
   if (!normalizedUsername) return null;
 
-  if (!isTelegramPremiumCheckConfigured()) {
-    console.warn("[lookup-profile] telegram profile lookup is not configured");
-    return null;
-  }
-
   try {
-    const telegramResult = await lookupTelegramProfile(normalizedUsername);
-    const profileName = String(telegramResult?.profileName || "").trim();
+    const lookup = await getTelegramUserInfo(normalizedUsername);
+    const profileName = String(lookup?.profileName || "").trim();
     if (!profileName) return null;
     return {
       username: normalizedUsername,
       profileName,
     };
-  } catch (telegramError) {
+  } catch (lookupError) {
     console.warn(
-      `[lookup-profile] telegram lookup failed for @${normalizedUsername}: ${telegramError?.message || telegramError}`,
+      `[lookup-profile] fragment getInfo failed for @${normalizedUsername}: ${lookupError?.message || lookupError}`,
     );
     return null;
   }
