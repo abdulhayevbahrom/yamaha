@@ -123,11 +123,36 @@ async function checkTelegramPremium(identifier) {
     id: entity?.id ? String(entity.id) : "",
     username: String(entity?.username || "").trim(),
     firstName: String(entity?.firstName || "").trim(),
+    lastName: String(entity?.lastName || "").trim(),
     isPremium: Boolean(entity?.premium),
+  };
+}
+
+async function lookupTelegramProfile(identifier) {
+  const entityInput = resolveEntityInput(identifier);
+  if (!entityInput) {
+    throw new Error("Username yoki tgUserId kiriting");
+  }
+
+  const telegramClient = await getTelegramPremiumCheckClient();
+  const entity = await telegramClient.getEntity(entityInput);
+
+  const username = String(entity?.username || "").trim();
+  const firstName = String(entity?.firstName || "").trim();
+  const lastName = String(entity?.lastName || "").trim();
+  const fullName = [firstName, lastName].filter(Boolean).join(" ").trim();
+
+  return {
+    id: entity?.id ? String(entity.id) : "",
+    username,
+    firstName,
+    lastName,
+    profileName: fullName || (username ? `@${username}` : ""),
   };
 }
 
 module.exports = {
   checkTelegramPremium,
   isTelegramPremiumCheckConfigured,
+  lookupTelegramProfile,
 };

@@ -16,6 +16,7 @@ const { checkForceJoinMembership } = require("../services/force-join.service");
 const {
   checkTelegramPremium,
   isTelegramPremiumCheckConfigured,
+  lookupTelegramProfile,
 } = require("../services/telegram-premium-check.service");
 const { normalizeCardBin, lookupCardBinInfo } = require("../services/card-bin.service");
 // const { ensureDefaultPlans } = require("../services/plan.service");
@@ -76,20 +77,28 @@ function writeProfileLookupCache(username, value) {
 }
 
 async function fetchProfileLookup(username) {
-  const url = `${process.env.API_BASE}/star/recipient/search?username=${encodeURIComponent(
-    username,
-  )}&quantity=1`;
-  const headers = { "API-Key": process.env.API_KEY };
+  const normalizedUsername = normalizeLookupUsername(username);
+  if (!normalizedUsername) return null;
 
-  const external = await fetch(url, { headers });
-  const data = await external.json();
-  const profileName = data?.name;
+  if (!isTelegramPremiumCheckConfigured()) {
+    console.warn("[lookup-profile] telegram profile lookup is not configured");
+    return null;
+  }
 
-  if (!profileName) return null;
-  return {
-    username,
-    profileName,
-  };
+  try {
+    const telegramResult = await lookupTelegramProfile(normalizedUsername);
+    const profileName = String(telegramResult?.profileName || "").trim();
+    if (!profileName) return null;
+    return {
+      username: normalizedUsername,
+      profileName,
+    };
+  } catch (telegramError) {
+    console.warn(
+      `[lookup-profile] telegram lookup failed for @${normalizedUsername}: ${telegramError?.message || telegramError}`,
+    );
+    return null;
+  }
 }
 
 function mapCatalog(plans) {
