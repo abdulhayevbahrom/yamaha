@@ -189,6 +189,25 @@ const normalizeTelegramEntities = (entities) => {
     .map((entity) => ({ ...entity }));
 };
 
+const isTelegramRecipientUnavailableError = (error) => {
+  const statusCode = Number(
+    error?.response?.statusCode ||
+      error?.response?.status ||
+      error?.response?.body?.error_code ||
+      0,
+  );
+  const message = String(
+    error?.response?.body?.description || error?.message || error || "",
+  ).toLowerCase();
+
+  return (
+    statusCode === 403 &&
+    (message.includes("bot was blocked by the user") ||
+      message.includes("user is deactivated") ||
+      message.includes("bot can't initiate conversation with a user"))
+  );
+};
+
 async function startBot({ strict = false } = {}) {
   const token = process.env.BOT_TOKEN;
   const webAppUrl = process.env.WEB_APP_URL;
@@ -243,6 +262,12 @@ async function startBot({ strict = false } = {}) {
       try {
         await handler(...args);
       } catch (error) {
+        if (isTelegramRecipientUnavailableError(error)) {
+          console.info(
+            `[telegram-bot:${scope}] recipient unavailable; update ignored`,
+          );
+          return;
+        }
         console.error(
           `[telegram-bot:${scope}]`,
           error?.message || "Unknown error",
@@ -1194,7 +1219,7 @@ async function startBot({ strict = false } = {}) {
   return bot;
 }
 
-module.exports = { startBot };
+module.exports = { isTelegramRecipientUnavailableError, startBot };
 
 if (require.main === module) {
   startBot({ strict: true }).catch((error) => {
