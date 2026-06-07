@@ -10,7 +10,9 @@ Production muhitida quyidagi sozlamalarni kiritish shart.
   kiritilmasa, `ADMIN_NOTIFY_CHAT_ID` ishlatiladi. Ikkalasi ham bo‘sh bo‘lsa,
   admin panelga kirish bloklanadi.
 - `TG_INIT_DATA_MAX_AGE_SEC_CRITICAL`: moliyaviy amallar uchun Telegram
-  `initData` sessiyasining maksimal yoshi, soniyalarda. Standart qiymat: `300`.
+  `initData` sessiyasining maksimal yoshi, soniyalarda. Standart qiymat:
+  `600` (10 daqiqa). Production `.env` faylida oldingi `300` qiymati qolgan
+  bo‘lsa, uni ham `600` ga almashtirish kerak.
 - `TRUST_PROXY`: faqat haqiqiy reverse proxy topologiyasi yoki ishonchli proxy
   tarmog‘iga moslab sozlanishi kerak. Standart qiymat `false`. Raqamli hop
   qiymati ishlatilsa, origin server internetdan bevosita ochiq bo‘lmasligi

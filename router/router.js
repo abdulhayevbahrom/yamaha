@@ -25,7 +25,7 @@ const {
 
 const telegramAuthMiddleware = requireTelegramAuth();
 const freshTelegramWriteAuth = createFreshTelegramAuthMiddleware({
-  maxAgeSec: Number(process.env.TG_INIT_DATA_MAX_AGE_SEC_CRITICAL || 300),
+  maxAgeSec: Number(process.env.TG_INIT_DATA_MAX_AGE_SEC_CRITICAL || 600),
 });
 const userWriteRateLimit = createRateLimit({
   keyPrefix: "user-write",
@@ -374,5 +374,4 @@ router.post(
 );
 
 module.exports = router;
-
 

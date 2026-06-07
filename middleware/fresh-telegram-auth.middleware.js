@@ -14,7 +14,7 @@ function createFreshTelegramAuthMiddleware(options = {}) {
     30,
     toSafeNumber(
       options?.maxAgeSec,
-      toSafeNumber(process.env.TG_INIT_DATA_MAX_AGE_SEC_CRITICAL, 300),
+      toSafeNumber(process.env.TG_INIT_DATA_MAX_AGE_SEC_CRITICAL, 600),
     ),
   );
   const allowFutureSkewSec = Math.max(
@@ -63,4 +63,3 @@ function createFreshTelegramAuthMiddleware(options = {}) {
 module.exports = {
   createFreshTelegramAuthMiddleware,
 };
-
