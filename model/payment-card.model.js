@@ -43,6 +43,15 @@ const paymentCardSchema = new Schema(
       type: Date,
       default: null,
     },
+    usageDay: {
+      type: String,
+      default: "",
+      index: true,
+    },
+    usageCount: {
+      type: Number,
+      default: 0,
+    },
   },
   { timestamps: true },
 );

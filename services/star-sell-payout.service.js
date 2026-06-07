@@ -63,22 +63,25 @@ async function syncAdminNotificationMessages(order, statusText) {
 }
 
 async function confirmStarSellPayoutById(orderId) {
-  const order = await Order.findById(orderId);
+  const order = await Order.findOneAndUpdate(
+    {
+      _id: orderId,
+      product: "star_sell",
+      status: { $in: ["payment_submitted", "paid_auto_processed"] },
+    },
+    { $set: { status: "admin_action_processing" } },
+    { new: false },
+  );
   if (!order) {
-    return { ok: false, reason: "not_found" };
-  }
-
-  if (String(order.product || "").toLowerCase() !== "star_sell") {
-    return { ok: false, reason: "not_star_sell" };
-  }
-
-  const status = String(order.status || "");
-  if (!STAR_SELL_READY_STATUSES.has(status) || status === "cancelled") {
+    const latest = await Order.findById(orderId);
+    if (!latest) return { ok: false, reason: "not_found" };
+    if (String(latest.product || "").toLowerCase() !== "star_sell") {
+      return { ok: false, reason: "not_star_sell" };
+    }
+    if (latest.status === "completed") {
+      return { ok: true, alreadyCompleted: true, order: latest };
+    }
     return { ok: false, reason: "not_ready" };
-  }
-
-  if (status === "completed") {
-    return { ok: true, alreadyCompleted: true, order };
   }
 
   const now = new Date();
@@ -132,24 +135,28 @@ async function confirmStarSellPayoutById(orderId) {
 }
 
 async function cancelStarSellPayoutById(orderId) {
-  const order = await Order.findById(orderId);
+  const order = await Order.findOneAndUpdate(
+    {
+      _id: orderId,
+      product: "star_sell",
+      status: { $in: ["payment_submitted", "paid_auto_processed"] },
+    },
+    { $set: { status: "admin_action_processing" } },
+    { new: false },
+  );
   if (!order) {
-    return { ok: false, reason: "not_found" };
-  }
-
-  if (String(order.product || "").toLowerCase() !== "star_sell") {
-    return { ok: false, reason: "not_star_sell" };
-  }
-
-  const status = String(order.status || "");
-  if (!STAR_SELL_READY_STATUSES.has(status)) {
+    const latest = await Order.findById(orderId);
+    if (!latest) return { ok: false, reason: "not_found" };
+    if (String(latest.product || "").toLowerCase() !== "star_sell") {
+      return { ok: false, reason: "not_star_sell" };
+    }
+    if (latest.status === "completed") {
+      return { ok: false, reason: "already_completed" };
+    }
+    if (latest.status === "cancelled") {
+      return { ok: true, alreadyCancelled: true, order: latest };
+    }
     return { ok: false, reason: "not_ready" };
-  }
-  if (status === "completed") {
-    return { ok: false, reason: "already_completed" };
-  }
-  if (status === "cancelled") {
-    return { ok: true, alreadyCancelled: true, order };
   }
 
   const now = new Date();

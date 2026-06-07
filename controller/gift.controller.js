@@ -1,3 +1,4 @@
+const crypto = require("node:crypto");
 const response = require("../utils/response");
 const User = require("../model/user.model");
 const UserGift = require("../model/user-gift.model");
@@ -23,6 +24,9 @@ const {
   sendStarGiftToRecipient,
   transferSavedStarGiftToRecipient,
 } = require("../services/telegram-gift.service");
+const {
+  isAmbiguousExternalError,
+} = require("../services/external-operation.service");
 
 function normalizeString(value) {
   return String(value || "").trim();
@@ -742,9 +746,10 @@ async function ensurePendingOffersFresh({ force = false } = {}) {
 
 if (!global.__nftOfferExpiryIntervalStarted) {
   global.__nftOfferExpiryIntervalStarted = true;
-  setInterval(() => {
+  const offerExpiryInterval = setInterval(() => {
     expirePendingOffers().catch(() => {});
   }, 60 * 1000);
+  offerExpiryInterval.unref?.();
 }
 
 async function cancelPendingOffersForNft(nftId, reason, excludeOfferId = "") {
@@ -2536,21 +2541,29 @@ async function withdrawMyNft(req, res) {
       return response.error(res, "nftId required");
     }
 
-    // Avval NFT ni atomik ravishda "owned" holatiga qaytaramiz,
-    // shunda listed bo'lsa marketplace'dan darhol chiqadi va race bo'lmaydi.
+    const transferRequestId = crypto.randomUUID();
     const nft = await UserNft.findOneAndUpdate(
       {
         nftId,
         ownerTgUserId: user.tgUserId,
         isTelegramPresent: true,
         marketStatus: { $in: ["owned", "listed"] },
+        $or: [
+          { transferStatus: "idle" },
+          { transferStatus: { $exists: false } },
+        ],
       },
       {
         $set: {
+          isTelegramPresent: false,
           marketStatus: "owned",
           listingPriceUzs: 0,
           listedAt: null,
           listedByTgUserId: "",
+          transferStatus: "processing",
+          transferRequestId,
+          transferStartedAt: new Date(),
+          transferError: "",
         },
       },
       { new: false },
@@ -2560,21 +2573,29 @@ async function withdrawMyNft(req, res) {
       return response.error(res, "NFT topilmadi yoki allaqachon yechib olingan");
     }
     const wasListed = normalizeString(nft.marketStatus) === "listed";
-    const restoreListedState = async () => {
-      if (!wasListed) return;
+    const restoreNftState = async () => {
       await UserNft.updateOne(
         {
           nftId,
           ownerTgUserId: user.tgUserId,
-          isTelegramPresent: true,
+          transferStatus: "processing",
+          transferRequestId,
         },
         {
           $set: {
-            marketStatus: "listed",
-            listingPriceUzs: toSafeNumber(nft.listingPriceUzs, 0),
-            listedAt: nft.listedAt || null,
-            listedByTgUserId:
-              normalizeString(nft.listedByTgUserId) || user.tgUserId,
+            isTelegramPresent: true,
+            marketStatus: wasListed ? "listed" : "owned",
+            listingPriceUzs: wasListed
+              ? toSafeNumber(nft.listingPriceUzs, 0)
+              : 0,
+            listedAt: wasListed ? nft.listedAt || null : null,
+            listedByTgUserId: wasListed
+              ? normalizeString(nft.listedByTgUserId) || user.tgUserId
+              : "",
+            transferStatus: "idle",
+            transferRequestId: "",
+            transferStartedAt: null,
+            transferError: "",
           },
         },
       );
@@ -2582,7 +2603,7 @@ async function withdrawMyNft(req, res) {
 
     const initialTransferLock = getNftTransferLockPayload(nft?.canTransferAt);
     if (initialTransferLock?.secondsLeft) {
-      await restoreListedState();
+      await restoreNftState();
       return response.error(
         res,
         buildTransferTooEarlyMessage(initialTransferLock),
@@ -2610,7 +2631,7 @@ async function withdrawMyNft(req, res) {
       ).lean();
 
       if (!updatedUser) {
-        await restoreListedState();
+        await restoreNftState();
         return response.error(
           res,
           "Balans yetarli emas. NFT yechib olish uchun " +
@@ -2628,7 +2649,7 @@ async function withdrawMyNft(req, res) {
           { $inc: { balance: withdrawFeeUzs } },
         );
       }
-      await restoreListedState();
+      await restoreNftState();
       return response.error(res, "NFT transfer manbasi topilmadi");
     }
 
@@ -2648,6 +2669,7 @@ async function withdrawMyNft(req, res) {
         userAgent: requestMeta.userAgent,
       });
     } catch (transferError) {
+      const ambiguousTransfer = isAmbiguousExternalError(transferError);
       logNftWithdrawSecurity("telegram_transfer_failed", {
         tgUserId: normalizeString(user?.tgUserId),
         nftId,
@@ -2666,13 +2688,38 @@ async function withdrawMyNft(req, res) {
         });
       }
 
+      if (ambiguousTransfer) {
+        await UserNft.updateOne(
+          {
+            nftId,
+            ownerTgUserId: user.tgUserId,
+            transferStatus: "processing",
+            transferRequestId,
+          },
+          {
+            $set: {
+              transferStatus: "needs_review",
+              transferError:
+                normalizeString(
+                  transferError?.errorMessage || transferError?.message,
+                ) || "telegram_transfer_result_unknown",
+            },
+          },
+        );
+        return response.error(
+          res,
+          "Telegram transfer natijasi noaniq. Takroriy yuborish bloklandi, administrator tekshiradi.",
+          { code: "NFT_TRANSFER_NEEDS_REVIEW" },
+        );
+      }
+
       if (withdrawFeeUzs > 0) {
         await User.updateOne(
           { tgUserId: user.tgUserId },
           { $inc: { balance: withdrawFeeUzs } },
         );
       }
-      await restoreListedState();
+      await restoreNftState();
 
       const tooEarlySeconds = getTransferTooEarlySeconds(transferError);
       if (tooEarlySeconds > 0) {
@@ -2701,10 +2748,12 @@ async function withdrawMyNft(req, res) {
     }
 
     const now = new Date();
-    await UserNft.updateOne(
+    const finalizedTransfer = await UserNft.updateOne(
       {
         nftId,
         ownerTgUserId: user.tgUserId,
+        transferStatus: "processing",
+        transferRequestId,
       },
       {
         $set: {
@@ -2716,9 +2765,32 @@ async function withdrawMyNft(req, res) {
           withdrawnAt: now,
           withdrawnTo: recipientIdentifier,
           canTransferAt: null,
+          transferStatus: "completed",
+          transferError: "",
         },
       },
     );
+    if (!finalizedTransfer.modifiedCount) {
+      await UserNft.updateOne(
+        {
+          nftId,
+          ownerTgUserId: user.tgUserId,
+          transferStatus: "processing",
+          transferRequestId,
+        },
+        {
+          $set: {
+            transferStatus: "needs_review",
+            transferError: "nft_transfer_state_finalize_failed",
+          },
+        },
+      );
+      return response.serverError(
+        res,
+        "NFT yuborildi, lekin holatini yakunlash uchun admin tekshiruvi kerak",
+        "nft_transfer_state_finalize_failed",
+      );
+    }
 
     await cancelPendingOffersForNft(nftId, "listing_withdrawn");
 
@@ -2929,11 +3001,23 @@ async function sendGift(req, res) {
       return response.error(res, "Qabul qiluvchi username yoki tgUserId kiriting");
     }
 
-    const ownedGift = await UserGift.findOne({
-      _id: userGiftId,
-      tgUserId: user.tgUserId,
-      status: "owned",
-    }).lean();
+    const sendRequestId = crypto.randomUUID();
+    const ownedGift = await UserGift.findOneAndUpdate(
+      {
+        _id: userGiftId,
+        tgUserId: user.tgUserId,
+        status: "owned",
+      },
+      {
+        $set: {
+          status: "sending",
+          sendRequestId,
+          sendStartedAt: new Date(),
+          sendError: "",
+        },
+      },
+      { new: false },
+    ).lean();
 
     if (!ownedGift) {
       return response.error(res, "Gift topilmadi");
@@ -2956,11 +3040,47 @@ async function sendGift(req, res) {
         });
       }
 
+      const ambiguousSend = isAmbiguousExternalError(sendError);
+      await UserGift.updateOne(
+        {
+          _id: ownedGift._id,
+          status: "sending",
+          sendRequestId,
+        },
+        {
+          $set: ambiguousSend
+            ? {
+                status: "send_needs_review",
+                sendError:
+                  normalizeString(sendError?.errorMessage || sendError?.message) ||
+                  "telegram_gift_send_result_unknown",
+              }
+            : {
+                status: "owned",
+                sendRequestId: "",
+                sendStartedAt: null,
+                sendError:
+                  normalizeString(sendError?.errorMessage || sendError?.message),
+              },
+        },
+      );
+
+      if (ambiguousSend) {
+        return response.error(
+          res,
+          "Gift yuborish natijasi noaniq. Takroriy yuborish bloklandi, administrator tekshiradi.",
+          { code: "GIFT_SEND_NEEDS_REVIEW" },
+        );
+      }
       return response.error(res, mapSendGiftError(sendError));
     }
 
-    await UserGift.updateOne(
-      { _id: ownedGift._id, status: "owned" },
+    const sentUpdate = await UserGift.updateOne(
+      {
+        _id: ownedGift._id,
+        status: "sending",
+        sendRequestId,
+      },
       {
         $set: {
           status: "sent",
@@ -2968,9 +3088,30 @@ async function sendGift(req, res) {
           sentToValue: recipient,
           sentToResolved: recipient,
           sentAt: new Date(),
+          sendError: "",
         },
       },
     );
+    if (!sentUpdate.modifiedCount) {
+      await UserGift.updateOne(
+        {
+          _id: ownedGift._id,
+          status: "sending",
+          sendRequestId,
+        },
+        {
+          $set: {
+            status: "send_needs_review",
+            sendError: "gift_send_state_finalize_failed",
+          },
+        },
+      );
+      return response.serverError(
+        res,
+        "Gift yuborildi, lekin holatini yakunlash uchun admin tekshiruvi kerak",
+        "gift_send_state_finalize_failed",
+      );
+    }
 
     emitUserUpdate(user.tgUserId, {
       type: "gift_sent",

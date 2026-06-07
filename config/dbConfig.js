@@ -5,8 +5,7 @@ let isConnected = false;
 const connectDB = async () => {
   if (isConnected) return;
   if (!process.env.MONGO_URI) {
-    console.warn("MONGO_URI topilmadi, backend DBsiz ishga tushdi.");
-    return;
+    throw new Error("MONGO_URI topilmadi");
   }
 
   try {

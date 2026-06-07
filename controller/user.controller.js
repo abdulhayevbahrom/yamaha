@@ -8,7 +8,10 @@ const ReferralEarning = require("../model/referral-earning.model");
 const { getNextOrderId } = require("../services/order-id.service");
 const { emitUserUpdate } = require("../socket");
 const { getTelegramUserFromRequest } = require("../utils/tg-user");
-const { selectPaymentCardForType } = require("../services/payment-card.service");
+const {
+  releasePaymentCardAllocation,
+  selectPaymentCardForType,
+} = require("../services/payment-card.service");
 const {
   activateReferralOnMiniAppOpen,
   buildReferralLink,
@@ -24,6 +27,11 @@ const {
 } = require("../services/settings.service");
 const { lookupCardBinInfo, normalizeScheme } = require("../services/card-bin.service");
 const { sendTelegramText } = require("../services/telegram-notify.service");
+const {
+  attachReservationToOrder,
+  releasePaymentReservation,
+  reservePaymentAmount,
+} = require("../services/payment-amount-reservation.service");
 
 const SUPPORTED_SCHEMES = new Set(["HUMOCARD", "HUMO", "UZCARD", "UNIONPAY", "UNIYONPAY"]);
 
@@ -578,6 +586,9 @@ async function getMyOrders(req, res) {
 }
 
 async function createBalanceTopup(req, res) {
+  let paymentReservationTokens = [];
+  let createdOrder = null;
+  let paymentCardAllocation = null;
   try {
     const tgUser = getTelegramUserFromRequest(req);
     if (!tgUser.tgUserId) {
@@ -589,7 +600,19 @@ async function createBalanceTopup(req, res) {
 
     const amount = Number(req.body?.amount || 0);
     const paymentMethod = String(req.body?.paymentMethod || "card").trim();
-    if (!amount || amount <= 0) {
+    const minTopupAmount = Math.max(
+      1,
+      Number(process.env.MIN_BALANCE_TOPUP_UZS || 1000),
+    );
+    const maxTopupAmount = Math.max(
+      minTopupAmount,
+      Number(process.env.MAX_BALANCE_TOPUP_UZS || 100_000_000),
+    );
+    if (
+      !Number.isSafeInteger(amount) ||
+      amount < minTopupAmount ||
+      amount > maxTopupAmount
+    ) {
       return response.error(res, "Summani kiriting");
     }
     if (!["card", "bankomat"].includes(paymentMethod)) {
@@ -602,14 +625,8 @@ async function createBalanceTopup(req, res) {
     }
 
     const now = Date.now();
-    const aliveFrom = new Date(now - PENDING_TTL_MS);
-    const activePendingFilter = {
-      status: "pending_payment",
-      createdAt: { $gte: aliveFrom },
-      expiresAt: { $gt: new Date(now) },
-    };
-
     let expectedAmount = amount;
+    let paymentMatchAmount = amount;
     let paymentGrossAmount = amount;
     let balanceCreditAmount = amount;
     let paymentFeePercent = 0;
@@ -623,27 +640,11 @@ async function createBalanceTopup(req, res) {
         return response.error(res, "Bu summa juda kichik. Kattaroq summa kiriting");
       }
 
-      const duplicatePending = await Order.findOne({
-        ...activePendingFilter,
-        product: "balance",
-        paymentMethod: "bankomat",
-        expectedAmount: amount,
-      }).lean();
-
-      if (duplicatePending) {
-        return response.error(res, "Bu summa hozir band. Boshqa summa kiriting");
-      }
-
       expectedAmount = amount;
+      paymentMatchAmount = netAmount;
       paymentGrossAmount = amount;
       balanceCreditAmount = netAmount;
       paymentFeePercent = feePercent;
-    } else {
-      const pendingCount = await Order.countDocuments(activePendingFilter);
-      expectedAmount = amount + Number(pendingCount || 0);
-      paymentGrossAmount = expectedAmount;
-      balanceCreditAmount = expectedAmount;
-      paymentFeePercent = 0;
     }
 
     let selectedCard;
@@ -656,6 +657,53 @@ async function createBalanceTopup(req, res) {
         return response.error(res, selectionError.message);
       }
       throw selectionError;
+    }
+    if (!selectedCard?.paymentCardSnapshot) {
+      return response.error(res, "Hozircha to'lov kartasi mavjud emas");
+    }
+    paymentCardAllocation = selectedCard.allocation || null;
+
+    const expiresAt = new Date(now + PENDING_TTL_MS);
+    const reservation = await reservePaymentAmount({
+      baseAmount: paymentMatchAmount,
+      expiresAt,
+      allowOffset: paymentMethod === "card",
+    });
+    if (!reservation) {
+      await releasePaymentCardAllocation(paymentCardAllocation);
+      paymentCardAllocation = null;
+      return response.error(
+        res,
+        paymentMethod === "bankomat"
+          ? "Bu summa hozir band. Boshqa summa kiriting"
+          : "Hozir barcha to'lov summalari band. Birozdan keyin qayta urinib ko'ring.",
+      );
+    }
+    paymentReservationTokens = [reservation.token];
+    paymentMatchAmount = reservation.amount;
+    let paymentAlternateMatchAmount = 0;
+    if (paymentMethod === "card") {
+      expectedAmount = reservation.amount;
+      paymentGrossAmount = reservation.amount;
+      balanceCreditAmount = reservation.amount;
+    } else if (expectedAmount !== paymentMatchAmount) {
+      const alternateReservation = await reservePaymentAmount({
+        baseAmount: expectedAmount,
+        expiresAt,
+        allowOffset: false,
+      });
+      if (!alternateReservation) {
+        await releasePaymentReservation(reservation.token);
+        paymentReservationTokens = [];
+        await releasePaymentCardAllocation(paymentCardAllocation);
+        paymentCardAllocation = null;
+        return response.error(
+          res,
+          "Bu summa hozir band. Boshqa summa kiriting",
+        );
+      }
+      paymentAlternateMatchAmount = alternateReservation.amount;
+      paymentReservationTokens.push(alternateReservation.token);
     }
 
     const nextOrderId = await getNextOrderId();
@@ -675,10 +723,26 @@ async function createBalanceTopup(req, res) {
       balanceCreditAmount,
       paymentFeePercent,
       expectedAmount,
+      paymentMatchAmount,
+      paymentAlternateMatchAmount,
+      paymentReservationToken: paymentReservationTokens[0] || "",
+      paymentReservationTokens,
       paidAmount: 0,
       status: "pending_payment",
-      expiresAt: new Date(now + PENDING_TTL_MS),
+      expiresAt,
       sequence: nextOrderId,
+    });
+    createdOrder = order;
+    await Promise.all(
+      paymentReservationTokens.map((token) =>
+        attachReservationToOrder(token, order._id),
+      ),
+    ).catch((error) => {
+      console.error(
+        "Topup payment reservation attach error:",
+        order._id,
+        error.message,
+      );
     });
 
     emitUserUpdate(tgUser.tgUserId, {
@@ -691,6 +755,16 @@ async function createBalanceTopup(req, res) {
 
     return response.created(res, "Topup order yaratildi", order);
   } catch (error) {
+    if (!createdOrder && paymentReservationTokens.length) {
+      await Promise.all(
+        paymentReservationTokens.map((token) =>
+          releasePaymentReservation(token),
+        ),
+      ).catch(() => {});
+    }
+    if (!createdOrder && paymentCardAllocation) {
+      await releasePaymentCardAllocation(paymentCardAllocation).catch(() => {});
+    }
     return response.serverError(
       res,
       "Topup yaratishda xatolik",

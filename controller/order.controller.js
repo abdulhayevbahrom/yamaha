@@ -8,7 +8,6 @@ const UserNft = require("../model/user-nft.model");
 const NftOffer = require("../model/nft-offer.model");
 const mongoose = require("mongoose");
 const { getNextOrderId } = require("../services/order-id.service");
-const { processIncomingPayment } = require("../services/payment-match.service");
 const { autoFulfillOrder } = require("../services/avtoBuy.service");
 const {
   confirmGameOrderById,
@@ -24,7 +23,10 @@ const {
   getStarSellPricing,
 } = require("../services/settings.service");
 const { getTelegramUserFromRequest } = require("../utils/tg-user");
-const { selectPaymentCardForType } = require("../services/payment-card.service");
+const {
+  releasePaymentCardAllocation,
+  selectPaymentCardForType,
+} = require("../services/payment-card.service");
 const {
   confirmStarSellPayoutById,
   cancelStarSellPayoutById,
@@ -34,6 +36,17 @@ const {
   cancelNftWithdrawalById,
 } = require("../services/nft-withdrawal-payout.service");
 const { sendTelegramText } = require("../services/telegram-notify.service");
+const {
+  getSuppliedServerManagedFields,
+} = require("../services/order-request-security.service");
+const {
+  attachReservationToOrder,
+  releasePaymentReservation,
+  reservePaymentAmount,
+} = require("../services/payment-amount-reservation.service");
+const {
+  applyBalanceDeltaOnce,
+} = require("../services/balance-operation.service");
 
 let sequence = 1;
 const PENDING_TTL_MS = 10 * 60 * 1000;
@@ -217,18 +230,6 @@ async function expirePendingOrders() {
   );
 }
 
-async function getUniquePendingAmount({ product, planCode, basePrice }) {
-  const now = Date.now();
-  const aliveFrom = new Date(now - PENDING_TTL_MS);
-  const pendingCount = await Order.countDocuments({
-    status: "pending_payment",
-    createdAt: { $gte: aliveFrom },
-    expiresAt: { $gt: new Date(now) },
-  });
-
-  return Number(basePrice) + Number(pendingCount);
-}
-
 async function getReport(period) {
   const periodDays = { week: 7, month: 30, year: 365 };
   const days = periodDays[period] || 30;
@@ -334,7 +335,23 @@ const calculatePrice = async (req, res) => {
 };
 
 const createOrder = async (req, res) => {
+  let paymentReservationToken = "";
+  let createdOrder = null;
+  let balanceDebitContext = null;
+  let paymentCardAllocation = null;
   try {
+    const requestBody =
+      req.body && typeof req.body === "object" && !Array.isArray(req.body)
+        ? req.body
+        : {};
+    const suppliedServerFields = getSuppliedServerManagedFields(requestBody);
+    if (suppliedServerFields.length) {
+      return response.error(
+        res,
+        `Server boshqaradigan maydonlarni yubormang: ${suppliedServerFields.join(", ")}`,
+      );
+    }
+
     const {
       product,
       planCode,
@@ -343,11 +360,8 @@ const createOrder = async (req, res) => {
       zoneId = "",
       profileName = "",
       customAmount,
-      expectedAmount,
-      paidAmount = 0,
       paymentMethod = "card",
-      status,
-    } = req.body;
+    } = requestBody;
     const normalizedPaymentMethod = String(paymentMethod || "card")
       .trim()
       .toLowerCase();
@@ -441,44 +455,22 @@ const createOrder = async (req, res) => {
       resolvedBasePrice = plan.basePrice;
     }
 
-    let paid = Number(paidAmount || 0);
-    let expected = Number(expectedAmount || 0);
+    let paid = 0;
+    let expected = 0;
     let expiresAt = null;
-    let finalStatus = status;
+    let finalStatus = "pending_payment";
     let paidAt = null;
     let paymentCardId = null;
     let paymentCardSnapshot = null;
 
     if (normalizedPaymentMethod === "balance") {
-      expected = Number(resolvedBasePrice || 0);
-      const user = await User.findOneAndUpdate(
-        { tgUserId, balance: { $gte: expected } },
-        { $inc: { balance: -expected } },
-        { new: true },
-      ).lean();
-      if (!user) return response.error(res, "Balans yetarli emas");
-
+      expected = Math.round(Number(resolvedBasePrice || 0));
       paid = expected;
       paidAt = new Date();
       finalStatus = "paid_auto_processed";
       expiresAt = null;
-    } else if (!finalStatus) {
-      finalStatus =
-        paid >= expected && expected > 0
-          ? "paid_auto_processed"
-          : "pending_payment";
-    }
-
-    if (finalStatus === "pending_payment") {
-      if (normalizedPaymentMethod === "stars") {
-        expected = Number(resolvedBasePrice || 0);
-      } else {
-        expected = await getUniquePendingAmount({
-          product,
-          planCode,
-          basePrice: resolvedBasePrice,
-        });
-      }
+    } else {
+      expected = Math.round(Number(resolvedBasePrice || 0));
       expiresAt = new Date(Date.now() + PENDING_TTL_MS);
     }
 
@@ -499,9 +491,43 @@ const createOrder = async (req, res) => {
       }
       paymentCardId = selectedCard.paymentCardId;
       paymentCardSnapshot = selectedCard.paymentCardSnapshot;
+      paymentCardAllocation = selectedCard.allocation || null;
+
+      const reservation = await reservePaymentAmount({
+        baseAmount: expected,
+        expiresAt,
+        allowOffset: true,
+      });
+      if (!reservation) {
+        await releasePaymentCardAllocation(paymentCardAllocation);
+        paymentCardAllocation = null;
+        return response.error(
+          res,
+          "Hozir barcha to'lov summalari band. Birozdan keyin qayta urinib ko'ring.",
+        );
+      }
+      expected = reservation.amount;
+      paymentReservationToken = reservation.token;
     }
 
     const nextOrderId = await getNextOrderId();
+    if (normalizedPaymentMethod === "balance") {
+      const operationKey = `order-charge:${nextOrderId}`;
+      const debitResult = await applyBalanceDeltaOnce({
+        tgUserId,
+        operationKey,
+        amount: -expected,
+      });
+      if (!debitResult.ok) {
+        return response.error(res, "Balans yetarli emas");
+      }
+      balanceDebitContext = {
+        tgUserId,
+        amount: expected,
+        operationKey,
+        rollbackKey: `order-charge-rollback:${nextOrderId}`,
+      };
+    }
     const normalizedSellCardNumber =
       String(product || "").toLowerCase() === "star_sell"
         ? normalizeCardNumber(req.body?.sellCardNumber)
@@ -541,6 +567,12 @@ const createOrder = async (req, res) => {
           ? Math.max(1, Math.floor(Number(customAmount || 0)))
           : 0,
       expectedAmount: expected,
+      paymentMatchAmount:
+        normalizedPaymentMethod === "balance" ||
+        normalizedPaymentMethod === "stars"
+          ? 0
+          : expected,
+      paymentReservationToken,
       paidAmount: paid,
       paidAt,
       status: finalStatus,
@@ -549,6 +581,18 @@ const createOrder = async (req, res) => {
       tgUserId,
       tgUsername,
     });
+    createdOrder = order;
+    if (paymentReservationToken) {
+      await attachReservationToOrder(paymentReservationToken, order._id).catch(
+        (error) => {
+          console.error(
+            "Payment reservation attach error:",
+            order._id,
+            error.message,
+          );
+        },
+      );
+    }
 
     if (finalStatus === "paid_auto_processed") {
       if (isManualGameProduct(product)) {
@@ -595,6 +639,20 @@ const createOrder = async (req, res) => {
     sequence += 1;
     return response.created(res, "Buyurtma yaratildi", order);
   } catch (error) {
+    if (!createdOrder && paymentReservationToken) {
+      await releasePaymentReservation(paymentReservationToken).catch(() => {});
+    }
+    if (!createdOrder && paymentCardAllocation) {
+      await releasePaymentCardAllocation(paymentCardAllocation).catch(() => {});
+    }
+    if (!createdOrder && balanceDebitContext) {
+      await applyBalanceDeltaOnce({
+        tgUserId: balanceDebitContext.tgUserId,
+        operationKey: balanceDebitContext.rollbackKey,
+        amount: balanceDebitContext.amount,
+        upsert: true,
+      }).catch(() => {});
+    }
     return response.serverError(
       res,
       "Buyurtma yaratishda xatolik",
@@ -1035,42 +1093,6 @@ const createStarsInvoice = async (req, res) => {
   }
 };
 
-const processCardPayment = async (req, res) => {
-  try {
-    const {
-      text = "",
-      amount = null,
-      externalMessageId = null,
-      source = "cardxabar",
-    } = req.body;
-    const result = await processIncomingPayment({
-      rawText: text,
-      amount,
-      externalMessageId,
-      source,
-    });
-
-    if (result.matched) {
-      return response.success(
-        res,
-        "To'lov matched va order paid bo'ldi",
-        result,
-      );
-    }
-    return response.warning(
-      res,
-      "To'lov qayta ishlangan, lekin order topilmadi",
-      result,
-    );
-  } catch (error) {
-    return response.serverError(
-      res,
-      "To'lov xabarini qayta ishlashda xatolik",
-      error.message,
-    );
-  }
-};
-
 const confirmUcOrder = async (req, res) => {
   try {
     const { id } = req.params;
@@ -1356,7 +1378,6 @@ module.exports = {
   createStarsInvoice,
   getReports,
   getHistory,
-  processCardPayment,
   retryFulfillment,
   markAutobuyOrderCompleted,
   confirmStarSellPayout,

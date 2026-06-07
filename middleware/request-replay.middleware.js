@@ -1,4 +1,5 @@
 const response = require("../utils/response");
+const SecurityNonce = require("../model/security-nonce.model");
 
 function normalizeString(value) {
   return String(value || "").trim();
@@ -7,20 +8,6 @@ function normalizeString(value) {
 function toSafeNumber(value, fallback) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-const replayStore = new Map();
-let lastCleanupAt = 0;
-
-function cleanup(nowMs) {
-  if (nowMs - lastCleanupAt < 30_000) return;
-  lastCleanupAt = nowMs;
-
-  for (const [key, expiresAt] of replayStore.entries()) {
-    if (!expiresAt || expiresAt <= nowMs) {
-      replayStore.delete(key);
-    }
-  }
 }
 
 function createRequestReplayGuard(options = {}) {
@@ -33,7 +20,7 @@ function createRequestReplayGuard(options = {}) {
     : [];
   const protectedMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
-  return (req, res, next) => {
+  return async (req, res, next) => {
     const method = normalizeString(req.method).toUpperCase();
     if (!protectedMethods.has(method)) return next();
 
@@ -55,16 +42,23 @@ function createRequestReplayGuard(options = {}) {
       "unknown";
     const replayKey = `${actorId}:${method}:${path}:${requestId}`;
 
-    const now = Date.now();
-    cleanup(now);
-
-    if (replayStore.has(replayKey)) {
-      return response.unauthorized(res, "Takroriy so'rov aniqlandi", {
-        code: "duplicate_request",
+    try {
+      await SecurityNonce.create({
+        key: `webapp:${replayKey}`,
+        expiresAt: new Date(Date.now() + windowMs),
       });
+    } catch (error) {
+      if (error?.code === 11000) {
+        return response.unauthorized(res, "Takroriy so'rov aniqlandi", {
+          code: "duplicate_request",
+        });
+      }
+      return response.serverError(
+        res,
+        "So'rov himoyasini tekshirib bo'lmadi",
+        "replay_store_unavailable",
+      );
     }
-
-    replayStore.set(replayKey, now + windowMs);
     return next();
   };
 }

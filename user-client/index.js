@@ -354,10 +354,10 @@ async function startUserClient({ strict = false } = {}) {
             senderUsername.toLowerCase() === cardxabarUsername.toLowerCase();
           const chatMatch = cardxabarChatId && chatId === cardxabarChatId;
 
-          if (cardxabarChatId || cardxabarUsername) {
-            if (!chatMatch && !usernameMatch) {
-              return;
-            }
+          if (cardxabarChatId) {
+            if (!chatMatch) return;
+          } else if (cardxabarUsername && !usernameMatch) {
+            return;
           }
 
           runtimeStatus.lastMonitoredMessageAt = new Date().toISOString();

@@ -6,9 +6,6 @@ const userController = require("../controller/user.controller");
 const giftController = require("../controller/gift.controller");
 const authMiddleware = require("../middleware/auth.middleware");
 const botActiveMiddleware = require("../middleware/bot-active.middleware");
-const apiKeyMiddleware = require("../middleware/api-key.middleware");
-const signatureMiddleware = require("../middleware/signature.middleware");
-const ipAllowlistMiddleware = require("../middleware/ip-allowlist.middleware");
 const { requireTelegramAuth } = require("../middleware/telegram-auth.middleware");
 const {
   createFreshTelegramAuthMiddleware,
@@ -41,12 +38,6 @@ const adminLoginRateLimit = createRateLimit({
   windowMs: Number(process.env.RATE_LIMIT_ADMIN_LOGIN_WINDOW_MS || 60_000),
   max: Number(process.env.RATE_LIMIT_ADMIN_LOGIN_MAX || 12),
 });
-const integrationRateLimit = createRateLimit({
-  keyPrefix: "integration",
-  windowMs: Number(process.env.RATE_LIMIT_INTEGRATION_WINDOW_MS || 60_000),
-  max: Number(process.env.RATE_LIMIT_INTEGRATION_MAX || 120),
-});
-
 router.get("/health", publicController.health);
 router.get("/catalog", publicController.getCatalog);
 router.get("/settings", publicController.getSettings);
@@ -60,6 +51,7 @@ router.post("/calculate-price", orderController.calculatePrice);
 router.post(
   "/orders",
   telegramAuthMiddleware,
+  freshTelegramWriteAuth,
   requireRegisteredUser,
   userWriteRateLimit,
   botActiveMiddleware,
@@ -68,6 +60,7 @@ router.post(
 router.post(
   "/orders/:id/stars-invoice",
   telegramAuthMiddleware,
+  freshTelegramWriteAuth,
   requireRegisteredUser,
   userWriteRateLimit,
   botActiveMiddleware,
@@ -92,6 +85,7 @@ router.get(
 router.post(
   "/balance/topup",
   telegramAuthMiddleware,
+  freshTelegramWriteAuth,
   requireRegisteredUser,
   userWriteRateLimit,
   botActiveMiddleware,
@@ -200,6 +194,7 @@ router.post(
 router.post(
   "/gifts/purchase",
   telegramAuthMiddleware,
+  freshTelegramWriteAuth,
   requireRegisteredUser,
   userWriteRateLimit,
   botActiveMiddleware,
@@ -208,6 +203,7 @@ router.post(
 router.post(
   "/gifts/send",
   telegramAuthMiddleware,
+  freshTelegramWriteAuth,
   requireRegisteredUser,
   userWriteRateLimit,
   botActiveMiddleware,
@@ -218,6 +214,7 @@ router.get("/admin/access", telegramAuthMiddleware, adminController.checkAccess)
 router.post(
   "/admin/login",
   telegramAuthMiddleware,
+  freshTelegramWriteAuth,
   adminLoginRateLimit,
   validate(loginValidation),
   adminController.login,
@@ -329,19 +326,6 @@ router.post(
   "/admin/users/:tgUserId/block",
   authMiddleware,
   adminController.updateUserBlockStatus,
-);
-router.post(
-  "/admin/orders/process-payment",
-  authMiddleware,
-  orderController.processCardPayment,
-);
-router.post(
-  "/integrations/orders/process-payment",
-  integrationRateLimit,
-  ipAllowlistMiddleware,
-  apiKeyMiddleware,
-  signatureMiddleware,
-  orderController.processCardPayment,
 );
 router.post(
   "/admin/orders/:id/retry-fulfill",

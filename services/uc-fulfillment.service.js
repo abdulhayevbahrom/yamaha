@@ -200,7 +200,11 @@ async function cancelGameOrderById(orderId) {
     });
   }
 
-  return { ok: true, order: lockedOrder, refundedAmount: Number(lockedOrder.paidAmount || 0) };
+  return {
+    ok: true,
+    order: lockedOrder,
+    refundedAmount: refundResult.refundedAmount,
+  };
 }
 
 async function confirmUcOrderById(orderId) {

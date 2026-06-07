@@ -38,13 +38,19 @@ function buildApiError(message, payload, statusCode) {
   return error;
 }
 
-async function post(path, body = {}) {
+async function post(path, body = {}, options = {}) {
   ensureApiKey();
 
   try {
     const response = await api.post(path, body, {
       headers: {
         "X-API-Key": FRAGMENT_API_KEY,
+        ...(options.idempotencyKey
+          ? {
+              "Idempotency-Key": String(options.idempotencyKey),
+              "X-Idempotency-Key": String(options.idempotencyKey),
+            }
+          : {}),
       },
     });
     const payload = response?.data;
@@ -72,7 +78,7 @@ async function post(path, body = {}) {
   }
 }
 
-async function buyStars(username, amount) {
+async function buyStars(username, amount, options = {}) {
   const cleaned = normalizeUsername(username);
   const normalizedAmount = Number(amount || 0);
 
@@ -83,10 +89,14 @@ async function buyStars(username, amount) {
     throw new Error("Stars miqdori noto'g'ri");
   }
 
-  const payload = await post("/stars/buy", {
-    username: cleaned,
-    amount: normalizedAmount,
-  });
+  const payload = await post(
+    "/stars/buy",
+    {
+      username: cleaned,
+      amount: normalizedAmount,
+    },
+    options,
+  );
 
   return {
     raw: payload,
@@ -94,7 +104,7 @@ async function buyStars(username, amount) {
   };
 }
 
-async function buyPremium(username, duration) {
+async function buyPremium(username, duration, options = {}) {
   const cleaned = normalizeUsername(username);
   const normalizedDuration = Number(duration || 0);
 
@@ -105,10 +115,14 @@ async function buyPremium(username, duration) {
     throw new Error("Premium muddati noto'g'ri");
   }
 
-  const payload = await post("/premium/buy", {
-    username: cleaned,
-    duration: normalizedDuration,
-  });
+  const payload = await post(
+    "/premium/buy",
+    {
+      username: cleaned,
+      duration: normalizedDuration,
+    },
+    options,
+  );
 
   return {
     raw: payload,

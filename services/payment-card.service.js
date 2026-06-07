@@ -2,29 +2,17 @@ const Order = require("../model/order.model");
 const PaymentCard = require("../model/payment-card.model");
 const { getPaymentCardConfig } = require("./settings.service");
 
-const LEGACY_PAYMENT_CARDS = {
-  purchase: {
-    type: "purchase",
-    label: "Legacy purchase card",
-    cardNumber: "6262 5707 3865 6539",
-    cardHolder: "Bo'stonqulov Akmaljon",
-    notes: "",
-    isFallback: true,
-  },
-  balance_topup: {
-    type: "balance_topup",
-    label: "Legacy topup card",
-    cardNumber: "5614 6838 1717 7439",
-    cardHolder: "Po'latov Mirzaxmat",
-    notes: "",
-    isFallback: true,
-  },
-};
-
 function getPaymentCardDayRange(date = new Date()) {
   const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const end = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
   return { start, end };
+}
+
+function getPaymentCardDayKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function resolveUsageRangeStart(card, dayStart) {
@@ -71,8 +59,25 @@ function buildPaymentCardSnapshot(card, { isFallback = false } = {}) {
 }
 
 function getLegacyFallbackCard(type) {
-  const fallback = LEGACY_PAYMENT_CARDS[type];
-  if (!fallback) return null;
+  if (
+    String(process.env.ALLOW_PAYMENT_CARD_ENV_FALLBACK || "").toLowerCase() !==
+    "true"
+  ) {
+    return null;
+  }
+  const prefix = type === "balance_topup" ? "TOPUP" : "PURCHASE";
+  const fallback = {
+    type,
+    label: "Environment fallback card",
+    cardNumber: String(
+      process.env[`${prefix}_FALLBACK_CARD_NUMBER`] || "",
+    ).trim(),
+    cardHolder: String(
+      process.env[`${prefix}_FALLBACK_CARD_HOLDER`] || "",
+    ).trim(),
+    notes: "",
+  };
+  if (!fallback.cardNumber || !fallback.cardHolder) return null;
   return {
     paymentCardId: null,
     paymentCardSnapshot: buildPaymentCardSnapshot(fallback, { isFallback: true }),
@@ -90,7 +95,12 @@ async function listPaymentCardsForAdmin() {
   return {
     config,
     cards: cards.map((card) => {
-      const currentDayTransactions = usageMap.get(String(card._id)) || 0;
+      const currentDayTransactions = Math.max(
+        usageMap.get(String(card._id)) || 0,
+        card.usageDay === getPaymentCardDayKey()
+          ? Number(card.usageCount || 0)
+          : 0,
+      );
       const remainingTransactions = Math.max(
         Number(config.dailyMaxTransactions || 0) - currentDayTransactions,
         0,
@@ -115,45 +125,90 @@ async function selectPaymentCardForType(type) {
     .lean();
 
   if (!cards.length) {
+    const fallback = getLegacyFallbackCard(type);
     return {
-      ...getLegacyFallbackCard(type),
+      ...(fallback || {
+        paymentCardId: null,
+        paymentCardSnapshot: null,
+      }),
       config,
-      reason: "legacy_fallback",
+      reason: fallback ? "environment_fallback" : "not_configured",
     };
   }
 
-  const usageMap = await getCardUsageMap(cards);
   const dailyMaxTransactions = Number(config.dailyMaxTransactions || 0);
-  const eligibleCards = cards.filter((card) => {
-    const used = usageMap.get(String(card._id)) || 0;
-    return used < dailyMaxTransactions;
-  });
-
-  if (!eligibleCards.length) {
-    return {
-      paymentCardId: null,
-      paymentCardSnapshot: null,
-      config,
-      reason: "limit_reached",
-    };
+  const usageMap = await getCardUsageMap(cards);
+  const usageDay = getPaymentCardDayKey();
+  const candidates = [...cards];
+  if (config.selectionMode === "random") {
+    candidates.sort(() => Math.random() - 0.5);
   }
 
-  let selected = eligibleCards[0];
-  if (config.selectionMode === "random" && eligibleCards.length > 1) {
-    const randomIndex = Math.floor(Math.random() * eligibleCards.length);
-    selected = eligibleCards[randomIndex];
+  for (const candidate of candidates) {
+    const historicalUsage = usageMap.get(String(candidate._id)) || 0;
+    await PaymentCard.updateOne(
+      {
+        _id: candidate._id,
+        $or: [
+          { usageDay: { $ne: usageDay } },
+          { usageDay: { $exists: false } },
+        ],
+      },
+      {
+        $set: {
+          usageDay,
+          usageCount: historicalUsage,
+        },
+      },
+    );
+
+    const selected = await PaymentCard.findOneAndUpdate(
+      {
+        _id: candidate._id,
+        isActive: true,
+        usageDay,
+        usageCount: { $lt: dailyMaxTransactions },
+      },
+      { $inc: { usageCount: 1 } },
+      { new: true },
+    ).lean();
+    if (!selected) continue;
+
+    return {
+      paymentCardId: selected._id,
+      paymentCardSnapshot: buildPaymentCardSnapshot(selected),
+      allocation: {
+        cardId: selected._id,
+        usageDay,
+      },
+      config,
+      reason: "selected",
+    };
   }
 
   return {
-    paymentCardId: selected._id,
-    paymentCardSnapshot: buildPaymentCardSnapshot(selected),
+    paymentCardId: null,
+    paymentCardSnapshot: null,
     config,
-    reason: "selected",
+    reason: "limit_reached",
   };
+}
+
+async function releasePaymentCardAllocation(allocation) {
+  if (!allocation?.cardId || !allocation?.usageDay) return;
+  await PaymentCard.updateOne(
+    {
+      _id: allocation.cardId,
+      usageDay: allocation.usageDay,
+      usageCount: { $gt: 0 },
+    },
+    { $inc: { usageCount: -1 } },
+  );
 }
 
 module.exports = {
   buildPaymentCardSnapshot,
   listPaymentCardsForAdmin,
+  releasePaymentCardAllocation,
   selectPaymentCardForType,
 };

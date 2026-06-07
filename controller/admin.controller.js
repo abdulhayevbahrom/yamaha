@@ -1,3 +1,4 @@
+const crypto = require("node:crypto");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const response = require("../utils/response");
@@ -500,7 +501,10 @@ async function buildAdminUserList(items) {
 }
 
 const parseAllowlist = () => {
-  const raw = process.env.ADMIN_NOTIFY_CHAT_ID || "";
+  const raw =
+    process.env.ADMIN_ALLOWED_TG_IDS ||
+    process.env.ADMIN_NOTIFY_CHAT_ID ||
+    "";
   return raw
     .split(",")
     .map((id) => String(id).trim())
@@ -509,7 +513,7 @@ const parseAllowlist = () => {
 
 const isAllowedAdmin = (req) => {
   const allowlist = parseAllowlist();
-  if (allowlist.length === 0) return true;
+  if (allowlist.length === 0) return false;
   const userId = normalizeString(req?.telegramAuth?.tgUserId);
   return allowlist.includes(userId);
 };
@@ -554,9 +558,20 @@ const login = async (req, res) => {
     return response.serverError(res, "JWT_SECRET_KEY topilmadi");
   }
 
-  const token = jwt.sign({ role: "admin", username }, secret, {
-    expiresIn: "12h",
-  });
+  const token = jwt.sign(
+    {
+      role: "admin",
+      username,
+      tgUserId: normalizeString(req.telegramAuth.tgUserId),
+      jti: crypto.randomUUID(),
+    },
+    secret,
+    {
+      expiresIn: normalizeString(process.env.ADMIN_JWT_TTL) || "2h",
+      issuer: "yamaha-api",
+      audience: "yamaha-admin",
+    },
+  );
   return response.success(res, "Admin login muvaffaqiyatli", {
     token,
     username,
@@ -1341,7 +1356,13 @@ const resetPaymentCardLimit = async (req, res) => {
     const now = new Date();
     const updated = await PaymentCard.findByIdAndUpdate(
       req.params.id,
-      { $set: { dailyUsageResetAt: now } },
+      {
+        $set: {
+          dailyUsageResetAt: now,
+          usageDay: "",
+          usageCount: 0,
+        },
+      },
       { new: true, runValidators: true },
     ).lean();
 
@@ -1557,7 +1578,7 @@ const topupUserBalance = async (req, res) => {
       amount: signedAmount,
       beforeBalance: Number(user.balance || 0),
       afterBalance: Number(updated?.balance || 0),
-      adminTgUserId: normalizeString(req.headers["x-tg-user-id"]),
+      adminTgUserId: normalizeString(req.admin?.tgUserId),
       adminUsername: normalizeString(req.admin?.username),
       note: isDecrease ? "Admin panel decrement" : "Admin panel topup",
     });
@@ -1606,7 +1627,7 @@ const updateUserBlockStatus = async (req, res) => {
           blockedAt: blocked ? new Date() : null,
           blockedReason: blocked ? reason : "",
           blockedByAdminId: blocked
-            ? normalizeString(req.headers["x-tg-user-id"])
+            ? normalizeString(req.admin?.tgUserId)
             : "",
           blockedByAdminUsername: blocked
             ? normalizeString(req.admin?.username)

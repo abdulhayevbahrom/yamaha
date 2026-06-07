@@ -196,6 +196,26 @@ const userNftSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    transferStatus: {
+      type: String,
+      enum: ["idle", "processing", "completed", "needs_review"],
+      default: "idle",
+      index: true,
+    },
+    transferRequestId: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    transferStartedAt: {
+      type: Date,
+      default: null,
+    },
+    transferError: {
+      type: String,
+      default: "",
+      trim: true,
+    },
 
     marketStatus: {
       type: String,

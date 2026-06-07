@@ -1,12 +1,26 @@
+const crypto = require("crypto");
 const Order = require("../model/order.model");
 const PaymentLog = require("../model/payment-log.model");
-const User = require("../model/user.model");
 const { autoFulfillOrder } = require("./avtoBuy.service");
 const { emitAdminUpdate, emitUserUpdate } = require("../socket");
 const { notifyGamePaid } = require("./notify.service");
 const { sendOrderArchive } = require("./order-archive.service");
 const { isManualGameProduct } = require("./uc-fulfillment.service");
 const { sendTelegramText } = require("./telegram-notify.service");
+const { applyBalanceDeltaOnce } = require("./balance-operation.service");
+const {
+  releaseReservationForOrder,
+} = require("./payment-amount-reservation.service");
+
+const PAYMENT_PROCESSING_STALE_MS = 30_000;
+
+function buildPaymentEventKey(source, externalMessageId) {
+  if (!externalMessageId) return "";
+  return crypto
+    .createHash("sha256")
+    .update(`${source}\n${externalMessageId}`)
+    .digest("hex");
+}
 
 function getAdminNotifyIds() {
   return String(process.env.ADMIN_NOTIFY_CHAT_ID || "")
@@ -181,9 +195,7 @@ function parseAmountFromText(text) {
     if (match && match[2]) {
       const rawAmount = match[2].trim();
       const normalized = rawAmount.replace(/\s+/g, "");
-      const value = normalized.includes(".")
-        ? Number(normalized.replace(/,/g, ""))
-        : Number(normalized.replace(/[^\d]/g, ""));
+      const value = Number(normalized.replace(/[^\d]/g, ""));
       if (Number.isFinite(value) && value > 0) return Math.round(value);
     }
   }
@@ -203,21 +215,111 @@ async function handlePostPaymentEffects(order, paidAmount, { userEventType = "pa
   if (!order) return { order: null, fulfillment: null };
 
   if (order.product === "balance" && order.tgUserId) {
+    const now = new Date();
+    const staleBefore = new Date(now.getTime() - PAYMENT_PROCESSING_STALE_MS);
+    const claimedOrder = await Order.findOneAndUpdate(
+      {
+        _id: order._id,
+        status: { $in: ["payment_processing", "paid_auto_processed"] },
+        $or: [
+          { fulfillmentStatus: "pending" },
+          { fulfillmentStatus: { $exists: false } },
+          {
+            fulfillmentStatus: "processing",
+            fulfillmentStartedAt: { $in: [null] },
+          },
+          {
+            fulfillmentStatus: "processing",
+            fulfillmentStartedAt: { $lt: staleBefore },
+          },
+        ],
+      },
+      {
+        $set: {
+          fulfillmentStatus: "processing",
+          fulfillmentStartedAt: now,
+          fulfillmentError: "",
+        },
+      },
+      { new: true },
+    ).lean();
+
+    if (!claimedOrder) {
+      const latest = await Order.findById(order._id).lean();
+      return {
+        order: latest || order,
+        fulfillment:
+          latest?.status === "completed"
+            ? { ok: true, duplicate: true }
+            : { skipped: true, reason: "balance_credit_already_processing" },
+      };
+    }
+    order = claimedOrder;
+
     const balanceIncrease = Number(order.balanceCreditAmount || paidAmount || 0);
-    await User.findOneAndUpdate(
-      { tgUserId: order.tgUserId },
-      { $inc: { balance: balanceIncrease } },
-      { upsert: true, new: true },
-    );
-    await Order.findByIdAndUpdate(order._id, {
-      status: "completed",
-      fulfillmentStatus: "success",
-      completionMode: "auto",
-      fulfilledAt: new Date(),
-      fulfillmentError: "",
+    const creditResult = await applyBalanceDeltaOnce({
+      tgUserId: order.tgUserId,
+      operationKey: `balance-topup:${String(order._id)}`,
+      amount: balanceIncrease,
+      upsert: true,
     });
+    if (!creditResult.ok) {
+      await Order.findOneAndUpdate(
+        { _id: order._id, fulfillmentStatus: "processing" },
+        {
+          $set: {
+            fulfillmentStatus: "needs_review",
+            fulfillmentError: creditResult.reason || "balance_credit_failed",
+          },
+        },
+      );
+      return {
+        order,
+        fulfillment: {
+          ok: false,
+          error: creditResult.reason || "balance_credit_failed",
+        },
+      };
+    }
+    const completedOrder = await Order.findOneAndUpdate(
+      {
+        _id: order._id,
+        status: { $in: ["payment_processing", "paid_auto_processed"] },
+        fulfillmentStatus: "processing",
+      },
+      {
+        $set: {
+          status: "completed",
+          fulfillmentStatus: "success",
+          completionMode: "auto",
+          fulfilledAt: new Date(),
+          fulfillmentError: "",
+        },
+      },
+      { new: true },
+    ).lean();
+    if (!completedOrder) {
+      await Order.findOneAndUpdate(
+        { _id: order._id, fulfillmentStatus: "processing" },
+        {
+          $set: {
+            fulfillmentStatus: "needs_review",
+            fulfillmentError: "balance_order_finalize_failed",
+          },
+        },
+      );
+      return {
+        order,
+        fulfillment: {
+          ok: false,
+          needsReview: true,
+          error: "balance_order_finalize_failed",
+        },
+      };
+    }
+    order = completedOrder;
     await sendOrderArchive(
-      { ...order, status: "completed" },
+      order,
       { statusLabel: "Balans to'ldirildi" },
     );
   }
@@ -270,6 +372,40 @@ async function handlePostPaymentEffects(order, paidAmount, { userEventType = "pa
   return { order, fulfillment };
 }
 
+async function resumeExistingPayment(order, paidAmount) {
+  if (!order) return { recovered: false, order: null, fulfillment: null };
+
+  if (order.product === "balance" && order.status !== "completed") {
+    const result = await handlePostPaymentEffects(order, paidAmount);
+    return { recovered: true, ...result };
+  }
+
+  if (order.status === "payment_processing") {
+    const paidOrder = await Order.findOneAndUpdate(
+      { _id: order._id, status: "payment_processing" },
+      { $set: { status: "paid_auto_processed" } },
+      { new: true },
+    ).lean();
+    if (!paidOrder) {
+      return { recovered: false, order, fulfillment: null };
+    }
+    const result = await handlePostPaymentEffects(paidOrder, paidAmount, {
+      userEventType: "payment_matched",
+    });
+    return { recovered: true, ...result };
+  }
+
+  if (
+    order.status === "paid_auto_processed" &&
+    ["star", "premium"].includes(String(order.product || "").toLowerCase())
+  ) {
+    const fulfillment = await autoFulfillOrder(order);
+    return { recovered: true, order, fulfillment };
+  }
+
+  return { recovered: false, order, fulfillment: null };
+}
+
 async function processIncomingPayment({
   rawText = "",
   amount = null,
@@ -278,11 +414,23 @@ async function processIncomingPayment({
 }) {
   await expirePendingOrders();
 
-  const parsedAmount = Number(amount || parseAmountFromText(rawText) || 0);
-  if (!parsedAmount) {
+  const parsedAmount = Math.round(
+    Number(amount || parseAmountFromText(rawText) || 0),
+  );
+  const normalizedSource = String(source || "cardxabar").trim().slice(0, 80);
+  const normalizedExternalMessageId =
+    externalMessageId == null
+      ? null
+      : String(externalMessageId).trim().slice(0, 200);
+  const paymentEventKey = buildPaymentEventKey(
+    normalizedSource,
+    normalizedExternalMessageId,
+  );
+
+  if (!Number.isSafeInteger(parsedAmount) || parsedAmount <= 0) {
     await PaymentLog.create({
-      source,
-      externalMessageId,
+      source: normalizedSource,
+      externalMessageId: normalizedExternalMessageId || undefined,
       amount: 0,
       rawText,
       status: "invalid",
@@ -290,56 +438,168 @@ async function processIncomingPayment({
     return { matched: false, reason: "amount_not_found", amount: 0 };
   }
 
-  if (externalMessageId) {
-    const exists = await PaymentLog.findOne({
-      source,
-      externalMessageId,
-    }).lean();
-    if (exists) {
-      return {
-        matched: false,
-        duplicate: true,
-        reason: "duplicate_message",
+  let paymentLog = null;
+  if (normalizedExternalMessageId) {
+    try {
+      paymentLog = await PaymentLog.create({
+        source: normalizedSource,
+        externalMessageId: normalizedExternalMessageId,
         amount: parsedAmount,
-      };
+        rawText,
+        status: "processing",
+      });
+    } catch (error) {
+      if (error?.code !== 11000) throw error;
+      const existingLog = await PaymentLog.findOne({
+        source: normalizedSource,
+        externalMessageId: normalizedExternalMessageId,
+      }).lean();
+      const staleProcessing =
+        existingLog?.status === "processing" &&
+        Date.now() - new Date(existingLog.createdAt || 0).getTime() >
+          PAYMENT_PROCESSING_STALE_MS;
+      if (!staleProcessing) {
+        if (existingLog?.matchedOrderId) {
+          const existingOrder = await Order.findById(
+            existingLog.matchedOrderId,
+          ).lean();
+          await resumeExistingPayment(existingOrder, parsedAmount);
+        }
+        return {
+          matched: false,
+          duplicate: true,
+          reason: "duplicate_message",
+          amount: parsedAmount,
+        };
+      }
+      paymentLog = existingLog;
     }
   }
 
   const now = new Date();
-  const pending = await Order.findOneAndUpdate(
-    {
-      status: "pending_payment",
-      $or: [
-        { expectedAmount: parsedAmount },
-        {
-          product: "balance",
-          paymentMethod: "bankomat",
-          balanceCreditAmount: parsedAmount,
-        },
-      ],
-      expiresAt: { $gt: now },
-    },
-    {
-      $set: {
-        status: "paid_auto_processed",
-        paidAmount: parsedAmount,
-        paidAt: now,
+  if (paymentEventKey) {
+    const claimedByEvent = await Order.findOne({
+      paymentEventKey,
+      status: {
+        $in: ["payment_processing", "paid_auto_processed", "completed"],
       },
-    },
-    {
-      sort: { createdAt: 1 },
-      new: true,
-    },
-  ).lean();
+    }).lean();
+    if (claimedByEvent) {
+      if (paymentLog?._id) {
+        await PaymentLog.updateOne(
+          { _id: paymentLog._id },
+          {
+            $set: {
+              status: "matched",
+              matchedOrderId: claimedByEvent._id,
+            },
+          },
+        );
+      }
+      const resumed = await resumeExistingPayment(
+        claimedByEvent,
+        parsedAmount,
+      );
+      return {
+        matched: true,
+        recovered: true,
+        amount: parsedAmount,
+        order: resumed.order || claimedByEvent,
+        fulfillment: resumed.fulfillment,
+      };
+    }
+  }
+
+  const matchFilter = {
+    status: "pending_payment",
+    expiresAt: { $gt: now },
+    $or: [
+      { paymentMatchAmount: parsedAmount },
+      { paymentAlternateMatchAmount: parsedAmount },
+      {
+        paymentMatchAmount: { $in: [0, null] },
+        expectedAmount: parsedAmount,
+      },
+      {
+        paymentMatchAmount: { $exists: false },
+        expectedAmount: parsedAmount,
+      },
+      {
+        paymentMatchAmount: { $in: [0, null] },
+        product: "balance",
+        paymentMethod: "bankomat",
+        balanceCreditAmount: parsedAmount,
+      },
+      {
+        paymentMatchAmount: { $exists: false },
+        product: "balance",
+        paymentMethod: "bankomat",
+        balanceCreditAmount: parsedAmount,
+      },
+    ],
+  };
+  const candidates = await Order.find(matchFilter)
+    .sort({ createdAt: 1 })
+    .limit(2)
+    .lean();
+
+  if (candidates.length > 1) {
+    if (paymentLog?._id) {
+      await PaymentLog.updateOne(
+        { _id: paymentLog._id },
+        { $set: { status: "unmatched" } },
+      );
+    } else {
+      await PaymentLog.create({
+        source: normalizedSource,
+        externalMessageId: undefined,
+        amount: parsedAmount,
+        rawText,
+        status: "unmatched",
+      });
+    }
+    return {
+      matched: false,
+      reason: "ambiguous_pending_orders",
+      amount: parsedAmount,
+    };
+  }
+
+  const candidate = candidates[0];
+  let pending = candidate
+    ? await Order.findOneAndUpdate(
+        {
+          _id: candidate._id,
+          status: "pending_payment",
+          expiresAt: { $gt: now },
+        },
+        {
+          $set: {
+            status: "payment_processing",
+            paidAmount: parsedAmount,
+            paidAt: now,
+            paymentEventKey,
+          },
+        },
+        { new: true },
+      ).lean()
+    : null;
 
   if (!pending) {
-    await PaymentLog.create({
-      source,
-      externalMessageId,
-      amount: parsedAmount,
-      rawText,
-      status: "unmatched",
-    });
+    if (paymentLog?._id) {
+      await PaymentLog.updateOne(
+        { _id: paymentLog._id },
+        { $set: { status: "unmatched" } },
+      );
+    } else {
+      await PaymentLog.create({
+        source: normalizedSource,
+        externalMessageId: undefined,
+        amount: parsedAmount,
+        rawText,
+        status: "unmatched",
+      });
+    }
     return {
       matched: false,
       reason: "pending_not_found",
@@ -347,14 +607,47 @@ async function processIncomingPayment({
     };
   }
 
-  await PaymentLog.create({
-    source,
-    externalMessageId,
-    amount: parsedAmount,
-    rawText,
-    status: "matched",
-    matchedOrderId: pending._id,
-  });
+  await releaseReservationForOrder(pending).catch(() => {});
+
+  if (paymentLog?._id) {
+    await PaymentLog.updateOne(
+      { _id: paymentLog._id },
+      {
+        $set: {
+          status: "matched",
+          matchedOrderId: pending._id,
+        },
+      },
+    );
+  } else {
+    await PaymentLog.create({
+      source: normalizedSource,
+      externalMessageId: undefined,
+      amount: parsedAmount,
+      rawText,
+      status: "matched",
+      matchedOrderId: pending._id,
+    });
+  }
+
+  if (pending.product !== "balance") {
+    const paidOrder = await Order.findOneAndUpdate(
+      { _id: pending._id, status: "payment_processing" },
+      { $set: { status: "paid_auto_processed" } },
+      { new: true },
+    ).lean();
+    if (!paidOrder) {
+      const latest = await Order.findById(pending._id).lean();
+      return {
+        matched: true,
+        duplicate: true,
+        amount: parsedAmount,
+        order: latest || pending,
+        fulfillment: null,
+      };
+    }
+    pending = paidOrder;
+  }
 
   const { fulfillment } = await handlePostPaymentEffects(pending, parsedAmount, {
     userEventType: "payment_matched",

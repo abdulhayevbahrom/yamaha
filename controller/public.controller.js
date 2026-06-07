@@ -1,4 +1,5 @@
 const response = require("../utils/response");
+const mongoose = require("mongoose");
 const Plan = require("../model/plan.model");
 const Order = require("../model/order.model");
 const User = require("../model/user.model");
@@ -179,7 +180,19 @@ function resolveTopSalesActor(order, user) {
   };
 }
 
-const health = async (_, res) => response.success(res, "API ishlayapti");
+const health = async (_, res) => {
+  const dbConnected = mongoose.connection.readyState === 1;
+  if (!dbConnected) {
+    return res.status(503).json({
+      state: false,
+      message: "API vaqtincha tayyor emas",
+      innerData: { database: "disconnected" },
+    });
+  }
+  return response.success(res, "API ishlayapti", {
+    database: "connected",
+  });
+};
 
 const getCatalog = async (_, res) => {
   try {

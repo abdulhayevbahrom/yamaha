@@ -37,9 +37,23 @@ const userGiftSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["owned", "sent"],
+      enum: ["owned", "sending", "sent", "send_needs_review"],
       default: "owned",
       index: true,
+    },
+    sendRequestId: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    sendStartedAt: {
+      type: Date,
+      default: null,
+    },
+    sendError: {
+      type: String,
+      default: "",
+      trim: true,
     },
     sentToType: {
       type: String,

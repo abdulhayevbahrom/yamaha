@@ -3,7 +3,6 @@ const path = require("node:path");
 const TelegramBot = require("node-telegram-bot-api");
 const connectDB = require("../config/dbConfig");
 const {
-  processIncomingPayment,
   processTelegramStarsPayment,
 } = require("../services/payment-match.service");
 const { onGamePaid } = require("../services/notify.service");
@@ -34,19 +33,6 @@ const { bindReferralFromStart } = require("../services/referral.service");
 
 const startCaption =
   "Star, Premium, PUBG UC va MLBB Diamond ni xavfsiz sotib oling.\n\nDo'konga kirish uchun tugmani bosing.";
-
-const normalizeOptionalId = (value) => {
-  const cleaned = String(value || "").trim();
-  if (!cleaned) return "";
-  if (
-    ["shartmas", "none", "null", "undefined", "-"].includes(
-      cleaned.toLowerCase(),
-    )
-  ) {
-    return "";
-  }
-  return cleaned;
-};
 
 const getGameProductLabel = (product) => {
   const key = String(product || "").trim().toLowerCase();
@@ -206,13 +192,6 @@ const normalizeTelegramEntities = (entities) => {
 async function startBot({ strict = false } = {}) {
   const token = process.env.BOT_TOKEN;
   const webAppUrl = process.env.WEB_APP_URL;
-  const cardxabarSourceChatId = normalizeOptionalId(
-    process.env.CARDXABAR_SOURCE_CHAT_ID,
-  );
-  const cardxabarNotifyChatId =
-    normalizeOptionalId(process.env.CARDXABAR_NOTIFY_CHAT_ID) ||
-    cardxabarSourceChatId ||
-    "";
   const adminNotifyChatId = process.env.ADMIN_NOTIFY_CHAT_ID || "";
   const startPhotoPath =
     process.env.START_PHOTO_PATH || path.join(__dirname, "..", "home.jpg");
@@ -1140,33 +1119,6 @@ async function startBot({ strict = false } = {}) {
       }
     }),
   );
-
-  if (cardxabarSourceChatId) {
-    bot.on("message", async (msg) => {
-      try {
-        if (!msg?.text) return;
-        if (String(msg.chat?.id) !== String(cardxabarSourceChatId)) return;
-        if (msg.text.startsWith("/")) return;
-
-        const externalMessageId = `${msg.chat.id}:${msg.message_id}`;
-        const result = await processIncomingPayment({
-          rawText: msg.text,
-          externalMessageId,
-          source: "cardxabar",
-        });
-
-        if (!cardxabarNotifyChatId) return;
-        if (result.matched) {
-          await bot.sendMessage(
-            cardxabarNotifyChatId,
-            `✅ To'lov mos tushdi\nBuyurtma: ${result.order.orderId}\nSumma: ${result.amount}`,
-          );
-        }
-      } catch (err) {
-        console.error("CardXabar message process error:", err.message);
-      }
-    });
-  }
 
   if (adminNotifyChatId) {
     onGamePaid(async (payload) => {

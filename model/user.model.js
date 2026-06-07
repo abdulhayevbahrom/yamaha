@@ -63,6 +63,11 @@ const userSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    balanceOperationKeys: {
+      type: [String],
+      default: [],
+      select: false,
+    },
     nftEarningsBalance: {
       type: Number,
       default: 0,

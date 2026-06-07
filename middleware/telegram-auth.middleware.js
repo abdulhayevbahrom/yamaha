@@ -99,7 +99,11 @@ function parseInitData(initData) {
   );
   const nowSec = Math.floor(Date.now() / 1000);
 
-  if (!authDateSec || Math.abs(nowSec - authDateSec) > maxAgeSec) {
+  if (
+    !authDateSec ||
+    authDateSec > nowSec + 30 ||
+    nowSec - authDateSec > maxAgeSec
+  ) {
     return { ok: false, reason: "expired" };
   }
 

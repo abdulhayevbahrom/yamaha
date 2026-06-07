@@ -1,6 +1,7 @@
 const Order = require("../model/order.model");
 const User = require("../model/user.model");
 const { emitAdminUpdate, emitUserUpdate } = require("../socket");
+const { applyBalanceDeltaOnce } = require("./balance-operation.service");
 const { sendTelegramText, editTelegramText } = require("./telegram-notify.service");
 const { sendOrderArchive } = require("./order-archive.service");
 const { getManagerUsername, getManagerUrl } = require("./star-sell-payout.service");
@@ -54,14 +55,26 @@ async function syncAdminMessages(order, statusText) {
 }
 
 async function confirmNftWithdrawalById(orderId) {
-  const order = await Order.findById(orderId);
-  if (!order) return { ok: false, reason: "not_found" };
-  if (String(order.product || "").toLowerCase() !== "nft_withdrawal") {
-    return { ok: false, reason: "not_nft_withdrawal" };
+  const order = await Order.findOneAndUpdate(
+    {
+      _id: orderId,
+      product: "nft_withdrawal",
+      status: { $in: ["payment_submitted", "paid_auto_processed"] },
+    },
+    { $set: { status: "admin_action_processing" } },
+    { new: false },
+  );
+  if (!order) {
+    const latest = await Order.findById(orderId);
+    if (!latest) return { ok: false, reason: "not_found" };
+    if (String(latest.product || "").toLowerCase() !== "nft_withdrawal") {
+      return { ok: false, reason: "not_nft_withdrawal" };
+    }
+    if (latest.status === "completed") {
+      return { ok: true, alreadyCompleted: true, order: latest };
+    }
+    return { ok: false, reason: "not_ready" };
   }
-  const status = String(order.status || "");
-  if (!READY_STATUSES.has(status) || status === "cancelled") return { ok: false, reason: "not_ready" };
-  if (status === "completed") return { ok: true, alreadyCompleted: true, order };
 
   const now = new Date();
   const fragmentTx = getSafeFragmentTx(order);
@@ -98,15 +111,29 @@ async function confirmNftWithdrawalById(orderId) {
 }
 
 async function cancelNftWithdrawalById(orderId) {
-  const order = await Order.findById(orderId);
-  if (!order) return { ok: false, reason: "not_found" };
-  if (String(order.product || "").toLowerCase() !== "nft_withdrawal") {
-    return { ok: false, reason: "not_nft_withdrawal" };
+  const order = await Order.findOneAndUpdate(
+    {
+      _id: orderId,
+      product: "nft_withdrawal",
+      status: { $in: [...READY_STATUSES].filter((status) => status !== "completed") },
+    },
+    { $set: { status: "admin_action_processing" } },
+    { new: false },
+  );
+  if (!order) {
+    const latest = await Order.findById(orderId);
+    if (!latest) return { ok: false, reason: "not_found" };
+    if (String(latest.product || "").toLowerCase() !== "nft_withdrawal") {
+      return { ok: false, reason: "not_nft_withdrawal" };
+    }
+    if (latest.status === "completed") {
+      return { ok: false, reason: "already_completed" };
+    }
+    if (latest.status === "cancelled") {
+      return { ok: true, alreadyCancelled: true, order: latest };
+    }
+    return { ok: false, reason: "not_ready" };
   }
-  const status = String(order.status || "");
-  if (!READY_STATUSES.has(status)) return { ok: false, reason: "not_ready" };
-  if (status === "completed") return { ok: false, reason: "already_completed" };
-  if (status === "cancelled") return { ok: true, alreadyCancelled: true, order };
 
   const amount = Math.max(0, Math.round(Number(order.expectedAmount || 0)));
   const now = new Date();
@@ -116,11 +143,19 @@ async function cancelNftWithdrawalById(orderId) {
   const fragmentTx = getSafeFragmentTx(order);
 
   if (amount > 0 && String(order.tgUserId || "").trim()) {
-    await User.findOneAndUpdate(
-      { tgUserId: String(order.tgUserId) },
-      { $inc: { balance: amount, nftEarningsBalance: amount } },
-      { new: true },
-    );
+    const creditResult = await applyBalanceDeltaOnce({
+      tgUserId: order.tgUserId,
+      operationKey: `nft-withdrawal-cancel:${String(order._id)}`,
+      amount,
+      extraIncrement: { nftEarningsBalance: amount },
+    });
+    if (!creditResult.ok) {
+      await Order.updateOne(
+        { _id: order._id, status: "admin_action_processing" },
+        { $set: { status: order.status } },
+      );
+      return { ok: false, reason: creditResult.reason || "refund_failed" };
+    }
   }
 
   order.status = "cancelled";

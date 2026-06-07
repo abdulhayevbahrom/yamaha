@@ -2,7 +2,10 @@ const Order = require("../model/order.model");
 const Plan = require("../model/plan.model");
 const { sendOrderArchive } = require("./order-archive.service");
 const { sendTelegramText } = require("./telegram-notify.service");
-const { refundToBalance } = require("./order-cancel.service");
+const {
+  getRefundAmount,
+  refundToBalance,
+} = require("./order-cancel.service");
 const { emitUserUpdate } = require("../socket");
 const { awardReferralCommissionForOrder } = require("./referral.service");
 const {
@@ -10,6 +13,8 @@ const {
   buyPremium: buyPremiumFromFragment,
 } = require("./fragment-api.service");
 const User = require("../model/user.model");
+const { applyBalanceDeltaOnce } = require("./balance-operation.service");
+const { isAmbiguousExternalError } = require("./external-operation.service");
 
 function getFragmentErrorPayload(error) {
   const fragmentPayload = error?.fragmentPayload;
@@ -106,8 +111,7 @@ async function notifyAdminsAboutFragmentLowBalance(order, payload) {
 }
 
 function getOrderChargeAmount(order) {
-  const amount = Number(order?.paidAmount || order?.expectedAmount || 0);
-  return Number.isFinite(amount) && amount > 0 ? amount : 0;
+  return getRefundAmount(order);
 }
 
 function hasRefundToBalanceMarker(order) {
@@ -141,13 +145,14 @@ async function rechargeRefundedBalanceOrder(order) {
     return { ok: false, error: "Balansni qayta yechish uchun ma'lumot yetarli emas" };
   }
 
-  const user = await User.findOneAndUpdate(
-    { tgUserId: String(order.tgUserId), balance: { $gte: chargeAmount } },
-    { $inc: { balance: -chargeAmount } },
-    { new: true },
-  ).lean();
+  const refundMarker = String(order?.fragmentTx?.refundedToBalanceAt || "");
+  const chargeResult = await applyBalanceDeltaOnce({
+    tgUserId: order.tgUserId,
+    operationKey: `order-refund-recharge:${String(order._id)}:${refundMarker}`,
+    amount: -chargeAmount,
+  });
 
-  if (!user) {
+  if (!chargeResult.ok) {
     return { ok: false, error: "Balans yetarli emas" };
   }
 
@@ -187,8 +192,8 @@ function buildFragmentTransaction({
   };
 }
 
-async function buyStars(recipient, amount) {
-  const purchase = await buyStarsFromFragment(recipient, amount);
+async function buyStars(recipient, amount, options = {}) {
+  const purchase = await buyStarsFromFragment(recipient, amount, options);
   return {
     fragment: buildFragmentTransaction({
       productType: "stars",
@@ -199,8 +204,8 @@ async function buyStars(recipient, amount) {
   };
 }
 
-async function buyPremium(recipient, months) {
-  const purchase = await buyPremiumFromFragment(recipient, months);
+async function buyPremium(recipient, months, options = {}) {
+  const purchase = await buyPremiumFromFragment(recipient, months, options);
   return {
     fragment: buildFragmentTransaction({
       productType: "premium",
@@ -212,32 +217,46 @@ async function buyPremium(recipient, months) {
 }
 
 async function markFulfillmentSuccess(order, result) {
-  await Order.findByIdAndUpdate(order._id, {
-    status: "completed",
-    fulfillmentStatus: "success",
-    completionMode: "auto",
-    fulfilledAt: new Date(),
-    fragmentTx: result.fragment || result || null,
-    fulfillmentError: "",
-  });
-  await sendOrderArchive(order);
-  if (order.tgUserId) {
-    emitUserUpdate(order.tgUserId, {
+  const completedOrder = await Order.findOneAndUpdate(
+    { _id: order._id, fulfillmentStatus: "processing" },
+    {
+      $set: {
+        status: "completed",
+        fulfillmentStatus: "success",
+        completionMode: "auto",
+        fulfilledAt: new Date(),
+        fragmentTx: result.fragment || result || null,
+        fulfillmentError: "",
+      },
+    },
+    { new: true },
+  ).lean();
+  if (!completedOrder) {
+    return {
+      ok: false,
+      needsReview: true,
+      error: "fulfillment_state_finalize_failed",
+    };
+  }
+
+  await sendOrderArchive(completedOrder);
+  if (completedOrder.tgUserId) {
+    emitUserUpdate(completedOrder.tgUserId, {
       type: "order_fulfilled",
       refreshOrders: true,
-      orderId: order._id,
-      status: order.status,
+      orderId: completedOrder._id,
+      status: completedOrder.status,
       fulfillmentStatus: "success",
-      product: order.product,
+      product: completedOrder.product,
     });
   }
 
   try {
-    await awardReferralCommissionForOrder(order);
+    await awardReferralCommissionForOrder(completedOrder);
   } catch (error) {
     console.error(
       "Referral commission apply error:",
-      order._id?.toString?.() || order._id,
+      completedOrder._id?.toString?.() || completedOrder._id,
       error.message,
     );
   }
@@ -247,6 +266,7 @@ async function markFulfillmentSuccess(order, result) {
 async function markFulfillmentFailure(order, error) {
   const errorMessage = error.message || "Auto buy xatolik";
   const payload = getFragmentErrorPayload(error);
+  const ambiguousFailure = isAmbiguousExternalError(error);
   const shouldNotifyAdmins =
     isFragmentLowBalanceError(payload, errorMessage) &&
     !order?.fragmentTx?.adminLowBalanceAlertSentAt;
@@ -264,7 +284,8 @@ async function markFulfillmentFailure(order, error) {
     }
   }
 
-  const isLowBalanceError = isFragmentLowBalanceError(payload, errorMessage);
+  const isLowBalanceError =
+    !ambiguousFailure && isFragmentLowBalanceError(payload, errorMessage);
   const alreadyRefunded = hasRefundToBalanceMarker(order);
 
   if (isLowBalanceError && !alreadyRefunded) {
@@ -303,12 +324,23 @@ async function markFulfillmentFailure(order, error) {
         }
       : payload;
 
-  await Order.findByIdAndUpdate(order._id, {
-    status: nextStatus,
-    fulfillmentStatus: nextFulfillmentStatus,
-    fulfillmentError: nextErrorMessage,
-    fragmentTx,
-  });
+  if (ambiguousFailure) {
+    nextFulfillmentStatus = "needs_review";
+    nextErrorMessage =
+      "Provayder javobi noaniq. Takroriy xaridni oldini olish uchun admin tekshiruvi talab qilinadi.";
+  }
+
+  await Order.findOneAndUpdate(
+    { _id: order._id, fulfillmentStatus: "processing" },
+    {
+      $set: {
+        status: nextStatus,
+        fulfillmentStatus: nextFulfillmentStatus,
+        fulfillmentError: nextErrorMessage,
+        fragmentTx,
+      },
+    },
+  );
   if (order.tgUserId) {
     emitUserUpdate(order.tgUserId, {
       type:
@@ -332,20 +364,42 @@ async function autoFulfillOrder(orderOrId) {
     typeof orderOrId === "object" && orderOrId?._id
       ? orderOrId._id
       : orderOrId;
-  const order = await Order.findById(orderId).lean();
+  const order = await Order.findOneAndUpdate(
+    {
+      _id: orderId,
+      status: "paid_auto_processed",
+      product: { $in: ["star", "premium"] },
+      $or: [
+        { fulfillmentStatus: { $in: ["pending", "failed", "skipped"] } },
+        { fulfillmentStatus: { $exists: false } },
+      ],
+    },
+    {
+      $set: {
+        fulfillmentStatus: "processing",
+        fulfillmentStartedAt: new Date(),
+        fulfillmentError: "",
+      },
+    },
+    { new: true },
+  ).lean();
 
-  if (!order) return { skipped: true, reason: "order_not_found" };
-  if (order.status !== "paid_auto_processed") {
-    return { skipped: true, reason: "not_paid" };
-  }
-  if (!["star", "premium"].includes(order.product)) {
-    return { skipped: true, reason: "unsupported_product" };
-  }
-  if (order.fulfillmentStatus === "processing") {
+  if (!order) {
+    const latest = await Order.findById(orderId).lean();
+    if (!latest) return { skipped: true, reason: "order_not_found" };
+    if (latest.status !== "paid_auto_processed") {
+      return { skipped: true, reason: "not_paid" };
+    }
+    if (!["star", "premium"].includes(latest.product)) {
+      return { skipped: true, reason: "unsupported_product" };
+    }
+    if (latest.fulfillmentStatus === "success") {
+      return { skipped: true, reason: "already_fulfilled" };
+    }
+    if (latest.fulfillmentStatus === "needs_review") {
+      return { skipped: true, reason: "manual_review_required" };
+    }
     return { skipped: true, reason: "already_processing" };
-  }
-  if (order.fulfillmentStatus === "success") {
-    return { skipped: true, reason: "already_fulfilled" };
   }
 
   const rechargeResult = await rechargeRefundedBalanceOrder(order);
@@ -368,18 +422,14 @@ async function autoFulfillOrder(orderOrId) {
       return { ok: false, error: "Custom star miqdori topilmadi" };
     }
 
-    await Order.findByIdAndUpdate(order._id, {
-      fulfillmentStatus: "processing",
-      fulfillmentStartedAt: new Date(),
-      fulfillmentError: "",
-    });
-
     const recipient = String(order.username || "")
       .replace(/^@/, "")
       .trim();
 
     try {
-      const result = await buyStars(recipient, amount);
+      const result = await buyStars(recipient, amount, {
+        idempotencyKey: `yamaha-order-${String(order._id)}`,
+      });
       return markFulfillmentSuccess(order, result);
     } catch (error) {
       return markFulfillmentFailure(order, error);
@@ -394,12 +444,6 @@ async function autoFulfillOrder(orderOrId) {
     return { ok: false, error: "Plan topilmadi" };
   }
 
-  await Order.findByIdAndUpdate(order._id, {
-    fulfillmentStatus: "processing",
-    fulfillmentStartedAt: new Date(),
-    fulfillmentError: "",
-  });
-
   const recipient = String(order.username || "")
     .replace(/^@/, "")
     .trim();
@@ -407,9 +451,13 @@ async function autoFulfillOrder(orderOrId) {
   try {
     let result;
     if (order.product === "star") {
-      result = await buyStars(recipient, plan.amount);
+      result = await buyStars(recipient, plan.amount, {
+        idempotencyKey: `yamaha-order-${String(order._id)}`,
+      });
     } else {
-      result = await buyPremium(recipient, plan.amount);
+      result = await buyPremium(recipient, plan.amount, {
+        idempotencyKey: `yamaha-order-${String(order._id)}`,
+      });
     }
 
     return markFulfillmentSuccess(order, result);

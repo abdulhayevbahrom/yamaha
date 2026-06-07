@@ -2,16 +2,16 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const { createServer } = require("node:http");
+const mongoose = require("mongoose");
 
 const connectDB = require("./config/dbConfig");
 const router = require("./router/router");
 const socket = require("./socket");
 const response = require("./utils/response");
-const { startBot } = require("./bot");
-const { startUserClient } = require("./user-client");
 const { createWebAppOriginGuard } = require("./middleware/webapp-origin.middleware");
 const { createWebAppSessionGuard } = require("./middleware/webapp-session.middleware");
 const { createRequestReplayGuard } = require("./middleware/request-replay.middleware");
+const { createTurnstileGuard } = require("./middleware/turnstile.middleware");
 
 //ads
 
@@ -44,7 +44,7 @@ const PORT = Number(process.env.PORT) || 4090;
 const app = express();
 const server = createServer(app);
 
-const trustProxyRaw = String(process.env.TRUST_PROXY || "1").trim();
+const trustProxyRaw = String(process.env.TRUST_PROXY || "").trim();
 if (trustProxyRaw) {
   const parsedTrustProxy = Number(trustProxyRaw);
   if (!Number.isNaN(parsedTrustProxy)) {
@@ -54,6 +54,8 @@ if (trustProxyRaw) {
   } else {
     app.set("trust proxy", trustProxyRaw);
   }
+} else {
+  app.set("trust proxy", false);
 }
 
 const staticCorsOrigins = [String(process.env.WEB_APP_URL || "").trim()].filter(
@@ -86,15 +88,11 @@ app.use(
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-connectDB().catch((err) => {
-  console.error("DB ulanishida xato:", err.message);
-});
-
 const io = socket.connect(server);
 app.set("socket", io);
 
 app.get("/", (_, res) => {
-  return response.success(res, "Backend ishlayapti test1", {
+  return response.success(res, "Backend ishlayapti", {
     service: "yamaha-miniapp-backend",
     date: new Date().toISOString(),
   });
@@ -104,15 +102,15 @@ app.use(
   "/api",
   createWebAppOriginGuard({
     allowedOrigins: [...allowedOrigins],
-    ignorePrefixes: ["/integrations/"],
     allowNoOriginGetPrefixes: [
+      "/health",
       "/gifts/image/",
       "/gifts/nft-image/",
       "/gifts/nft-pattern/",
     ],
   }),
   createWebAppSessionGuard({
-    ignorePrefixes: ["/integrations/", "/health"],
+    ignorePrefixes: ["/health"],
     allowNoInitDataGetPrefixes: [
       "/gifts/image/",
       "/gifts/nft-image/",
@@ -121,7 +119,15 @@ app.use(
   }),
   createRequestReplayGuard({
     windowMs: Number(process.env.REQUEST_REPLAY_WINDOW_MS || 120_000),
-    ignorePrefixes: ["/integrations/", "/health"],
+    ignorePrefixes: ["/health"],
+  }),
+  createTurnstileGuard({
+    protectedPrefixes: [
+      "/orders",
+      "/balance/topup",
+      "/gifts/",
+      "/admin/login",
+    ],
   }),
   router,
 );
@@ -130,18 +136,56 @@ app.use((_, res) => {
   return response.notFound(res, "Route topilmadi");
 });
 
-server.listen(PORT, () => {
-  console.log(`Server: http://localhost:${PORT}`);
-  if (shouldStartTelegramWorkers()) {
-    Promise.resolve(startBot()).catch((error) => {
-      console.error("Bot start error:", error?.message || error);
-    });
-    Promise.resolve(startUserClient()).catch((error) => {
-      console.error("User-client start error:", error?.message || error);
-    });
-  } else {
-    console.log(
-      "Telegram workerlar bu processda ishga tushirilmadi (PM2 instance yoki env cheklovi).",
-    );
+async function startServer() {
+  await connectDB();
+
+  server.listen(PORT, () => {
+    console.log(`Server: http://localhost:${PORT}`);
+    if (shouldStartTelegramWorkers()) {
+      const { startBot } = require("./bot");
+      const { startUserClient } = require("./user-client");
+      Promise.resolve(startBot({ strict: true })).catch((error) => {
+        console.error("Bot start error:", error?.message || error);
+      });
+      Promise.resolve(startUserClient({ strict: true })).catch((error) => {
+        console.error("User-client start error:", error?.message || error);
+      });
+    } else {
+      console.log(
+        "Telegram workerlar bu processda ishga tushirilmadi (PM2 instance yoki env cheklovi).",
+      );
+    }
+  });
+}
+
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`${signal}: backend to'xtatilmoqda...`);
+
+  const forceExitTimer = setTimeout(() => {
+    console.error("Backend belgilangan vaqtda to'xtamadi");
+    process.exit(1);
+  }, 10_000);
+  forceExitTimer.unref();
+
+  if (server.listening) {
+    await new Promise((resolve) => server.close(resolve));
   }
+  await mongoose.disconnect().catch(() => {});
+  clearTimeout(forceExitTimer);
+  process.exit(0);
+}
+
+process.once("SIGTERM", () => {
+  void shutdown("SIGTERM");
+});
+process.once("SIGINT", () => {
+  void shutdown("SIGINT");
+});
+
+startServer().catch((error) => {
+  console.error("Backend ishga tushmadi:", error?.message || error);
+  process.exit(1);
 });

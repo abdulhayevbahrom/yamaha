@@ -8,7 +8,7 @@ const paymentLogSchema = new mongoose.Schema(
     },
     externalMessageId: {
       type: String,
-      default: null
+      default: undefined
     },
     amount: {
       type: Number,
@@ -25,7 +25,7 @@ const paymentLogSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["matched", "unmatched", "duplicate", "invalid"],
+      enum: ["processing", "matched", "unmatched", "duplicate", "invalid"],
       default: "invalid"
     }
   },

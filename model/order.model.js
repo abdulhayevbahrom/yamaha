@@ -84,6 +84,12 @@ const orderSchema = new Schema(
       ),
       default: null
     },
+    paymentReservationToken: {
+      type: String,
+      default: "",
+      trim: true,
+      index: true
+    },
     paymentMethod: {
       type: String,
       enum: ["card", "bankomat", "uzumbank", "paynet", "click", "balance", "stars"],
@@ -129,6 +135,26 @@ const orderSchema = new Schema(
       type: Number,
       required: true
     },
+    paymentMatchAmount: {
+      type: Number,
+      default: 0,
+      index: true
+    },
+    paymentAlternateMatchAmount: {
+      type: Number,
+      default: 0,
+      index: true
+    },
+    paymentReservationTokens: {
+      type: [String],
+      default: []
+    },
+    paymentEventKey: {
+      type: String,
+      default: "",
+      trim: true,
+      index: true
+    },
     paidAmount: {
       type: Number,
       default: 0
@@ -157,8 +183,10 @@ const orderSchema = new Schema(
       type: String,
       enum: [
         "pending_payment",
+        "payment_processing",
         "payment_submitted",
         "paid_auto_processed",
+        "admin_action_processing",
         "completed",
         "cancelled",
         "failed"
@@ -167,7 +195,7 @@ const orderSchema = new Schema(
     },
     fulfillmentStatus: {
       type: String,
-      enum: ["pending", "processing", "success", "failed", "skipped"],
+      enum: ["pending", "processing", "success", "failed", "skipped", "needs_review"],
       default: "pending"
     },
     completionMode: {
@@ -211,6 +239,7 @@ orderSchema.index({ paymentCardId: 1, createdAt: 1, status: 1 });
 orderSchema.index({ status: 1, expiresAt: 1 });
 orderSchema.index({ tgUserId: 1, createdAt: -1 });
 orderSchema.index({ status: 1, expectedAmount: 1, expiresAt: 1, createdAt: 1 });
+orderSchema.index({ status: 1, paymentMatchAmount: 1, expiresAt: 1, createdAt: 1 });
 orderSchema.index({ product: 1, status: 1, paidAt: -1, createdAt: -1 });
 orderSchema.index({ createdAt: -1 });
 
