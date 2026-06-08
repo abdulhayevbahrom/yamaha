@@ -15,7 +15,8 @@ const {
 } = require("../middleware/turnstile.middleware");
 
 test("payment text parser handles Uzbek thousands separators", () => {
-  assert.equal(parseAmountFromText("+ 109.000 UZS"), 109000);
+  assert.equal(parseAmountFromText("➕ 1 001.00 UZS"), 1001);
+  assert.equal(parseAmountFromText("+ 109 000.00 UZS"), 109000);
   assert.equal(parseAmountFromText("➕ 10,900,000 UZS"), 10900000);
 });
 

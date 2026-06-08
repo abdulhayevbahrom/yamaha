@@ -195,7 +195,9 @@ function parseAmountFromText(text) {
     if (match && match[2]) {
       const rawAmount = match[2].trim();
       const normalized = rawAmount.replace(/\s+/g, "");
-      const value = Number(normalized.replace(/[^\d]/g, ""));
+      const value = normalized.includes(".")
+        ? Number(normalized.replace(/,/g, ""))
+        : Number(normalized.replace(/[^\d]/g, ""));
       if (Number.isFinite(value) && value > 0) return Math.round(value);
     }
   }
