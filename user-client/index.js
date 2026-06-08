@@ -9,6 +9,9 @@ const connectDB = require("../config/dbConfig");
 const { getTelegramCredentials } = require("../config/telegram-credentials");
 const { acquireTelegramSessionLock } = require("../utils/telegram-session-lock");
 const { buildTelegramClientOptions } = require("../utils/telegram-client-options");
+const {
+  shouldProcessCardxabarMessage,
+} = require("../utils/cardxabar-message-filter");
 
 const telegramCredentials = getTelegramCredentials("cardxabar");
 const apiId = telegramCredentials.apiId;
@@ -349,14 +352,14 @@ async function startUserClient({ strict = false } = {}) {
               ? await message.getSender()
               : null);
           const senderUsername = String(sender?.username || "").trim();
-          const usernameMatch =
-            cardxabarUsername &&
-            senderUsername.toLowerCase() === cardxabarUsername.toLowerCase();
-          const chatMatch = cardxabarChatId && chatId === cardxabarChatId;
-
-          if (cardxabarChatId) {
-            if (!chatMatch) return;
-          } else if (cardxabarUsername && !usernameMatch) {
+          if (
+            !shouldProcessCardxabarMessage({
+              configuredChatId: cardxabarChatId,
+              configuredUsername: cardxabarUsername,
+              messageChatId: chatId,
+              senderUsername,
+            })
+          ) {
             return;
           }
 
