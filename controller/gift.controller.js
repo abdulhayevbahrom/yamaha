@@ -27,6 +27,9 @@ const {
 const {
   isAmbiguousExternalError,
 } = require("../services/external-operation.service");
+const {
+  getGiftSendErrorMessage,
+} = require("../services/gift-send-error-message.service");
 
 function normalizeString(value) {
   return String(value || "").trim();
@@ -280,35 +283,6 @@ function buildImageFallbackSvg() {
 </svg>`,
     "utf8",
   );
-}
-
-function mapSendGiftError(error) {
-  const raw = normalizeString(error?.errorMessage || error?.message || "");
-  if (!raw) return "Gift yuborishda xatolik yuz berdi";
-
-  if (raw.includes("BALANCE_TOO_LOW")) {
-    return "Giftni yechib olish uchun xizmat hisobida stars yetarli emas. Administratorga murojaat qiling";
-  }
-  if (raw.includes("USERNAME_INVALID")) {
-    return "Username noto'g'ri";
-  }
-  if (raw.includes("PEER_ID_INVALID") || raw.includes("USER_ID_INVALID")) {
-    return "Foydalanuvchi topilmadi";
-  }
-  if (raw.includes("FLOOD_WAIT")) {
-    return "Telegram cheklovi sabab birozdan keyin qayta urinib ko'ring";
-  }
-  if (raw.includes("TG_USER_SESSION")) {
-    return "Telegram session eskirgan. Administratorga murojaat qiling";
-  }
-  if (raw.includes("PAYMENT_REQUIRED")) {
-    return "Telegram transfer uchun stars to'lovi talab qilindi. Iltimos qayta urinib ko'ring yoki administratorga murojaat qiling";
-  }
-  if (raw.includes("STARS") && raw.includes("LOW")) {
-    return "Telegram hisobida stars yetarli emas";
-  }
-
-  return raw;
 }
 
 function parseAdminNotifyIds() {
@@ -2744,7 +2718,7 @@ async function withdrawMyNft(req, res) {
         );
       }
 
-      return response.error(res, mapSendGiftError(transferError));
+      return response.error(res, getGiftSendErrorMessage(transferError));
     }
 
     const now = new Date();
@@ -3072,7 +3046,7 @@ async function sendGift(req, res) {
           { code: "GIFT_SEND_NEEDS_REVIEW" },
         );
       }
-      return response.error(res, mapSendGiftError(sendError));
+      return response.error(res, getGiftSendErrorMessage(sendError));
     }
 
     const sentUpdate = await UserGift.updateOne(
@@ -3128,11 +3102,8 @@ async function sendGift(req, res) {
       recipient,
     });
   } catch (error) {
-    return response.serverError(
-      res,
-      "Gift yuborishda xatolik",
-      error.message,
-    );
+    console.error("[GIFT_SEND_ERROR]", error);
+    return response.serverError(res, "Gift yuborishda xatolik yuz berdi");
   }
 }
 
@@ -3157,4 +3128,3 @@ module.exports = {
   purchaseGift,
   sendGift,
 };
-
