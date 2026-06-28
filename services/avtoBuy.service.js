@@ -74,6 +74,36 @@ function isFragmentLowBalanceError(payload, fallback = "") {
   );
 }
 
+function isFragmentPayloadUnavailableError(payload, error) {
+  const statusCode = Number(
+    error?.statusCode || error?.response?.status || payload?.statusCode || 0,
+  );
+  const code = String(payload?.code || "").trim().toUpperCase();
+  const text = normalizeFragmentErrorText(payload, error?.message || "");
+
+  return (
+    statusCode === 502 &&
+    code === "FRAGMENT_ERROR" &&
+    text.includes("payload olinmadi")
+  );
+}
+
+function isRefundableFragmentFailure(payload, error) {
+  const errorMessage = error?.message || "";
+
+  return (
+    isFragmentLowBalanceError(payload, errorMessage) ||
+    isFragmentPayloadUnavailableError(payload, error)
+  );
+}
+
+function getFragmentRefundReason(payload, error) {
+  if (isFragmentPayloadUnavailableError(payload, error)) {
+    return "fragment_payload_unavailable";
+  }
+  return "fragment_low_balance";
+}
+
 async function notifyAdminsAboutFragmentLowBalance(order, payload) {
   const adminIds = parseAdminNotifyIds();
   if (!adminIds.length) return false;
@@ -284,11 +314,12 @@ async function markFulfillmentFailure(order, error) {
     }
   }
 
-  const isLowBalanceError =
-    !ambiguousFailure && isFragmentLowBalanceError(payload, errorMessage);
+  const isRefundableFailure =
+    !ambiguousFailure && isRefundableFragmentFailure(payload, error);
   const alreadyRefunded = hasRefundToBalanceMarker(order);
+  const refundReason = getFragmentRefundReason(payload, error);
 
-  if (isLowBalanceError && !alreadyRefunded) {
+  if (isRefundableFailure && !alreadyRefunded) {
     const refundResult = await refundToBalance(order);
     if (refundResult?.ok) {
       refundSentAt = new Date();
@@ -317,7 +348,7 @@ async function markFulfillmentFailure(order, error) {
             ? {
                 refundedToBalanceAt: refundSentAt,
                 refundedToBalanceAmount: getOrderChargeAmount(order),
-                refundReason: "fragment_low_balance",
+                refundReason,
                 refundTarget,
               }
             : {}),
@@ -470,4 +501,6 @@ module.exports = {
   buyStars,
   buyPremium,
   autoFulfillOrder,
+  isFragmentPayloadUnavailableError,
+  isRefundableFragmentFailure,
 };
