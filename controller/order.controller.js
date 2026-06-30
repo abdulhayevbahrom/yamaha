@@ -360,9 +360,9 @@ const createOrder = async (req, res) => {
       zoneId = "",
       profileName = "",
       customAmount,
-      paymentMethod = "card",
+      paymentMethod = "balance",
     } = requestBody;
-    const normalizedPaymentMethod = String(paymentMethod || "card")
+    const normalizedPaymentMethod = String(paymentMethod || "balance")
       .trim()
       .toLowerCase();
     const { tgUserId, username: tgUsername } = getTelegramUserFromRequest(req);
@@ -374,7 +374,7 @@ const createOrder = async (req, res) => {
       );
     }
     const currentUser = await User.findOne({ tgUserId })
-      .select({ isBlocked: 1, profileName: 1, username: 1 })
+      .select({ isBlocked: 1, profileName: 1, username: 1, balance: 1 })
       .lean();
     if (currentUser?.isBlocked) {
       return response.error(res, "Foydalanuvchi bloklangan");
@@ -384,6 +384,15 @@ const createOrder = async (req, res) => {
     }
     if (!ORDER_PAYMENT_METHODS.includes(normalizedPaymentMethod)) {
       return response.error(res, "To'lov usuli noto'g'ri");
+    }
+    if (
+      String(product || "").toLowerCase() !== "star_sell" &&
+      normalizedPaymentMethod !== "balance"
+    ) {
+      return response.error(
+        res,
+        "Endi buyurtmalar faqat balans orqali to'lanadi",
+      );
     }
     if (
       normalizedPaymentMethod === "stars" &&
@@ -519,7 +528,19 @@ const createOrder = async (req, res) => {
         amount: -expected,
       });
       if (!debitResult.ok) {
-        return response.error(res, "Balans yetarli emas");
+        const latestUser = await User.findOne({ tgUserId })
+          .select({ balance: 1 })
+          .lean();
+        const currentBalance = Math.max(
+          0,
+          Math.round(Number(latestUser?.balance ?? currentUser?.balance ?? 0)),
+        );
+        return response.error(res, "Balans yetarli emas", {
+          code: "INSUFFICIENT_BALANCE",
+          requiredAmount: expected,
+          currentBalance,
+          missingAmount: Math.max(0, expected - currentBalance),
+        });
       }
       balanceDebitContext = {
         tgUserId,
@@ -1388,5 +1409,4 @@ module.exports = {
   cancelUcOrder,
   cancelOrder,
 };
-
 
