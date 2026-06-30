@@ -21,6 +21,8 @@ const {
   updatePaymentCardValidation,
   createStaticGiftValidation,
   updateStaticGiftValidation,
+  createHeroSlideValidation,
+  updateHeroSlideValidation,
 } = require("../validations/admin.validation");
 
 const telegramAuthMiddleware = requireTelegramAuth();
@@ -104,6 +106,7 @@ router.get("/gifts/catalog", giftController.getGiftCatalog);
 router.get("/gifts/image/:giftId", giftController.getGiftImage);
 router.get("/gifts/nft-image/:nftId", giftController.getNftImage);
 router.get("/gifts/nft-pattern/:nftId", giftController.getNftPattern);
+router.get("/hero-slides", publicController.getHeroSlides);
 router.get("/my-gifts", telegramAuthMiddleware, requireRegisteredUser, giftController.getMyGifts);
 router.get("/gifts/nft", telegramAuthMiddleware, requireRegisteredUser, giftController.getMyNftGifts);
 router.get("/gifts/nft/market", giftController.getNftMarketplace);
@@ -226,6 +229,7 @@ router.get(
   adminController.getPaymentCards,
 );
 router.get("/admin/static-gifts", authMiddleware, adminController.getStaticGifts);
+router.get("/admin/hero-slides", authMiddleware, adminController.getHeroSlides);
 router.post(
   "/admin/plans",
   authMiddleware,
@@ -243,6 +247,12 @@ router.post(
   authMiddleware,
   validate(createStaticGiftValidation),
   adminController.createStaticGift,
+);
+router.post(
+  "/admin/hero-slides",
+  authMiddleware,
+  validate(createHeroSlideValidation),
+  adminController.createHeroSlide,
 );
 router.patch(
   "/admin/plans/:id",
@@ -262,6 +272,12 @@ router.patch(
   validate(updateStaticGiftValidation),
   adminController.updateStaticGift,
 );
+router.patch(
+  "/admin/hero-slides/:id",
+  authMiddleware,
+  validate(updateHeroSlideValidation),
+  adminController.updateHeroSlide,
+);
 router.delete("/admin/plans/:id", authMiddleware, adminController.deletePlan);
 router.delete(
   "/admin/payment-cards/:id",
@@ -272,6 +288,11 @@ router.delete(
   "/admin/static-gifts/:id",
   authMiddleware,
   adminController.deleteStaticGift,
+);
+router.delete(
+  "/admin/hero-slides/:id",
+  authMiddleware,
+  adminController.deleteHeroSlide,
 );
 router.post(
   "/admin/payment-cards/:id/reset-limit",
@@ -374,4 +395,3 @@ router.post(
 );
 
 module.exports = router;
-

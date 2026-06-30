@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const Plan = require("../model/plan.model");
 const Order = require("../model/order.model");
 const User = require("../model/user.model");
+const HeroSlide = require("../model/hero-slide.model");
 const {
   getStarPricing,
   getGameStarsPaymentConfig,
@@ -122,6 +123,18 @@ function mapCatalog(plans) {
   return grouped;
 }
 
+function mapHeroSlide(doc) {
+  return {
+    _id: String(doc?._id || ""),
+    title: String(doc?.title || "").trim(),
+    imageUrl: String(doc?.imageUrl || "").trim(),
+    sortOrder: Number(doc?.sortOrder || 0),
+    isActive: Boolean(doc?.isActive),
+    createdAt: doc?.createdAt || null,
+    updatedAt: doc?.updatedAt || null,
+  };
+}
+
 function getTopSalesStartDate(period) {
   const now = new Date();
   if (period === "today") {
@@ -227,6 +240,17 @@ const getSettings = async (_, res) => {
     });
   } catch (error) {
     return response.serverError(res, "Settings olishda xatolik", error.message);
+  }
+};
+
+const getHeroSlides = async (_, res) => {
+  try {
+    const items = await HeroSlide.find({ isActive: true })
+      .sort({ sortOrder: 1, createdAt: -1 })
+      .lean();
+    return response.success(res, "Hero slides", items.map(mapHeroSlide));
+  } catch (error) {
+    return response.serverError(res, "Hero slides olishda xatolik", error.message);
   }
 };
 
@@ -474,6 +498,7 @@ module.exports = {
   health,
   getCatalog,
   getSettings,
+  getHeroSlides,
   getCardBinInfo,
   getTopSales,
   checkForceJoin,

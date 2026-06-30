@@ -162,6 +162,36 @@ const updateStaticGiftValidation = (req) => {
   return payload;
 };
 
+const createHeroSlideValidation = (req) => {
+  const { title, imageUrl, sortOrder, isActive } = req.body || {};
+
+  return {
+    title: typeof title === "undefined" ? "" : String(title).trim(),
+    imageUrl: requireText(imageUrl, "imageUrl"),
+    sortOrder:
+      typeof sortOrder === "undefined" ? 0 : requireNumber(sortOrder, "sortOrder"),
+    isActive: typeof isActive === "boolean" ? isActive : true,
+  };
+};
+
+const updateHeroSlideValidation = (req) => {
+  const { title, imageUrl, sortOrder, isActive } = req.body || {};
+  const payload = {};
+
+  if (typeof title !== "undefined") payload.title = String(title).trim();
+  if (typeof imageUrl !== "undefined") payload.imageUrl = requireText(imageUrl, "imageUrl");
+  if (typeof sortOrder !== "undefined") {
+    payload.sortOrder = requireNumber(sortOrder, "sortOrder");
+  }
+  if (typeof isActive !== "undefined") payload.isActive = Boolean(isActive);
+
+  if (Object.keys(payload).length === 0) {
+    throw new Error("Yangilash uchun kamida bitta field yuboring");
+  }
+
+  return payload;
+};
+
 module.exports = {
   loginValidation,
   createPlanValidation,
@@ -170,4 +200,6 @@ module.exports = {
   updatePaymentCardValidation,
   createStaticGiftValidation,
   updateStaticGiftValidation,
+  createHeroSlideValidation,
+  updateHeroSlideValidation,
 };

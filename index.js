@@ -107,6 +107,7 @@ app.use(
       "/gifts/image/",
       "/gifts/nft-image/",
       "/gifts/nft-pattern/",
+      "/hero-slides",
     ],
   }),
   createWebAppSessionGuard({
@@ -115,6 +116,7 @@ app.use(
       "/gifts/image/",
       "/gifts/nft-image/",
       "/gifts/nft-pattern/",
+      "/hero-slides",
     ],
   }),
   createRequestReplayGuard({
@@ -126,6 +128,7 @@ app.use(
       "/orders",
       "/balance/topup",
       "/gifts/",
+      "/admin/hero-slides",
       "/admin/login",
     ],
   }),

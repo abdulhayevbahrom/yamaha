@@ -5,6 +5,7 @@ const response = require("../utils/response");
 const Plan = require("../model/plan.model");
 const PaymentCard = require("../model/payment-card.model");
 const StaticGift = require("../model/static-gift.model");
+const HeroSlide = require("../model/hero-slide.model");
 const User = require("../model/user.model");
 const Order = require("../model/order.model");
 const UserGift = require("../model/user-gift.model");
@@ -1242,6 +1243,18 @@ function mapStaticGift(doc) {
   };
 }
 
+function mapHeroSlide(doc) {
+  return {
+    _id: String(doc?._id || ""),
+    title: normalizeString(doc?.title),
+    imageUrl: normalizeString(doc?.imageUrl),
+    sortOrder: Number(doc?.sortOrder || 0),
+    isActive: Boolean(doc?.isActive),
+    createdAt: doc?.createdAt || null,
+    updatedAt: doc?.updatedAt || null,
+  };
+}
+
 const getStaticGifts = async (_, res) => {
   try {
     const items = await StaticGift.find({})
@@ -1321,6 +1334,84 @@ const deleteStaticGift = async (req, res) => {
     return response.serverError(
       res,
       "Static gift o'chirishda xatolik",
+      error.message,
+    );
+  }
+};
+
+const getHeroSlides = async (_, res) => {
+  try {
+    const items = await HeroSlide.find({})
+      .sort({ sortOrder: 1, createdAt: -1 })
+      .lean();
+    return response.success(res, "Hero slides", items.map(mapHeroSlide));
+  } catch (error) {
+    return response.serverError(
+      res,
+      "Hero slide'larni olishda xatolik",
+      error.message,
+    );
+  }
+};
+
+const createHeroSlide = async (req, res) => {
+  try {
+    const payload = {
+      ...req.validated,
+      title: normalizeString(req.validated?.title),
+      imageUrl: normalizeString(req.validated?.imageUrl),
+    };
+    if (!payload.imageUrl) {
+      return response.error(res, "imageUrl required");
+    }
+    const created = await HeroSlide.create(payload);
+    return response.created(res, "Hero slide qo'shildi", mapHeroSlide(created));
+  } catch (error) {
+    return response.serverError(
+      res,
+      "Hero slide qo'shishda xatolik",
+      error.message,
+    );
+  }
+};
+
+const updateHeroSlide = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const payload = {
+      ...req.validated,
+    };
+    if (typeof payload.title !== "undefined") {
+      payload.title = normalizeString(payload.title);
+    }
+    if (typeof payload.imageUrl !== "undefined") {
+      payload.imageUrl = normalizeString(payload.imageUrl);
+    }
+    const updated = await HeroSlide.findByIdAndUpdate(id, payload, {
+      new: true,
+      runValidators: true,
+    }).lean();
+    if (!updated) return response.notFound(res, "Hero slide topilmadi");
+    return response.success(res, "Hero slide yangilandi", mapHeroSlide(updated));
+  } catch (error) {
+    return response.serverError(
+      res,
+      "Hero slide yangilashda xatolik",
+      error.message,
+    );
+  }
+};
+
+const deleteHeroSlide = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const deleted = await HeroSlide.findByIdAndDelete(id).lean();
+    if (!deleted) return response.notFound(res, "Hero slide topilmadi");
+    return response.success(res, "Hero slide o'chirildi", mapHeroSlide(deleted));
+  } catch (error) {
+    return response.serverError(
+      res,
+      "Hero slide o'chirishda xatolik",
       error.message,
     );
   }
@@ -1954,12 +2045,16 @@ module.exports = {
   updateSettings,
   getPaymentCards,
   getStaticGifts,
+  getHeroSlides,
   createPaymentCard,
   createStaticGift,
+  createHeroSlide,
   updatePaymentCard,
   updateStaticGift,
+  updateHeroSlide,
   deletePaymentCard,
   deleteStaticGift,
+  deleteHeroSlide,
   resetPaymentCardLimit,
   searchUsers,
   searchAssets,
@@ -1973,9 +2068,6 @@ module.exports = {
   getDiagnostics,
   getActiveUsers,
 };
-
-
-
 
 
 
