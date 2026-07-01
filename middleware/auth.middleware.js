@@ -25,22 +25,6 @@ module.exports = (req, res, next) => {
       return response.unauthorized(res, "Admin Telegram sessiyasi mos emas");
     }
 
-    const method = normalizeString(req.method).toUpperCase();
-    if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
-      const authDateSec = Number(req?.telegramAuth?.authDateSec || 0);
-      const maxAgeSec = Math.max(
-        30,
-        Number(process.env.TG_INIT_DATA_MAX_AGE_SEC_CRITICAL || 300),
-      );
-      const ageSec = Math.floor(Date.now() / 1000) - authDateSec;
-      if (!authDateSec || ageSec < -30 || ageSec > maxAgeSec) {
-        return response.unauthorized(
-          res,
-          "Admin amali uchun Telegram sessiyasini yangilang",
-          { code: "stale_admin_telegram_session" },
-        );
-      }
-    }
     req.admin = payload;
     next();
   } catch (error) {
