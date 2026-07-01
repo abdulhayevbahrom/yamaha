@@ -690,17 +690,12 @@ async function createBalanceTopup(req, res) {
     const reservation = await reservePaymentAmount({
       baseAmount: paymentMatchAmount,
       expiresAt,
-      allowOffset: paymentMethod === "card",
+      allowOffset: false,
     });
     if (!reservation) {
       await releasePaymentCardAllocation(paymentCardAllocation);
       paymentCardAllocation = null;
-      return response.error(
-        res,
-        paymentMethod === "bankomat"
-          ? "Bu summa hozir band. Boshqa summa kiriting"
-          : "Hozir barcha to'lov summalari band. Birozdan keyin qayta urinib ko'ring.",
-      );
+      return response.error(res, "Bu summa hozir band. Boshqa summa kiriting");
     }
     paymentReservationTokens = [reservation.token];
     paymentMatchAmount = reservation.amount;
