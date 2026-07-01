@@ -695,7 +695,9 @@ async function createBalanceTopup(req, res) {
     if (!reservation) {
       await releasePaymentCardAllocation(paymentCardAllocation);
       paymentCardAllocation = null;
-      return response.error(res, "Bu summa hozir band. Boshqa summa kiriting");
+      return response.error(res, "Bu summa hozir band. Boshqa summa kiriting", {
+        code: "BALANCE_AMOUNT_RESERVED",
+      });
     }
     paymentReservationTokens = [reservation.token];
     paymentMatchAmount = reservation.amount;
@@ -715,10 +717,9 @@ async function createBalanceTopup(req, res) {
         paymentReservationTokens = [];
         await releasePaymentCardAllocation(paymentCardAllocation);
         paymentCardAllocation = null;
-        return response.error(
-          res,
-          "Bu summa hozir band. Boshqa summa kiriting",
-        );
+        return response.error(res, "Bu summa hozir band. Boshqa summa kiriting", {
+          code: "BALANCE_AMOUNT_RESERVED",
+        });
       }
       paymentAlternateMatchAmount = alternateReservation.amount;
       paymentReservationTokens.push(alternateReservation.token);
