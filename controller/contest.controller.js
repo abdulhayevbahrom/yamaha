@@ -2,7 +2,9 @@ const response = require("../utils/response");
 const Contest = require("../model/contest.model");
 const {
   buildContestLeaderboard,
+  findContestUserRank,
   finalizeContestIfNeeded,
+  getContestLeaderboardLimit,
   getContestPhase,
   mapContest,
   normalizeString,
@@ -13,10 +15,7 @@ function sortPrizes(prizes = []) {
   return [...prizes]
     .map((item, index) => ({
       place: Number(item?.place || index + 1),
-      title: normalizeString(item?.title),
       giftId: normalizeString(item?.giftId),
-      giftName: normalizeString(item?.giftName),
-      giftEmoji: normalizeString(item?.giftEmoji) || "🎁",
       giftImageUrl: normalizeString(item?.giftImageUrl),
     }))
     .filter((item) => item.place > 0)
@@ -52,9 +51,10 @@ async function listContests(req, res, options = {}) {
           ? await buildContestLeaderboard(finalized)
           : null;
       const source = finalized || contest;
+      const limit = getContestLeaderboardLimit(source);
       items.push({
         ...mapContest(source),
-        leaderboard: stats?.leaderboard || [],
+        leaderboard: stats?.leaderboard?.slice(0, limit) || [],
       });
     }
 
@@ -68,7 +68,7 @@ async function listContests(req, res, options = {}) {
   }
 }
 
-const getCurrentContest = async (_, res) => {
+const getCurrentContest = async (req, res) => {
   try {
     const contest = await Contest.find({
       status: { $ne: "cancelled" },
@@ -93,12 +93,19 @@ const getCurrentContest = async (_, res) => {
     }
 
     const stats = await buildContestLeaderboard(activeContest);
+    const limit = getContestLeaderboardLimit(activeContest);
+    const myRank = findContestUserRank(
+      stats.leaderboard,
+      req?.telegramAuth?.tgUserId || req.headers["x-tg-user-id"],
+    );
+
     return response.success(res, "Contest", {
       contest: {
         ...mapContest(activeContest),
-        leaderboard: stats.leaderboard,
+        leaderboard: stats.leaderboard.slice(0, limit),
       },
-      leaderboard: stats.leaderboard,
+      leaderboard: stats.leaderboard.slice(0, limit),
+      myRank,
     });
   } catch (error) {
     return response.serverError(
@@ -133,12 +140,11 @@ const createContest = async (req, res) => {
 
     const created = await Contest.create({
       title: normalizeString(payload.title),
-      description: normalizeString(payload.description),
       startsAt,
       endsAt,
       winnerCount: Number(payload.winnerCount || prizes.length || 1),
+      leaderboardLimit: Number(payload.leaderboardLimit || 10),
       prizes,
-      bannerEmoji: normalizeString(payload.bannerEmoji) || "🏆",
       status: startMode === "now" ? "active" : "scheduled",
       createdBy: normalizeString(payload.createdBy),
       updatedBy: normalizeString(payload.updatedBy),
@@ -167,9 +173,6 @@ const updateContest = async (req, res) => {
     if (typeof payload.title !== "undefined") {
       payload.title = normalizeString(payload.title);
     }
-    if (typeof payload.description !== "undefined") {
-      payload.description = normalizeString(payload.description);
-    }
     if (typeof payload.startsAt !== "undefined" || typeof payload.endsAt !== "undefined") {
       const startsAt = payload.startsAt ? toDate(payload.startsAt) : contest.startsAt;
       const endsAt = payload.endsAt ? toDate(payload.endsAt) : contest.endsAt;
@@ -183,8 +186,8 @@ const updateContest = async (req, res) => {
     if (typeof payload.winnerCount !== "undefined") {
       payload.winnerCount = Number(payload.winnerCount || 0);
     }
-    if (typeof payload.bannerEmoji !== "undefined") {
-      payload.bannerEmoji = normalizeString(payload.bannerEmoji) || "🏆";
+    if (typeof payload.leaderboardLimit !== "undefined") {
+      payload.leaderboardLimit = Number(payload.leaderboardLimit || 0);
     }
     if (typeof payload.status !== "undefined") {
       payload.status = normalizeString(payload.status) || contest.status;

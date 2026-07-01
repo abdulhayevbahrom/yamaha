@@ -44,10 +44,7 @@ function getContestPublicStatus(contest, now = new Date()) {
 function mapContestPrize(doc = {}) {
   return {
     place: Number(doc.place || 0),
-    title: normalizeString(doc.title),
     giftId: normalizeString(doc.giftId),
-    giftName: normalizeString(doc.giftName),
-    giftEmoji: normalizeString(doc.giftEmoji) || "🎁",
     giftImageUrl: normalizeString(doc.giftImageUrl),
   };
 }
@@ -60,10 +57,7 @@ function mapContestWinner(doc = {}) {
     profileName: normalizeString(doc.profileName),
     totalSpent: Number(doc.totalSpent || 0),
     orderCount: Number(doc.orderCount || 0),
-    prizeTitle: normalizeString(doc.prizeTitle),
     giftId: normalizeString(doc.giftId),
-    giftName: normalizeString(doc.giftName),
-    giftEmoji: normalizeString(doc.giftEmoji) || "🎁",
     giftImageUrl: normalizeString(doc.giftImageUrl),
   };
 }
@@ -72,14 +66,14 @@ function mapContest(doc, options = {}) {
   if (!doc) return null;
   const now = options.now || new Date();
   const phase = getContestPhase(doc, now);
+  const winnerCount = Number(doc.winnerCount || 0);
   return {
     _id: String(doc._id || ""),
     title: normalizeString(doc.title),
-    description: normalizeString(doc.description),
     startsAt: doc.startsAt || null,
     endsAt: doc.endsAt || null,
-    bannerEmoji: normalizeString(doc.bannerEmoji) || "🏆",
-    winnerCount: Number(doc.winnerCount || 0),
+    winnerCount,
+    leaderboardLimit: Number(doc.leaderboardLimit || winnerCount || 10),
     prizes: Array.isArray(doc.prizes) ? doc.prizes.map(mapContestPrize) : [],
     status: phase,
     rawStatus: normalizeString(doc.status) || "scheduled",
@@ -92,6 +86,20 @@ function mapContest(doc, options = {}) {
     createdAt: doc.createdAt || null,
     updatedAt: doc.updatedAt || null,
   };
+}
+
+function getContestLeaderboardLimit(contest) {
+  const raw = Number(contest?.leaderboardLimit || 0);
+  if (Number.isFinite(raw) && raw > 0) return Math.floor(raw);
+  const winnerCount = Number(contest?.winnerCount || 0);
+  if (Number.isFinite(winnerCount) && winnerCount > 0) return Math.floor(winnerCount);
+  return 10;
+}
+
+function findContestUserRank(leaderboard, tgUserId) {
+  const target = normalizeString(tgUserId);
+  if (!target || !Array.isArray(leaderboard)) return null;
+  return leaderboard.find((item) => normalizeString(item?.tgUserId) === target) || null;
 }
 
 function buildContestWinnerPrizeMap(contest) {
@@ -246,10 +254,7 @@ function buildWinnerSnapshot(contest, leaderboard) {
       profileName: normalizeString(item.profileName),
       totalSpent: Number(item.totalSpent || 0),
       orderCount: Number(item.orderCount || 0),
-      prizeTitle: normalizeString(prize.title),
       giftId: normalizeString(prize.giftId),
-      giftName: normalizeString(prize.giftName),
-      giftEmoji: normalizeString(prize.giftEmoji) || "🎁",
       giftImageUrl: normalizeString(prize.giftImageUrl),
     };
   });
@@ -294,7 +299,9 @@ module.exports = {
   SUCCESS_STATUSES,
   buildContestLeaderboard,
   buildWinnerSnapshot,
+  findContestUserRank,
   finalizeContestIfNeeded,
+  getContestLeaderboardLimit,
   getContestPhase,
   getContestPublicStatus,
   mapContest,

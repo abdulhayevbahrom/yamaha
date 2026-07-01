@@ -9,24 +9,9 @@ const contestPrizeSchema = new Schema(
       required: true,
       min: 1,
     },
-    title: {
-      type: String,
-      default: "",
-      trim: true,
-    },
     giftId: {
       type: String,
       default: "",
-      trim: true,
-    },
-    giftName: {
-      type: String,
-      default: "",
-      trim: true,
-    },
-    giftEmoji: {
-      type: String,
-      default: "🎁",
       trim: true,
     },
     giftImageUrl: {
@@ -68,24 +53,9 @@ const contestWinnerSchema = new Schema(
       type: Number,
       default: 0,
     },
-    prizeTitle: {
-      type: String,
-      default: "",
-      trim: true,
-    },
     giftId: {
       type: String,
       default: "",
-      trim: true,
-    },
-    giftName: {
-      type: String,
-      default: "",
-      trim: true,
-    },
-    giftEmoji: {
-      type: String,
-      default: "🎁",
       trim: true,
     },
     giftImageUrl: {
@@ -104,11 +74,6 @@ const contestSchema = new Schema(
       required: true,
       trim: true,
     },
-    description: {
-      type: String,
-      default: "",
-      trim: true,
-    },
     startsAt: {
       type: Date,
       required: true,
@@ -124,14 +89,14 @@ const contestSchema = new Schema(
       default: 3,
       min: 1,
     },
+    leaderboardLimit: {
+      type: Number,
+      default: 10,
+      min: 1,
+    },
     prizes: {
       type: [contestPrizeSchema],
       default: [],
-    },
-    bannerEmoji: {
-      type: String,
-      default: "🏆",
-      trim: true,
     },
     status: {
       type: String,
