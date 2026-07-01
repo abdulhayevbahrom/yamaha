@@ -2,6 +2,7 @@ const router = require("express").Router();
 const publicController = require("../controller/public.controller");
 const orderController = require("../controller/order.controller");
 const adminController = require("../controller/admin.controller");
+const contestController = require("../controller/contest.controller");
 const userController = require("../controller/user.controller");
 const giftController = require("../controller/gift.controller");
 const authMiddleware = require("../middleware/auth.middleware");
@@ -23,6 +24,8 @@ const {
   updateStaticGiftValidation,
   createHeroSlideValidation,
   updateHeroSlideValidation,
+  createContestValidation,
+  updateContestValidation,
 } = require("../validations/admin.validation");
 
 const telegramAuthMiddleware = requireTelegramAuth();
@@ -108,6 +111,7 @@ router.get("/gifts/image/:giftId", giftController.getGiftImage);
 router.get("/gifts/nft-image/:nftId", giftController.getNftImage);
 router.get("/gifts/nft-pattern/:nftId", giftController.getNftPattern);
 router.get("/hero-slides", publicController.getHeroSlides);
+router.get("/contest/current", contestController.getCurrentContest);
 router.get("/my-gifts", telegramAuthMiddleware, requireRegisteredUser, giftController.getMyGifts);
 router.get("/gifts/nft", telegramAuthMiddleware, requireRegisteredUser, giftController.getMyNftGifts);
 router.get("/gifts/nft/market", giftController.getNftMarketplace);
@@ -231,6 +235,7 @@ router.get(
 );
 router.get("/admin/static-gifts", authMiddleware, adminController.getStaticGifts);
 router.get("/admin/hero-slides", authMiddleware, adminController.getHeroSlides);
+router.get("/admin/contests", authMiddleware, contestController.getAdminContests);
 router.post(
   "/admin/plans",
   authMiddleware,
@@ -254,6 +259,12 @@ router.post(
   authMiddleware,
   validate(createHeroSlideValidation),
   adminController.createHeroSlide,
+);
+router.post(
+  "/admin/contests",
+  authMiddleware,
+  validate(createContestValidation),
+  contestController.createContest,
 );
 router.patch(
   "/admin/plans/:id",
@@ -279,6 +290,12 @@ router.patch(
   validate(updateHeroSlideValidation),
   adminController.updateHeroSlide,
 );
+router.patch(
+  "/admin/contests/:id",
+  authMiddleware,
+  validate(updateContestValidation),
+  contestController.updateContest,
+);
 router.delete("/admin/plans/:id", authMiddleware, adminController.deletePlan);
 router.delete(
   "/admin/payment-cards/:id",
@@ -294,6 +311,11 @@ router.delete(
   "/admin/hero-slides/:id",
   authMiddleware,
   adminController.deleteHeroSlide,
+);
+router.delete(
+  "/admin/contests/:id",
+  authMiddleware,
+  contestController.deleteContest,
 );
 router.post(
   "/admin/payment-cards/:id/reset-limit",
