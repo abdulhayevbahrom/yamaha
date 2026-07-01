@@ -123,7 +123,6 @@ const emitUserUpdate = (tgUserId, payload = {}) => {
   if (!ioInstance || !tgUserId) return;
   ioInstance.to(userRoom(tgUserId)).emit("app:update", {
     scope: "user",
-    tgUserId: String(tgUserId),
     ...payload,
   });
 };

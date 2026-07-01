@@ -71,6 +71,7 @@ router.post(
 router.get("/reports", authMiddleware, orderController.getReports);
 router.get("/history", authMiddleware, orderController.getHistory);
 router.get("/me", telegramAuthMiddleware, requireRegisteredUser, userController.getMe);
+router.get("/balance", telegramAuthMiddleware, requireRegisteredUser, userController.getBalance);
 router.get(
   "/balance/:tgUserId",
   telegramAuthMiddleware,

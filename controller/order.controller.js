@@ -47,6 +47,7 @@ const {
 const {
   applyBalanceDeltaOnce,
 } = require("../services/balance-operation.service");
+const { sanitizePublicOrder } = require("../utils/public-payload");
 
 let sequence = 1;
 const PENDING_TTL_MS = 10 * 60 * 1000;
@@ -658,7 +659,7 @@ const createOrder = async (req, res) => {
     });
 
     sequence += 1;
-    return response.created(res, "Buyurtma yaratildi", order);
+    return response.created(res, "Buyurtma yaratildi", sanitizePublicOrder(order));
   } catch (error) {
     if (!createdOrder && paymentReservationToken) {
       await releasePaymentReservation(paymentReservationToken).catch(() => {});
@@ -1131,7 +1132,7 @@ const confirmUcOrder = async (req, res) => {
       return response.error(res, "O'yin orderini tasdiqlashda xatolik");
     }
 
-    return response.success(res, "O'yin orderi yakunlandi", result.order);
+    return response.success(res, "O'yin orderi yakunlandi", sanitizePublicOrder(result.order));
   } catch (error) {
     return response.serverError(
       res,
@@ -1161,7 +1162,7 @@ const cancelUcOrder = async (req, res) => {
       return response.error(res, "O'yin orderini bekor qilishda xatolik");
     }
 
-    return response.success(res, "O'yin orderi bekor qilindi", result.order);
+    return response.success(res, "O'yin orderi bekor qilindi", sanitizePublicOrder(result.order));
   } catch (error) {
     return response.serverError(
       res,
@@ -1188,7 +1189,7 @@ const cancelOrder = async (req, res) => {
       return response.error(res, "Orderni bekor qilishda xatolik");
     }
 
-    return response.success(res, "Order bekor qilindi", result.order);
+    return response.success(res, "Order bekor qilindi", sanitizePublicOrder(result.order));
   } catch (error) {
     return response.serverError(res, "Orderni bekor qilishda xatolik", error.message);
   }
@@ -1228,7 +1229,7 @@ const markAutobuyOrderCompleted = async (req, res) => {
     }
 
     if (order.status === "completed" && order.fulfillmentStatus === "success") {
-      return response.success(res, "Order allaqachon bajarilgan", order);
+      return response.success(res, "Order allaqachon bajarilgan", sanitizePublicOrder(order));
     }
 
     if (order.status !== "paid_auto_processed") {
@@ -1277,7 +1278,7 @@ const markAutobuyOrderCompleted = async (req, res) => {
       });
     }
 
-    return response.success(res, "Order bajarildi deb belgilandi", order);
+    return response.success(res, "Order bajarildi deb belgilandi", sanitizePublicOrder(order));
   } catch (error) {
     return response.serverError(
       res,
@@ -1304,14 +1305,14 @@ const confirmStarSellPayout = async (req, res) => {
       return response.success(
         res,
         "Order allaqachon tasdiqlangan",
-        result.order,
+        sanitizePublicOrder(result.order),
       );
     }
 
     return response.success(
       res,
       "Star sell bo'yicha pul o'tkazish tasdiqlandi",
-      result.order,
+      sanitizePublicOrder(result.order),
     );
   } catch (error) {
     return response.serverError(
@@ -1331,8 +1332,8 @@ const confirmNftWithdrawalPayout = async (req, res) => {
       if (result.reason === "not_nft_withdrawal") return response.error(res, "Bu order NFT yechib olish orderi emas");
       return response.error(res, "Order hali tasdiqlash uchun tayyor emas");
     }
-    if (result.alreadyCompleted) return response.success(res, "Order allaqachon tasdiqlangan", result.order);
-    return response.success(res, "NFT yechib olish bo'yicha pul o'tkazish tasdiqlandi", result.order);
+    if (result.alreadyCompleted) return response.success(res, "Order allaqachon tasdiqlangan", sanitizePublicOrder(result.order));
+    return response.success(res, "NFT yechib olish bo'yicha pul o'tkazish tasdiqlandi", sanitizePublicOrder(result.order));
   } catch (error) {
     return response.serverError(res, "NFT yechib olish tasdiqlashda xatolik", error.message);
   }
@@ -1358,14 +1359,14 @@ const cancelStarSellPayout = async (req, res) => {
       return response.success(
         res,
         "Order allaqachon bekor qilingan",
-        result.order,
+        sanitizePublicOrder(result.order),
       );
     }
 
     return response.success(
       res,
       "Star sell buyurtmasi bekor qilindi",
-      result.order,
+      sanitizePublicOrder(result.order),
     );
   } catch (error) {
     return response.serverError(
@@ -1386,8 +1387,8 @@ const cancelNftWithdrawalPayout = async (req, res) => {
       if (result.reason === "already_completed") return response.error(res, "Order allaqachon tasdiqlangan");
       return response.error(res, "Orderni bekor qilish hozir mumkin emas");
     }
-    if (result.alreadyCancelled) return response.success(res, "Order allaqachon bekor qilingan", result.order);
-    return response.success(res, "NFT yechib olish buyurtmasi bekor qilindi", result.order);
+    if (result.alreadyCancelled) return response.success(res, "Order allaqachon bekor qilingan", sanitizePublicOrder(result.order));
+    return response.success(res, "NFT yechib olish buyurtmasi bekor qilindi", sanitizePublicOrder(result.order));
   } catch (error) {
     return response.serverError(res, "NFT yechib olishni bekor qilishda xatolik", error.message);
   }
@@ -1409,4 +1410,3 @@ module.exports = {
   cancelUcOrder,
   cancelOrder,
 };
-

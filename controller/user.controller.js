@@ -8,6 +8,7 @@ const ReferralEarning = require("../model/referral-earning.model");
 const { getNextOrderId } = require("../services/order-id.service");
 const { emitUserUpdate } = require("../socket");
 const { getTelegramUserFromRequest } = require("../utils/tg-user");
+const { sanitizePublicOrder } = require("../utils/public-payload");
 const {
   releasePaymentCardAllocation,
   selectPaymentCardForType,
@@ -23,7 +24,6 @@ const {
 const {
   getBankomatTopupConfig,
   getReferralConfig,
-  getNftWithdrawalConfig,
 } = require("../services/settings.service");
 const { lookupCardBinInfo, normalizeScheme } = require("../services/card-bin.service");
 const { sendTelegramText } = require("../services/telegram-notify.service");
@@ -154,7 +154,6 @@ async function getMe(req, res) {
     const totalSpent = baseOrderSpent + giftSpent + nftBuySpent;
 
     return response.success(res, "Profile", {
-      ...user,
       isBlocked: Boolean(user?.isBlocked),
       blockedAt: user?.blockedAt || null,
       blockedReason: String(user?.blockedReason || ""),
@@ -301,10 +300,11 @@ async function getMyReferrals(req, res) {
     const items = referredUsers.map((referredUser) => {
       const earning = earningsMap.get(String(referredUser.tgUserId)) || {};
       const order = ordersMap.get(String(referredUser.tgUserId)) || {};
+      const username = String(referredUser.username || "").trim();
 
       return {
-        tgUserId: String(referredUser.tgUserId),
-        username: String(referredUser.username || ""),
+        username,
+        displayName: username ? `@${username}` : "Mijoz",
         referredAt: referredUser.referredAt || referredUser.createdAt || null,
         referralActivatedAt: referredUser.referralActivatedAt || null,
         totalOrders: Number(order.totalOrders || 0),
@@ -345,25 +345,16 @@ async function getMyReferrals(req, res) {
 
 async function getBalance(req, res) {
   try {
-    const tgUserId = String(
-      req.params?.tgUserId || req.query?.tgUserId || "",
-    ).trim();
     const authUserId = normalizeString(req?.telegramAuth?.tgUserId);
 
-    if (!tgUserId) {
+    if (!authUserId) {
       return response.error(
         res,
         "Telegram profilingiz aniqlanmadi. Ilovani qayta ochib ko'ring.",
       );
     }
-    if (authUserId && authUserId !== tgUserId) {
-      return response.forbidden(
-        res,
-        "Faqat o'zingizning balansingizni ko'rishingiz mumkin",
-      );
-    }
 
-    let user = await User.findOne({ tgUserId }).lean();
+    let user = await User.findOne({ tgUserId: authUserId }).lean();
 
     // Legacy users: nftEarningsBalance field was introduced later.
     // Recover only when the field is missing, not when it is legitimately 0.
@@ -373,7 +364,7 @@ async function getBalance(req, res) {
       const legacyRows = await UserNft.aggregate([
         {
           $match: {
-            lastSellerTgUserId: String(tgUserId),
+            lastSellerTgUserId: String(authUserId),
             lastSellerNetUzs: { $gt: 0 },
           },
         },
@@ -387,19 +378,15 @@ async function getBalance(req, res) {
       const recovered = Math.max(0, Math.round(Number(legacyRows?.[0]?.total || 0)));
       if (recovered > 0) {
         user = await User.findOneAndUpdate(
-          { tgUserId },
+          { tgUserId: authUserId },
           { $set: { nftEarningsBalance: recovered } },
           { new: true },
         ).lean();
       }
     }
 
-    const nftWithdrawalConfig = await getNftWithdrawalConfig();
     return response.success(res, "Balance", {
-      tgUserId,
       balance: Number(user?.balance || 0),
-      nftEarningsBalance: Number(user?.nftEarningsBalance || 0),
-      nftWithdrawalConfig,
     });
   } catch (error) {
     return response.serverError(res, "Balance olishda xatolik", error.message);
@@ -430,7 +417,43 @@ async function getMyOrders(req, res) {
     );
 
     const [orders, userGifts, acceptedOffers, marketSales] = await Promise.all([
-      Order.find({ tgUserId: tgUser.tgUserId }).sort({ createdAt: -1 }).limit(250).lean(),
+      Order.find({ tgUserId: tgUser.tgUserId })
+        .sort({ createdAt: -1 })
+        .limit(250)
+        .select({
+          orderId: 1,
+          product: 1,
+          planCode: 1,
+          customAmount: 1,
+          username: 1,
+          playerId: 1,
+          zoneId: 1,
+          profileName: 1,
+          paymentCardSnapshot: 1,
+          paymentMethod: 1,
+          sellCardNumber: 1,
+          sellPricePerStar: 1,
+          starsAmount: 1,
+          paymentGrossAmount: 1,
+          balanceCreditAmount: 1,
+          paymentFeePercent: 1,
+          expectedAmount: 1,
+          paymentMatchAmount: 1,
+          paymentAlternateMatchAmount: 1,
+          paidAmount: 1,
+          paidAt: 1,
+          status: 1,
+          fulfillmentStatus: 1,
+          completionMode: 1,
+          fulfillmentError: 1,
+          fragmentTx: 1,
+          fulfillmentStartedAt: 1,
+          fulfilledAt: 1,
+          expiresAt: 1,
+          createdAt: 1,
+          updatedAt: 1,
+        })
+        .lean(),
       UserGift.find({ tgUserId: tgUser.tgUserId })
         .sort({ createdAt: -1 })
         .limit(250)
@@ -503,7 +526,7 @@ async function getMyOrders(req, res) {
     );
 
     const orderItems = orders.map((item) => ({
-      ...item,
+      ...(sanitizePublicOrder(item) || {}),
       sourceType: "order",
     }));
 
@@ -753,7 +776,11 @@ async function createBalanceTopup(req, res) {
       product: order.product,
     });
 
-    return response.created(res, "Topup order yaratildi", order);
+    return response.created(
+      res,
+      "Topup order yaratildi",
+      sanitizePublicOrder(order),
+    );
   } catch (error) {
     if (!createdOrder && paymentReservationTokens.length) {
       await Promise.all(
