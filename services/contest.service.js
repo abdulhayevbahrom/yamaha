@@ -75,8 +75,15 @@ function mapContestWinner(doc = {}) {
     profileName: normalizeString(doc.profileName),
     totalSpent: Number(doc.totalSpent || 0),
     orderCount: Number(doc.orderCount || 0),
+    prizeType:
+      normalizeString(doc.prizeType).toLowerCase() === "nft" || normalizeString(doc.nftId)
+        ? "nft"
+        : "gift",
     giftId: normalizeString(doc.giftId),
+    nftId: normalizeString(doc.nftId),
+    prizeTitle: normalizeString(doc.prizeTitle || doc.title),
     giftImageUrl: normalizeString(doc.giftImageUrl),
+    patternImageUrl: normalizeString(doc.patternImageUrl),
   };
 }
 
@@ -405,8 +412,15 @@ function buildWinnerSnapshot(contest, leaderboard) {
       profileName: normalizeString(item.profileName),
       totalSpent: Number(item.totalSpent || 0),
       orderCount: Number(item.orderCount || 0),
+      prizeType:
+        normalizeString(prize.prizeType).toLowerCase() === "nft" || normalizeString(prize.nftId)
+          ? "nft"
+          : "gift",
       giftId: normalizeString(prize.giftId),
+      nftId: normalizeString(prize.nftId),
+      prizeTitle: normalizeString(prize.title),
       giftImageUrl: normalizeString(prize.giftImageUrl),
+      patternImageUrl: normalizeString(prize.patternImageUrl),
     };
   });
 }

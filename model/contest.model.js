@@ -83,12 +83,33 @@ const contestWinnerSchema = new Schema(
       type: Number,
       default: 0,
     },
+    prizeType: {
+      type: String,
+      enum: ["gift", "nft"],
+      default: "gift",
+      trim: true,
+    },
     giftId: {
       type: String,
       default: "",
       trim: true,
     },
+    nftId: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    prizeTitle: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     giftImageUrl: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    patternImageUrl: {
       type: String,
       default: "",
       trim: true,
