@@ -4,6 +4,7 @@ const {
   buildContestLeaderboard,
   findContestUserRank,
   finalizeContestIfNeeded,
+  getContestEligibleProducts,
   getContestLeaderboardLimit,
   getContestPhase,
   mapContest,
@@ -20,6 +21,10 @@ function sortPrizes(prizes = []) {
     }))
     .filter((item) => item.place > 0)
     .sort((left, right) => left.place - right.place);
+}
+
+function sortEligibleProducts(products = []) {
+  return getContestEligibleProducts({ eligibleProducts: products });
 }
 
 function validateContestWindow(startAt, endAt) {
@@ -43,20 +48,21 @@ async function listContests(req, res, options = {}) {
       .sort({ startsAt: -1, createdAt: -1 })
       .lean();
 
-    const items = [];
-    for (const contest of contests) {
-      const finalized = await finalizeContestIfNeeded(contest);
-      const stats =
-        finalized && getContestPhase(finalized) === "active"
-          ? await buildContestLeaderboard(finalized)
-          : null;
-      const source = finalized || contest;
-      const limit = getContestLeaderboardLimit(source);
-      items.push({
-        ...mapContest(source),
-        leaderboard: stats?.leaderboard?.slice(0, limit) || [],
-      });
-    }
+    const items = await Promise.all(
+      contests.map(async (contest) => {
+        const finalized = await finalizeContestIfNeeded(contest);
+        const source = finalized || contest;
+        const stats =
+          source && getContestPhase(source) === "active"
+            ? await buildContestLeaderboard(source)
+            : null;
+        const limit = getContestLeaderboardLimit(source);
+        return {
+          ...mapContest(source),
+          leaderboard: stats?.leaderboard?.slice(0, limit) || [],
+        };
+      }),
+    );
 
     return response.success(res, options.message || "Contests", items);
   } catch (error) {
@@ -144,6 +150,7 @@ const createContest = async (req, res) => {
       endsAt,
       winnerCount: Number(payload.winnerCount || prizes.length || 1),
       leaderboardLimit: Number(payload.leaderboardLimit || 10),
+      eligibleProducts: sortEligibleProducts(payload.eligibleProducts),
       prizes,
       status: startMode === "now" ? "active" : "scheduled",
       createdBy: normalizeString(payload.createdBy),
@@ -188,6 +195,9 @@ const updateContest = async (req, res) => {
     }
     if (typeof payload.leaderboardLimit !== "undefined") {
       payload.leaderboardLimit = Number(payload.leaderboardLimit || 0);
+    }
+    if (typeof payload.eligibleProducts !== "undefined") {
+      payload.eligibleProducts = sortEligibleProducts(payload.eligibleProducts);
     }
     if (typeof payload.status !== "undefined") {
       payload.status = normalizeString(payload.status) || contest.status;

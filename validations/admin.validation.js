@@ -22,6 +22,7 @@ function normalizeCardNumber(value) {
 const validCategories = ["star", "premium", "uc", "freefire", "mlbb"];
 const validPaymentCardTypes = ["purchase", "balance_topup"];
 const validContestModes = ["now", "scheduled"];
+const validContestProducts = ["star", "premium", "uc", "freefire", "mlbb", "gift", "nft"];
 
 function normalizeContestPrizes(value) {
   if (!Array.isArray(value)) {
@@ -48,6 +49,31 @@ function normalizeContestPrizes(value) {
   }
 
   return prizes;
+}
+
+function normalizeContestProducts(value) {
+  if (!Array.isArray(value)) {
+    throw new Error("eligibleProducts array bo'lishi kerak");
+  }
+
+  const products = Array.from(
+    new Set(
+      value
+        .map((item) => String(item || "").trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  );
+
+  if (!products.length) {
+    throw new Error("Kamida bitta mahsulot tanlang");
+  }
+
+  const invalid = products.find((item) => !validContestProducts.includes(item));
+  if (invalid) {
+    throw new Error(`eligibleProducts noto'g'ri: ${invalid}`);
+  }
+
+  return products;
 }
 
 const loginValidation = (req) => {
@@ -228,6 +254,7 @@ const createContestValidation = (req) => {
     endsAt,
     winnerCount,
     leaderboardLimit,
+    eligibleProducts,
     prizes,
     createdBy,
     updatedBy,
@@ -250,6 +277,7 @@ const createContestValidation = (req) => {
       typeof leaderboardLimit === "undefined"
         ? 10
         : requireNumber(leaderboardLimit, "leaderboardLimit"),
+    eligibleProducts: normalizeContestProducts(eligibleProducts),
     prizes: normalizeContestPrizes(prizes),
     createdBy: typeof createdBy === "undefined" ? "" : String(createdBy).trim(),
     updatedBy: typeof updatedBy === "undefined" ? "" : String(updatedBy).trim(),
@@ -269,13 +297,14 @@ const createContestValidation = (req) => {
   return payload;
 };
 
-  const updateContestValidation = (req) => {
+const updateContestValidation = (req) => {
   const {
     title,
     startsAt,
     endsAt,
     winnerCount,
     leaderboardLimit,
+    eligibleProducts,
     prizes,
     status,
   } = req.body || {};
@@ -292,6 +321,9 @@ const createContestValidation = (req) => {
     if (!Number.isFinite(payload.leaderboardLimit) || payload.leaderboardLimit <= 0) {
       throw new Error("leaderboardLimit 1 dan katta bo'lishi kerak");
     }
+  }
+  if (typeof eligibleProducts !== "undefined") {
+    payload.eligibleProducts = normalizeContestProducts(eligibleProducts);
   }
   if (typeof prizes !== "undefined") payload.prizes = normalizeContestPrizes(prizes);
   if (typeof status !== "undefined") {

@@ -94,6 +94,10 @@ const contestSchema = new Schema(
       default: 10,
       min: 1,
     },
+    eligibleProducts: {
+      type: [String],
+      default: [],
+    },
     prizes: {
       type: [contestPrizeSchema],
       default: [],

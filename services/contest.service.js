@@ -1,8 +1,13 @@
 const Contest = require("../model/contest.model");
+const NftOffer = require("../model/nft-offer.model");
 const Order = require("../model/order.model");
+const UserGift = require("../model/user-gift.model");
+const UserNft = require("../model/user-nft.model");
 const User = require("../model/user.model");
 
 const CONTEST_ORDER_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb"];
+const CONTEST_EXTRA_PRODUCTS = ["gift", "nft"];
+const CONTEST_ELIGIBLE_PRODUCTS = [...CONTEST_ORDER_PRODUCTS, ...CONTEST_EXTRA_PRODUCTS];
 const SUCCESS_STATUSES = ["paid_auto_processed", "completed"];
 
 function normalizeString(value) {
@@ -74,6 +79,7 @@ function mapContest(doc, options = {}) {
     endsAt: doc.endsAt || null,
     winnerCount,
     leaderboardLimit: Number(doc.leaderboardLimit || winnerCount || 10),
+    eligibleProducts: getContestEligibleProducts(doc),
     prizes: Array.isArray(doc.prizes) ? doc.prizes.map(mapContestPrize) : [],
     status: phase,
     rawStatus: normalizeString(doc.status) || "scheduled",
@@ -100,6 +106,20 @@ function findContestUserRank(leaderboard, tgUserId) {
   const target = normalizeString(tgUserId);
   if (!target || !Array.isArray(leaderboard)) return null;
   return leaderboard.find((item) => normalizeString(item?.tgUserId) === target) || null;
+}
+
+function getContestEligibleProducts(contest) {
+  const selected = Array.isArray(contest?.eligibleProducts)
+    ? contest.eligibleProducts
+    : [];
+  const normalized = Array.from(
+    new Set(
+      selected
+        .map((item) => normalizeString(item).toLowerCase())
+        .filter((item) => CONTEST_ELIGIBLE_PRODUCTS.includes(item)),
+    ),
+  );
+  return normalized.length ? normalized : [...CONTEST_ORDER_PRODUCTS];
 }
 
 function buildContestWinnerPrizeMap(contest) {
@@ -134,46 +154,163 @@ async function buildContestLeaderboard(contest) {
     };
   }
 
-  const orders = await Order.find({
-    product: { $in: CONTEST_ORDER_PRODUCTS },
-    status: { $in: SUCCESS_STATUSES },
-    createdAt: { $lte: endsAt },
-  })
-    .select({
-      tgUserId: 1,
-      tgUsername: 1,
-      profileName: 1,
-      expectedAmount: 1,
-      paidAmount: 1,
-      paidAt: 1,
-      createdAt: 1,
-      orderId: 1,
-      product: 1,
-    })
-    .lean();
-
-  const relevantOrders = orders
-    .map((order) => {
-      const paidAt = toDate(order?.paidAt);
-      const createdAt = toDate(order?.createdAt);
-      const eventTime = paidAt || createdAt;
-      if (!eventTime) return null;
-      if (eventTime.getTime() < startsAt.getTime()) return null;
-      if (eventTime.getTime() > endsAt.getTime()) return null;
-      return {
-        ...order,
-        eventTime,
-      };
-    })
-    .filter(Boolean);
-
-  const tgUserIds = Array.from(
-    new Set(
-      relevantOrders
-        .map((order) => normalizeString(order?.tgUserId))
-        .filter(Boolean),
-    ),
+  const eligibleProducts = getContestEligibleProducts(contest);
+  const selectedOrderProducts = eligibleProducts.filter((item) =>
+    CONTEST_ORDER_PRODUCTS.includes(item),
   );
+  const includeGifts = eligibleProducts.includes("gift");
+  const includeNfts = eligibleProducts.includes("nft");
+
+  const [orders, giftPurchases, acceptedOffers, nftSales] = await Promise.all([
+    selectedOrderProducts.length
+      ? Order.find({
+          product: { $in: selectedOrderProducts },
+          status: { $in: SUCCESS_STATUSES },
+          createdAt: { $lte: endsAt },
+        })
+          .select({
+            tgUserId: 1,
+            tgUsername: 1,
+            profileName: 1,
+            expectedAmount: 1,
+            paidAmount: 1,
+            paidAt: 1,
+            createdAt: 1,
+            product: 1,
+          })
+          .lean()
+      : Promise.resolve([]),
+    includeGifts
+      ? UserGift.find({
+          priceUzs: { $gt: 0 },
+          createdAt: { $gte: startsAt, $lte: endsAt },
+        })
+          .select({
+            tgUserId: 1,
+            tgUsername: 1,
+            title: 1,
+            priceUzs: 1,
+            createdAt: 1,
+          })
+          .lean()
+      : Promise.resolve([]),
+    includeNfts
+      ? NftOffer.find({
+          status: "accepted",
+          offeredPriceUzs: { $gt: 0 },
+          acceptedAt: { $gte: startsAt, $lte: endsAt },
+        })
+          .select({
+            nftId: 1,
+            buyerTgUserId: 1,
+            buyerUsername: 1,
+            buyerProfileName: 1,
+            offeredPriceUzs: 1,
+            acceptedAt: 1,
+          })
+          .lean()
+      : Promise.resolve([]),
+    includeNfts
+      ? UserNft.find({
+          lastSoldPriceUzs: { $gt: 0 },
+          lastSoldAt: { $gte: startsAt, $lte: endsAt },
+        })
+          .select({
+            nftId: 1,
+            ownerTgUserId: 1,
+            ownerUsername: 1,
+            ownerName: 1,
+            lastBuyerTgUserId: 1,
+            lastSoldPriceUzs: 1,
+            lastSoldAt: 1,
+          })
+          .lean()
+      : Promise.resolve([]),
+  ]);
+
+  const acceptedOfferKeyMap = new Map();
+  acceptedOffers.forEach((offer) => {
+    const key = [
+      normalizeString(offer?.nftId),
+      normalizeString(offer?.buyerTgUserId),
+      Number(offer?.offeredPriceUzs || 0),
+    ].join(":");
+    const existing = acceptedOfferKeyMap.get(key) || [];
+    existing.push(toDate(offer?.acceptedAt)?.getTime() || 0);
+    acceptedOfferKeyMap.set(key, existing);
+  });
+
+  const events = [
+    ...orders
+      .map((order) => {
+        const paidAt = toDate(order?.paidAt);
+        const createdAt = toDate(order?.createdAt);
+        const eventTime = paidAt || createdAt;
+        if (!eventTime) return null;
+        if (eventTime.getTime() < startsAt.getTime()) return null;
+        if (eventTime.getTime() > endsAt.getTime()) return null;
+        return {
+          tgUserId: normalizeString(order?.tgUserId),
+          username: normalizeUsername(order?.tgUsername),
+          profileName: normalizeString(order?.profileName),
+          amount: Number(order?.paidAmount || order?.expectedAmount || 0),
+          eventTime,
+        };
+      })
+      .filter(Boolean),
+    ...giftPurchases
+      .map((gift) => {
+        const eventTime = toDate(gift?.createdAt);
+        if (!eventTime) return null;
+        return {
+          tgUserId: normalizeString(gift?.tgUserId),
+          username: normalizeUsername(gift?.tgUsername),
+          profileName: "",
+          amount: Number(gift?.priceUzs || 0),
+          eventTime,
+        };
+      })
+      .filter((item) => item && item.amount > 0),
+    ...acceptedOffers
+      .map((offer) => {
+        const eventTime = toDate(offer?.acceptedAt);
+        if (!eventTime) return null;
+        return {
+          tgUserId: normalizeString(offer?.buyerTgUserId),
+          username: normalizeUsername(offer?.buyerUsername),
+          profileName: normalizeString(offer?.buyerProfileName),
+          amount: Number(offer?.offeredPriceUzs || 0),
+          eventTime,
+        };
+      })
+      .filter((item) => item && item.amount > 0),
+    ...nftSales
+      .map((sale) => {
+        const eventTime = toDate(sale?.lastSoldAt);
+        if (!eventTime) return null;
+        const tgUserId =
+          normalizeString(sale?.lastBuyerTgUserId) || normalizeString(sale?.ownerTgUserId);
+        const dedupeKey = [
+          normalizeString(sale?.nftId),
+          tgUserId,
+          Number(sale?.lastSoldPriceUzs || 0),
+        ].join(":");
+        const acceptedTimes = acceptedOfferKeyMap.get(dedupeKey) || [];
+        if (acceptedTimes.some((time) => Math.abs(time - eventTime.getTime()) <= 10000)) {
+          return null;
+        }
+        return {
+          tgUserId,
+          username: normalizeUsername(sale?.ownerUsername),
+          profileName: normalizeString(sale?.ownerName),
+          amount: Number(sale?.lastSoldPriceUzs || 0),
+          eventTime,
+        };
+      })
+      .filter((item) => item && item.amount > 0),
+  ];
+
+  const tgUserIds = Array.from(new Set(events.map((item) => item.tgUserId).filter(Boolean)));
   const users = tgUserIds.length
     ? await User.find({ tgUserId: { $in: tgUserIds } })
         .select({ tgUserId: 1, username: 1, profileName: 1 })
@@ -185,32 +322,33 @@ async function buildContestLeaderboard(contest) {
 
   const grouped = new Map();
 
-  relevantOrders.forEach((order) => {
-    const tgUserId = normalizeString(order?.tgUserId);
+  events.forEach((event) => {
+    const tgUserId = normalizeString(event?.tgUserId);
     const user = userMap.get(tgUserId) || null;
-    const username = normalizeUsername(user?.username || order?.tgUsername);
-    const profileName = normalizeString(user?.profileName || order?.profileName);
+    const username = normalizeUsername(user?.username || event?.username);
+    const profileName = normalizeString(user?.profileName || event?.profileName);
     const displayName =
       profileName || (username ? `@${username}` : tgUserId) || tgUserId;
-    const amount = Number(order?.paidAmount || order?.expectedAmount || 0);
-    const current = grouped.get(tgUserId || `guest:${normalizeString(order?.tgUsername)}`);
+    const amount = Number(event?.amount || 0);
+    if (amount <= 0) return;
+    const current = grouped.get(tgUserId || `guest:${normalizeString(event?.username)}`);
 
     if (!current) {
-      grouped.set(tgUserId || `guest:${normalizeString(order?.tgUsername)}`, {
+      grouped.set(tgUserId || `guest:${normalizeString(event?.username)}`, {
         tgUserId,
         username,
         profileName: displayName,
         totalSpent: amount,
         orderCount: 1,
-        lastOrderAt: order.eventTime.getTime(),
+        lastOrderAt: event.eventTime.getTime(),
       });
       return;
     }
 
     current.totalSpent += amount;
     current.orderCount += 1;
-    if (order.eventTime.getTime() > current.lastOrderAt) {
-      current.lastOrderAt = order.eventTime.getTime();
+    if (event.eventTime.getTime() > current.lastOrderAt) {
+      current.lastOrderAt = event.eventTime.getTime();
       current.username = username || current.username;
       current.profileName = displayName || current.profileName;
     }
@@ -295,7 +433,9 @@ async function finalizeContestIfNeeded(contestDoc) {
 }
 
 module.exports = {
+  CONTEST_ELIGIBLE_PRODUCTS,
   CONTEST_ORDER_PRODUCTS,
+  getContestEligibleProducts,
   SUCCESS_STATUSES,
   buildContestLeaderboard,
   buildWinnerSnapshot,
