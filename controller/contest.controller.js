@@ -1,5 +1,6 @@
 const response = require("../utils/response");
 const Contest = require("../model/contest.model");
+const UserNft = require("../model/user-nft.model");
 const {
   buildContestLeaderboard,
   findContestUserRank,
@@ -12,13 +13,101 @@ const {
   toDate,
 } = require("../services/contest.service");
 
-function sortPrizes(prizes = []) {
-  return [...prizes]
-    .map((item, index) => ({
-      place: Number(item?.place || index + 1),
+function buildContestNftPrizePayload(doc = {}) {
+  const normalizedNftId = normalizeString(doc?.nftId || doc?.giftId);
+  return {
+    prizeType: "nft",
+    giftId: normalizeString(doc?.giftId),
+    nftId: normalizedNftId,
+    title: normalizeString(doc?.title) || "NFT Gift",
+    giftImageUrl: normalizedNftId
+      ? `/api/gifts/nft-image/${encodeURIComponent(normalizedNftId)}`
+      : normalizeString(doc?.giftImageUrl),
+    patternImageUrl:
+      normalizeString(doc?.patternAssetStatus) === "available" && normalizedNftId
+        ? `/api/gifts/nft-pattern/${encodeURIComponent(normalizedNftId)}`
+        : "",
+    backdropColors: {
+      center: normalizeString(doc?.backdropColors?.center) || "#346d2b",
+      edge: normalizeString(doc?.backdropColors?.edge) || "#2d5f24",
+      pattern: normalizeString(doc?.backdropColors?.pattern) || "#8ec95d",
+      text: normalizeString(doc?.backdropColors?.text) || "#eaffdc",
+    },
+  };
+}
+
+async function enrichContestPrize(item = {}) {
+  const prizeType =
+    normalizeString(item?.prizeType).toLowerCase() === "nft" || normalizeString(item?.nftId)
+      ? "nft"
+      : "gift";
+
+  if (prizeType !== "nft") {
+    return {
+      place: Number(item?.place || 0),
+      prizeType: "gift",
       giftId: normalizeString(item?.giftId),
+      nftId: "",
+      title: normalizeString(item?.title),
       giftImageUrl: normalizeString(item?.giftImageUrl),
-    }))
+      patternImageUrl: "",
+      backdropColors: {
+        center: "",
+        edge: "",
+        pattern: "",
+        text: "",
+      },
+    };
+  }
+
+  const nftId = normalizeString(item?.nftId || item?.giftId);
+  if (!nftId) {
+    return {
+      place: Number(item?.place || 0),
+      prizeType: "nft",
+      giftId: "",
+      nftId: "",
+      title: normalizeString(item?.title) || "NFT Gift",
+      giftImageUrl: normalizeString(item?.giftImageUrl),
+      patternImageUrl: "",
+      backdropColors: {
+        center: "#346d2b",
+        edge: "#2d5f24",
+        pattern: "#8ec95d",
+        text: "#eaffdc",
+      },
+    };
+  }
+
+  const nftDoc = await UserNft.findOne({ nftId })
+    .select({
+      nftId: 1,
+      giftId: 1,
+      title: 1,
+      patternAssetStatus: 1,
+      backdropColors: 1,
+    })
+    .lean();
+
+  const normalized = nftDoc ? buildContestNftPrizePayload(nftDoc) : buildContestNftPrizePayload(item);
+  return {
+    place: Number(item?.place || 0),
+    ...normalized,
+  };
+}
+
+async function sortPrizes(prizes = []) {
+  const normalized = await Promise.all(
+    [...prizes].map(async (item, index) => {
+      const enriched = await enrichContestPrize(item);
+      return {
+        ...enriched,
+        place: Number(item?.place || enriched.place || index + 1),
+      };
+    }),
+  );
+
+  return normalized
     .filter((item) => item.place > 0)
     .sort((left, right) => left.place - right.place);
 }
@@ -139,7 +228,7 @@ const createContest = async (req, res) => {
         ? validateContestWindow(now, payload.endsAt)
         : validateContestWindow(payload.startsAt, payload.endsAt);
 
-    const prizes = sortPrizes(payload.prizes || []);
+    const prizes = await sortPrizes(payload.prizes || []);
     if (!prizes.length) {
       return response.error(res, "Kamida bitta prize kiriting");
     }
@@ -188,7 +277,7 @@ const updateContest = async (req, res) => {
       payload.endsAt = window.endsAt;
     }
     if (typeof payload.prizes !== "undefined") {
-      payload.prizes = sortPrizes(payload.prizes);
+      payload.prizes = await sortPrizes(payload.prizes);
     }
     if (typeof payload.winnerCount !== "undefined") {
       payload.winnerCount = Number(payload.winnerCount || 0);

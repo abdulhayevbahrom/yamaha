@@ -49,8 +49,21 @@ function getContestPublicStatus(contest, now = new Date()) {
 function mapContestPrize(doc = {}) {
   return {
     place: Number(doc.place || 0),
+    prizeType:
+      normalizeString(doc.prizeType).toLowerCase() === "nft" || normalizeString(doc.nftId)
+        ? "nft"
+        : "gift",
     giftId: normalizeString(doc.giftId),
+    nftId: normalizeString(doc.nftId),
+    title: normalizeString(doc.title),
     giftImageUrl: normalizeString(doc.giftImageUrl),
+    patternImageUrl: normalizeString(doc.patternImageUrl),
+    backdropColors: {
+      center: normalizeString(doc?.backdropColors?.center) || "",
+      edge: normalizeString(doc?.backdropColors?.edge) || "",
+      pattern: normalizeString(doc?.backdropColors?.pattern) || "",
+      text: normalizeString(doc?.backdropColors?.text) || "",
+    },
   };
 }
 

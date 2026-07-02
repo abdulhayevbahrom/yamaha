@@ -9,7 +9,23 @@ const contestPrizeSchema = new Schema(
       required: true,
       min: 1,
     },
+    prizeType: {
+      type: String,
+      enum: ["gift", "nft"],
+      default: "gift",
+      trim: true,
+    },
     giftId: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    nftId: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    title: {
       type: String,
       default: "",
       trim: true,
@@ -18,6 +34,20 @@ const contestPrizeSchema = new Schema(
       type: String,
       default: "",
       trim: true,
+    },
+    patternImageUrl: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    backdropColors: {
+      type: {
+        center: { type: String, default: "", trim: true },
+        edge: { type: String, default: "", trim: true },
+        pattern: { type: String, default: "", trim: true },
+        text: { type: String, default: "", trim: true },
+      },
+      default: () => ({}),
     },
   },
   { _id: false },

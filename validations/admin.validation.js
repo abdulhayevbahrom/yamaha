@@ -32,9 +32,29 @@ function normalizeContestPrizes(value) {
   const prizes = value
     .map((item, index) => {
       const place = requireNumber(item?.place ?? index + 1, "prize place");
+      const prizeType =
+        String(item?.prizeType || (String(item?.nftId || "").trim() ? "nft" : "gift"))
+          .trim()
+          .toLowerCase() === "nft"
+          ? "nft"
+          : "gift";
       return {
         place,
-        giftId: typeof item?.giftId === "undefined" ? "" : String(item.giftId).trim(),
+        prizeType,
+        giftId:
+          prizeType === "gift"
+            ? typeof item?.giftId === "undefined"
+              ? ""
+              : String(item.giftId).trim()
+            : typeof item?.giftId === "undefined"
+              ? ""
+              : String(item.giftId).trim(),
+        nftId:
+          prizeType === "nft"
+            ? typeof item?.nftId === "undefined"
+              ? ""
+              : String(item.nftId).trim()
+            : "",
         giftImageUrl:
           typeof item?.giftImageUrl === "undefined"
             ? ""
@@ -46,6 +66,19 @@ function normalizeContestPrizes(value) {
 
   if (!prizes.length) {
     throw new Error("Kamida bitta prize kerak");
+  }
+
+  const invalid = prizes.find(
+    (item) =>
+      (item.prizeType === "gift" && !item.giftId) ||
+      (item.prizeType === "nft" && !item.nftId),
+  );
+  if (invalid) {
+    throw new Error(
+      invalid.prizeType === "nft"
+        ? "NFT prize uchun nftId kiriting"
+        : "Gift prize uchun giftId kiriting",
+    );
   }
 
   return prizes;
