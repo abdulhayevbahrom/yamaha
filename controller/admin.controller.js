@@ -1248,6 +1248,7 @@ function mapHeroSlide(doc) {
     _id: String(doc?._id || ""),
     title: normalizeString(doc?.title),
     imageUrl: normalizeString(doc?.imageUrl),
+    targetTab: normalizeString(doc?.targetTab),
     sortOrder: Number(doc?.sortOrder || 0),
     isActive: Boolean(doc?.isActive),
     createdAt: doc?.createdAt || null,
@@ -1360,6 +1361,7 @@ const createHeroSlide = async (req, res) => {
       ...req.validated,
       title: normalizeString(req.validated?.title),
       imageUrl: normalizeString(req.validated?.imageUrl),
+      targetTab: normalizeString(req.validated?.targetTab),
     };
     if (!payload.imageUrl) {
       return response.error(res, "imageUrl required");
@@ -1386,6 +1388,9 @@ const updateHeroSlide = async (req, res) => {
     }
     if (typeof payload.imageUrl !== "undefined") {
       payload.imageUrl = normalizeString(payload.imageUrl);
+    }
+    if (typeof payload.targetTab !== "undefined") {
+      payload.targetTab = normalizeString(payload.targetTab);
     }
     const updated = await HeroSlide.findByIdAndUpdate(id, payload, {
       new: true,
@@ -2068,7 +2073,6 @@ module.exports = {
   getDiagnostics,
   getActiveUsers,
 };
-
 
 
 

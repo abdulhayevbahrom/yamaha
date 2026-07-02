@@ -128,6 +128,7 @@ function mapHeroSlide(doc) {
     _id: String(doc?._id || ""),
     title: String(doc?.title || "").trim(),
     imageUrl: String(doc?.imageUrl || "").trim(),
+    targetTab: String(doc?.targetTab || "").trim(),
     sortOrder: Number(doc?.sortOrder || 0),
     isActive: Boolean(doc?.isActive),
     createdAt: doc?.createdAt || null,

@@ -12,6 +12,12 @@ const heroSlideSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    targetTab: {
+      type: String,
+      default: "",
+      trim: true,
+      index: true,
+    },
     sortOrder: {
       type: Number,
       default: 0,

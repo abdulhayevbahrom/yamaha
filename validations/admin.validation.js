@@ -23,6 +23,26 @@ const validCategories = ["star", "premium", "uc", "freefire", "mlbb"];
 const validPaymentCardTypes = ["purchase", "balance_topup"];
 const validContestModes = ["now", "scheduled"];
 const validContestProducts = ["star", "premium", "uc", "freefire", "mlbb", "gift", "nft"];
+const validHeroSlideTargets = [
+  "",
+  "stars",
+  "premium",
+  "pubg",
+  "freefire",
+  "mlbb",
+  "star_sell",
+  "gifts",
+  "orders",
+  "profile",
+];
+
+function normalizeHeroSlideTarget(value) {
+  const target = String(value || "").trim().toLowerCase();
+  if (!validHeroSlideTargets.includes(target)) {
+    throw new Error("targetTab noto'g'ri");
+  }
+  return target;
+}
 
 function normalizeContestPrizes(value) {
   if (!Array.isArray(value)) {
@@ -250,11 +270,13 @@ const updateStaticGiftValidation = (req) => {
 };
 
 const createHeroSlideValidation = (req) => {
-  const { title, imageUrl, sortOrder, isActive } = req.body || {};
+  const { title, imageUrl, targetTab, sortOrder, isActive } = req.body || {};
 
   return {
     title: typeof title === "undefined" ? "" : String(title).trim(),
     imageUrl: requireText(imageUrl, "imageUrl"),
+    targetTab:
+      typeof targetTab === "undefined" ? "" : normalizeHeroSlideTarget(targetTab),
     sortOrder:
       typeof sortOrder === "undefined" ? 0 : requireNumber(sortOrder, "sortOrder"),
     isActive: typeof isActive === "boolean" ? isActive : true,
@@ -262,11 +284,12 @@ const createHeroSlideValidation = (req) => {
 };
 
 const updateHeroSlideValidation = (req) => {
-  const { title, imageUrl, sortOrder, isActive } = req.body || {};
+  const { title, imageUrl, targetTab, sortOrder, isActive } = req.body || {};
   const payload = {};
 
   if (typeof title !== "undefined") payload.title = String(title).trim();
   if (typeof imageUrl !== "undefined") payload.imageUrl = requireText(imageUrl, "imageUrl");
+  if (typeof targetTab !== "undefined") payload.targetTab = normalizeHeroSlideTarget(targetTab);
   if (typeof sortOrder !== "undefined") {
     payload.sortOrder = requireNumber(sortOrder, "sortOrder");
   }
