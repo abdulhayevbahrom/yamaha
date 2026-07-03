@@ -34,6 +34,7 @@ const validHeroSlideTargets = [
   "gifts",
   "orders",
   "profile",
+  "referral",
 ];
 
 function normalizeHeroSlideTarget(value) {
