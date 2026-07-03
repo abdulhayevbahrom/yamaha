@@ -63,6 +63,10 @@ const userSchema = new mongoose.Schema(
       type: [Number],
       default: [],
     },
+    referralRewardCampaignIdsNotified: {
+      type: [String],
+      default: [],
+    },
     balance: {
       type: Number,
       default: 0,

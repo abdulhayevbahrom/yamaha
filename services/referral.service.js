@@ -156,12 +156,27 @@ async function maybeNotifyReferralMilestone(referrerOrId) {
     Math.floor(Number(rewardConfig?.inviteThreshold || 50)),
   );
   const rewardLabel = String(rewardConfig?.rewardLabel || "Telegram Premium").trim();
+  const campaignId = String(
+    rewardConfig?.campaignId || "referral_reward_default",
+  ).trim();
+  const activeFromRaw = rewardConfig?.activeFrom
+    ? new Date(rewardConfig.activeFrom)
+    : null;
+  const activeFrom =
+    activeFromRaw && Number.isFinite(activeFromRaw.getTime())
+      ? activeFromRaw
+      : null;
 
-  const qualifyingCount = await User.countDocuments({
+  const qualifyingFilter = {
     referredByUserId: referrerTgUserId,
     referralActivatedAt: { $ne: null },
     isBlocked: { $ne: true },
-  });
+  };
+  if (activeFrom) {
+    qualifyingFilter.referralActivatedAt.$gte = activeFrom;
+  }
+
+  const qualifyingCount = await User.countDocuments(qualifyingFilter);
 
   if (qualifyingCount < inviteThreshold) {
     return {
@@ -177,11 +192,11 @@ async function maybeNotifyReferralMilestone(referrerOrId) {
   const claimUpdated = await User.findOneAndUpdate(
     {
       tgUserId: referrerTgUserId,
-      referralRewardMilestoneNotifiedThresholds: { $ne: marker },
+      referralRewardCampaignIdsNotified: { $ne: campaignId },
     },
     {
       $addToSet: {
-        referralRewardMilestoneNotifiedThresholds: marker,
+        referralRewardCampaignIdsNotified: campaignId,
       },
     },
     { new: true },
@@ -218,11 +233,22 @@ async function maybeNotifyReferralMilestone(referrerOrId) {
       referralActivatedAt: 1,
       createdAt: 1,
     })
-    .limit(inviteThreshold)
     .lean();
 
+  const qualifyingReferredUsers = activeFrom
+    ? referredUsers.filter((item) => {
+        const activatedAt = new Date(item?.referralActivatedAt || 0).getTime();
+        return Number.isFinite(activatedAt) && activatedAt >= activeFrom.getTime();
+      })
+    : referredUsers;
+
+  qualifyingReferredUsers.length = Math.min(
+    qualifyingReferredUsers.length,
+    inviteThreshold,
+  );
+
   const adminIds = getAdminAlertRecipientIds();
-  const profileButtons = buildInlineKeyboardFromUsers(referredUsers);
+  const profileButtons = buildInlineKeyboardFromUsers(qualifyingReferredUsers);
   const firstButtons = profileButtons.slice(0, 50);
   const keyboard = [
     ...firstButtons,
@@ -257,6 +283,7 @@ async function maybeNotifyReferralMilestone(referrerOrId) {
     qualifyingCount,
     inviteThreshold,
     rewardLabel,
+    campaignId,
   });
 
   return {
@@ -266,6 +293,7 @@ async function maybeNotifyReferralMilestone(referrerOrId) {
     qualifyingCount,
     inviteThreshold,
     rewardLabel,
+    campaignId,
   };
 }
 

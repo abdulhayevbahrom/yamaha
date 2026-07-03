@@ -51,6 +51,8 @@ const DEFAULT_REFERRAL_CONFIG = {
 const DEFAULT_REFERRAL_REWARD_CONFIG = {
   inviteThreshold: 50,
   rewardLabel: "Telegram Premium",
+  campaignId: "referral_reward_default",
+  activeFrom: null,
 };
 
 const DEFAULT_NFT_MARKETPLACE_CONFIG = {
@@ -205,6 +207,8 @@ async function getReferralRewardConfig() {
   const doc = await Settings.findOne({ key: "referral_reward_config" }).lean();
   const inviteThreshold = Number(doc?.value?.inviteThreshold);
   const rewardLabel = String(doc?.value?.rewardLabel || "").trim();
+  const campaignId = String(doc?.value?.campaignId || "").trim();
+  const activeFrom = doc?.value?.activeFrom ? new Date(doc.value.activeFrom) : null;
 
   return {
     inviteThreshold:
@@ -213,6 +217,12 @@ async function getReferralRewardConfig() {
         : DEFAULT_REFERRAL_REWARD_CONFIG.inviteThreshold,
     rewardLabel:
       rewardLabel || DEFAULT_REFERRAL_REWARD_CONFIG.rewardLabel,
+    campaignId:
+      campaignId || DEFAULT_REFERRAL_REWARD_CONFIG.campaignId,
+    activeFrom:
+      activeFrom && Number.isFinite(activeFrom.getTime())
+        ? activeFrom.toISOString()
+        : DEFAULT_REFERRAL_REWARD_CONFIG.activeFrom,
   };
 }
 
@@ -466,6 +476,7 @@ async function updateReferralConfig(payload) {
 }
 
 async function updateReferralRewardConfig(payload) {
+  const current = await getReferralRewardConfig();
   const inviteThreshold = Number(payload.inviteThreshold);
   const rewardLabel = String(payload.rewardLabel || "").trim();
 
@@ -476,9 +487,26 @@ async function updateReferralRewardConfig(payload) {
     throw new Error("rewardLabel noto'g'ri");
   }
 
+  const normalizedThreshold = Math.floor(inviteThreshold);
+  const thresholdChanged =
+    normalizedThreshold !== Number(current?.inviteThreshold || 0);
+  const campaignId = thresholdChanged
+    ? `referral_reward_${Date.now()}`
+    : String(current?.campaignId || DEFAULT_REFERRAL_REWARD_CONFIG.campaignId);
+  const activeFrom = thresholdChanged
+    ? new Date().toISOString()
+    : current?.activeFrom || null;
+
   const doc = await Settings.findOneAndUpdate(
     { key: "referral_reward_config" },
-    { value: { inviteThreshold: Math.floor(inviteThreshold), rewardLabel } },
+    {
+      value: {
+        inviteThreshold: normalizedThreshold,
+        rewardLabel,
+        campaignId,
+        activeFrom,
+      },
+    },
     { new: true, upsert: true },
   ).lean();
 
@@ -490,6 +518,11 @@ async function updateReferralRewardConfig(payload) {
     rewardLabel: String(
       doc?.value?.rewardLabel ?? DEFAULT_REFERRAL_REWARD_CONFIG.rewardLabel,
     ),
+    campaignId: String(
+      doc?.value?.campaignId ?? DEFAULT_REFERRAL_REWARD_CONFIG.campaignId,
+    ),
+    activeFrom:
+      doc?.value?.activeFrom || DEFAULT_REFERRAL_REWARD_CONFIG.activeFrom,
   };
 }
 
