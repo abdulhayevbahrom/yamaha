@@ -2,7 +2,12 @@ const User = require("../model/user.model");
 const Order = require("../model/order.model");
 const ReferralEarning = require("../model/referral-earning.model");
 const { emitUserUpdate } = require("../socket");
-const { getReferralConfig } = require("./settings.service");
+const {
+  getReferralConfig,
+  getReferralRewardConfig,
+} = require("./settings.service");
+const { sendTelegramText } = require("./telegram-notify.service");
+const { emitAdminUpdate } = require("../socket");
 
 const ELIGIBLE_REFERRAL_PRODUCTS = new Set([
   "star",
@@ -88,6 +93,180 @@ function buildReferralLink(referralCode) {
 
   const separator = botLink.includes("?") ? "&" : "?";
   return `${botLink}${separator}start=${payload}`;
+}
+
+function buildTelegramProfileUrl({ tgUserId = "", username = "" }) {
+  const normalizedUsername = normalizeUsername(username);
+  if (normalizedUsername) {
+    return `https://t.me/${encodeURIComponent(normalizedUsername)}`;
+  }
+
+  const normalizedUserId = normalizeString(tgUserId);
+  if (!normalizedUserId) return "";
+  return `tg://user?id=${encodeURIComponent(normalizedUserId)}`;
+}
+
+function parseIdList(rawValue) {
+  return String(rawValue || "")
+    .split(",")
+    .map((id) => normalizeString(id))
+    .filter(Boolean);
+}
+
+function getAdminAlertRecipientIds() {
+  const allowlist = parseIdList(process.env.ADMIN_ALLOWED_TG_IDS);
+  const notifyList = parseIdList(process.env.ADMIN_NOTIFY_CHAT_ID);
+
+  if (allowlist.length > 0) {
+    if (notifyList.length > 0) {
+      return notifyList.filter((id) => allowlist.includes(id));
+    }
+    return allowlist;
+  }
+
+  return notifyList;
+}
+
+function buildInlineKeyboardFromUsers(users = []) {
+  const buttons = [];
+  for (const user of users) {
+    const text = normalizeString(user?.username)
+      ? `@${normalizeUsername(user.username)}`
+      : normalizeString(user?.tgUserId) || "Profile";
+    const url = buildTelegramProfileUrl(user);
+    if (!url) continue;
+    buttons.push([{ text, url }]);
+  }
+  return buttons;
+}
+
+async function maybeNotifyReferralMilestone(referrerOrId) {
+  const referrerTgUserId =
+    typeof referrerOrId === "object" && referrerOrId?.tgUserId
+      ? normalizeString(referrerOrId.tgUserId)
+      : normalizeString(referrerOrId);
+
+  if (!referrerTgUserId) {
+    return { ok: false, skipped: true, reason: "missing_referrer" };
+  }
+
+  const rewardConfig = await getReferralRewardConfig();
+  const inviteThreshold = Math.max(
+    1,
+    Math.floor(Number(rewardConfig?.inviteThreshold || 50)),
+  );
+  const rewardLabel = String(rewardConfig?.rewardLabel || "Telegram Premium").trim();
+
+  const qualifyingCount = await User.countDocuments({
+    referredByUserId: referrerTgUserId,
+    referralActivatedAt: { $ne: null },
+    isBlocked: { $ne: true },
+  });
+
+  if (qualifyingCount < inviteThreshold) {
+    return {
+      ok: true,
+      skipped: true,
+      reason: "threshold_not_reached",
+      qualifyingCount,
+      inviteThreshold,
+    };
+  }
+
+  const marker = inviteThreshold;
+  const claimUpdated = await User.findOneAndUpdate(
+    {
+      tgUserId: referrerTgUserId,
+      referralRewardMilestoneNotifiedThresholds: { $ne: marker },
+    },
+    {
+      $addToSet: {
+        referralRewardMilestoneNotifiedThresholds: marker,
+      },
+    },
+    { new: true },
+  ).lean();
+
+  if (!claimUpdated?.tgUserId) {
+    return {
+      ok: true,
+      skipped: true,
+      reason: "already_notified",
+      qualifyingCount,
+      inviteThreshold,
+    };
+  }
+
+  const referrer = await User.findOne({ tgUserId: referrerTgUserId })
+    .select({
+      tgUserId: 1,
+      username: 1,
+      profileName: 1,
+    })
+    .lean();
+
+  const referredUsers = await User.find({
+    referredByUserId: referrerTgUserId,
+    referralActivatedAt: { $ne: null },
+    isBlocked: { $ne: true },
+  })
+    .sort({ referralActivatedAt: -1, createdAt: -1 })
+    .select({
+      tgUserId: 1,
+      username: 1,
+      profileName: 1,
+      referralActivatedAt: 1,
+      createdAt: 1,
+    })
+    .limit(inviteThreshold)
+    .lean();
+
+  const adminIds = getAdminAlertRecipientIds();
+  const profileButtons = buildInlineKeyboardFromUsers(referredUsers);
+  const firstButtons = profileButtons.slice(0, 50);
+  const keyboard = [
+    ...firstButtons,
+  ];
+
+  const adminMessage = [
+    "🏆 Referral milestone yetdi",
+    `Mijoz: ${referrer?.username ? `@${normalizeUsername(referrer.username)}` : normalizeString(referrer?.profileName) || referrerTgUserId}`,
+    `TG ID: ${referrerTgUserId}`,
+    `Taklif qilganlar: ${qualifyingCount}`,
+    `Sovga: ${rewardLabel}`,
+    "",
+    "Admin sovg'ani qo'lda topshiradi.",
+  ].join("\n");
+
+  if (adminIds.length > 0) {
+    await Promise.allSettled(
+      adminIds.map((adminId) =>
+        sendTelegramText(adminId, adminMessage, {
+          reply_markup:
+            keyboard.length > 0
+              ? { inline_keyboard: keyboard }
+              : undefined,
+        }),
+      ),
+    );
+  }
+
+  emitAdminUpdate({
+    type: "referral_reward_milestone_reached",
+    referrerTgUserId,
+    qualifyingCount,
+    inviteThreshold,
+    rewardLabel,
+  });
+
+  return {
+    ok: true,
+    notified: true,
+    referrerTgUserId,
+    qualifyingCount,
+    inviteThreshold,
+    rewardLabel,
+  };
 }
 
 async function ensureReferralIdentity({ tgUserId, username = "", profileName = "" }) {
@@ -272,6 +451,13 @@ async function activateReferralOnMiniAppOpen({
     referredUsername: user.username || "",
   });
 
+  void maybeNotifyReferralMilestone(referrer.tgUserId).catch((error) => {
+    console.error(
+      "Referral milestone notification error:",
+      error?.message || error,
+    );
+  });
+
   return activatedUser;
 }
 
@@ -373,9 +559,11 @@ async function awardReferralCommissionForOrder(orderOrId) {
 
 module.exports = {
   buildReferralLink,
+  buildTelegramProfileUrl,
   bindReferralFromStart,
   ensureReferralIdentity,
   activateReferralOnMiniAppOpen,
   awardReferralCommissionForOrder,
+  maybeNotifyReferralMilestone,
   generateReferralCode,
 };

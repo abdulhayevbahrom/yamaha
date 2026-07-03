@@ -48,6 +48,11 @@ const DEFAULT_REFERRAL_CONFIG = {
   orderPercent: 0,
 };
 
+const DEFAULT_REFERRAL_REWARD_CONFIG = {
+  inviteThreshold: 50,
+  rewardLabel: "Telegram Premium",
+};
+
 const DEFAULT_NFT_MARKETPLACE_CONFIG = {
   feePercent: 5,
   withdrawFeeUzs: 0,
@@ -193,6 +198,21 @@ async function getReferralConfig() {
       .trim()
       .replace(/^@+/, ""),
     botLink: String(process.env.BOT_LINK || "").trim(),
+  };
+}
+
+async function getReferralRewardConfig() {
+  const doc = await Settings.findOne({ key: "referral_reward_config" }).lean();
+  const inviteThreshold = Number(doc?.value?.inviteThreshold);
+  const rewardLabel = String(doc?.value?.rewardLabel || "").trim();
+
+  return {
+    inviteThreshold:
+      Number.isFinite(inviteThreshold) && inviteThreshold > 0
+        ? Math.floor(inviteThreshold)
+        : DEFAULT_REFERRAL_REWARD_CONFIG.inviteThreshold,
+    rewardLabel:
+      rewardLabel || DEFAULT_REFERRAL_REWARD_CONFIG.rewardLabel,
   };
 }
 
@@ -445,6 +465,34 @@ async function updateReferralConfig(payload) {
   };
 }
 
+async function updateReferralRewardConfig(payload) {
+  const inviteThreshold = Number(payload.inviteThreshold);
+  const rewardLabel = String(payload.rewardLabel || "").trim();
+
+  if (!Number.isFinite(inviteThreshold) || inviteThreshold <= 0) {
+    throw new Error("inviteThreshold noto'g'ri");
+  }
+  if (!rewardLabel) {
+    throw new Error("rewardLabel noto'g'ri");
+  }
+
+  const doc = await Settings.findOneAndUpdate(
+    { key: "referral_reward_config" },
+    { value: { inviteThreshold: Math.floor(inviteThreshold), rewardLabel } },
+    { new: true, upsert: true },
+  ).lean();
+
+  return {
+    inviteThreshold: Number(
+      doc?.value?.inviteThreshold ??
+        DEFAULT_REFERRAL_REWARD_CONFIG.inviteThreshold,
+    ),
+    rewardLabel: String(
+      doc?.value?.rewardLabel ?? DEFAULT_REFERRAL_REWARD_CONFIG.rewardLabel,
+    ),
+  };
+}
+
 async function updateNftMarketplaceConfig(payload) {
   const current = await getNftMarketplaceConfig();
 
@@ -589,6 +637,7 @@ module.exports = {
   getPaymentCardConfig,
   getBankomatTopupConfig,
   getReferralConfig,
+  getReferralRewardConfig,
   getNftMarketplaceConfig,
   getNftWithdrawalConfig,
   getSupportConfig,
@@ -601,6 +650,7 @@ module.exports = {
   updatePaymentCardConfig,
   updateBankomatTopupConfig,
   updateReferralConfig,
+  updateReferralRewardConfig,
   updateNftMarketplaceConfig,
   updateNftWithdrawalConfig,
   updateSupportConfig,

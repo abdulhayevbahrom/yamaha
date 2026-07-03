@@ -22,6 +22,7 @@ const {
   getPaymentCardConfig,
   getBankomatTopupConfig,
   getReferralConfig,
+  getReferralRewardConfig,
   getNftMarketplaceConfig,
   getNftWithdrawalConfig,
   getSupportConfig,
@@ -34,6 +35,7 @@ const {
   updatePaymentCardConfig,
   updateBankomatTopupConfig,
   updateReferralConfig,
+  updateReferralRewardConfig,
   updateNftMarketplaceConfig,
   updateNftWithdrawalConfig,
   updateSupportConfig,
@@ -49,6 +51,9 @@ const {
 const {
   getTelegramUserProfilePhoto,
 } = require("../services/telegram-profile-photo.service");
+const {
+  listSuspiciousDevices,
+} = require("../services/security-device.service");
 
 const PURCHASE_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb"];
 const PAID_STATUSES = ["paid_auto_processed", "completed"];
@@ -649,6 +654,7 @@ const getSettings = async (_, res) => {
     const paymentCardConfig = await getPaymentCardConfig();
     const bankomatTopupConfig = await getBankomatTopupConfig();
     const referralConfig = await getReferralConfig();
+    const referralRewardConfig = await getReferralRewardConfig();
     const nftMarketplaceConfig = await getNftMarketplaceConfig();
     const nftWithdrawalConfig = await getNftWithdrawalConfig();
     const supportConfig = await getSupportConfig();
@@ -663,6 +669,7 @@ const getSettings = async (_, res) => {
       paymentCardConfig,
       bankomatTopupConfig,
       referralConfig,
+      referralRewardConfig,
       nftMarketplaceConfig,
       nftWithdrawalConfig,
       supportConfig,
@@ -684,6 +691,7 @@ const updateSettings = async (req, res) => {
       paymentCardConfig,
       bankomatTopupConfig,
       referralConfig,
+      referralRewardConfig,
       nftMarketplaceConfig,
       nftWithdrawalConfig,
       supportConfig,
@@ -699,13 +707,14 @@ const updateSettings = async (req, res) => {
       !paymentCardConfig &&
       !bankomatTopupConfig &&
       !referralConfig &&
+      !referralRewardConfig &&
       !nftMarketplaceConfig &&
       !nftWithdrawalConfig &&
       !supportConfig
     ) {
       return response.error(
         res,
-        "starPricing yoki gameStarsPaymentConfig yoki starSellPricing yoki forceJoin yoki botStatus yoki botBroadcastConfig yoki paymentCardConfig yoki bankomatTopupConfig yoki referralConfig yoki nftMarketplaceConfig yoki nftWithdrawalConfig yoki supportConfig required",
+        "starPricing yoki gameStarsPaymentConfig yoki starSellPricing yoki forceJoin yoki botStatus yoki botBroadcastConfig yoki paymentCardConfig yoki bankomatTopupConfig yoki referralConfig yoki referralRewardConfig yoki nftMarketplaceConfig yoki nftWithdrawalConfig yoki supportConfig required",
       );
     }
 
@@ -736,6 +745,11 @@ const updateSettings = async (req, res) => {
     }
     if (referralConfig) {
       out.referralConfig = await updateReferralConfig(referralConfig);
+    }
+    if (referralRewardConfig) {
+      out.referralRewardConfig = await updateReferralRewardConfig(
+        referralRewardConfig,
+      );
     }
     if (nftMarketplaceConfig) {
       out.nftMarketplaceConfig = await updateNftMarketplaceConfig(
@@ -1912,6 +1926,30 @@ const getDiagnostics = async (_, res) => {
   }
 };
 
+const getSuspiciousDevices = async (req, res) => {
+  try {
+    const requestedPage = Number(req.query?.page || 1);
+    const requestedLimit = Number(req.query?.limit || 20);
+    const page =
+      Number.isFinite(requestedPage) && requestedPage > 0
+        ? Math.floor(requestedPage)
+        : 1;
+    const limit =
+      Number.isFinite(requestedLimit) && requestedLimit > 0
+        ? Math.min(100, Math.floor(requestedLimit))
+        : 20;
+
+    const data = await listSuspiciousDevices({ page, limit });
+    return response.success(res, "Suspicious devices", data);
+  } catch (error) {
+    return response.serverError(
+      res,
+      "Shubhali qurilmalarni olishda xatolik",
+      error.message,
+    );
+  }
+};
+
 const getActiveUsers = async (req, res) => {
   try {
     const period = String(req.query?.period || "today").trim().toLowerCase();
@@ -2071,11 +2109,9 @@ module.exports = {
   topupUserBalance,
   updateUserBlockStatus,
   getDiagnostics,
+  getSuspiciousDevices,
   getActiveUsers,
 };
-
-
-
 
 
 

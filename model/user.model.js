@@ -59,6 +59,10 @@ const userSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    referralRewardMilestoneNotifiedThresholds: {
+      type: [Number],
+      default: [],
+    },
     balance: {
       type: Number,
       default: 0,

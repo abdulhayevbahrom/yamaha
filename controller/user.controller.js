@@ -19,6 +19,9 @@ const {
   ensureReferralIdentity,
 } = require("../services/referral.service");
 const {
+  recordDeviceActivity,
+} = require("../services/security-device.service");
+const {
   calculateBankomatNetAmount,
 } = require("../services/balance-topup.service");
 const {
@@ -73,6 +76,19 @@ async function getMe(req, res) {
     }
 
     await activateReferralOnMiniAppOpen(tgUser);
+    void recordDeviceActivity({
+      req,
+      tgUserId: tgUser.tgUserId,
+      username: tgUser.username,
+      profileName: tgUser.profileName,
+      route: req.path || req.originalUrl || "/me",
+      method: req.method,
+    }).catch((error) => {
+      console.error(
+        "Referral device tracking error:",
+        error?.message || error,
+      );
+    });
     const [
       user,
       totalOrders,
@@ -190,6 +206,19 @@ async function getMyReferrals(req, res) {
     }
 
     await activateReferralOnMiniAppOpen(tgUser);
+    void recordDeviceActivity({
+      req,
+      tgUserId: tgUser.tgUserId,
+      username: tgUser.username,
+      profileName: tgUser.profileName,
+      route: req.path || req.originalUrl || "/my-referrals",
+      method: req.method,
+    }).catch((error) => {
+      console.error(
+        "Referral device tracking error:",
+        error?.message || error,
+      );
+    });
     const requestedPage = Number(req.query?.page || 1);
     const requestedLimit = Number(req.query?.limit || 20);
     const page =

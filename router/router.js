@@ -329,6 +329,11 @@ router.get(
   adminController.getDiagnostics,
 );
 router.get(
+  "/admin/security/devices",
+  authMiddleware,
+  adminController.getSuspiciousDevices,
+);
+router.get(
   "/admin/active-users",
   authMiddleware,
   adminController.getActiveUsers,
