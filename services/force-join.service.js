@@ -51,8 +51,8 @@ async function fetchChatMember(channelId, userId) {
   }
 }
 
-async function checkForceJoinMembership(userId) {
-  const forceJoin = await getForceJoin();
+async function checkForceJoinMembership(userId, forceJoinConfig = null) {
+  const forceJoin = forceJoinConfig || (await getForceJoin());
   const channelId = String(forceJoin.channelId || "").trim();
   const joinUrl = buildJoinUrl(channelId, forceJoin.joinUrl);
 
@@ -102,7 +102,13 @@ async function checkForceJoinMembership(userId) {
   };
 }
 
+async function isForceJoinQualified(userId, forceJoinConfig = null) {
+  const membership = await checkForceJoinMembership(userId, forceJoinConfig);
+  return Boolean(membership?.canProceed);
+}
+
 module.exports = {
   buildJoinUrl,
   checkForceJoinMembership,
+  isForceJoinQualified,
 };

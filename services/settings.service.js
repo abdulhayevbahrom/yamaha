@@ -56,6 +56,7 @@ const DEFAULT_REFERRAL_REWARD_CONFIG = {
   activeFrom: null,
   rewardCatalog: [
     {
+      inviteThreshold: 50,
       key: "premium_1m",
       label: "1 oylik Premium",
       serviceType: "premium",
@@ -64,6 +65,7 @@ const DEFAULT_REFERRAL_REWARD_CONFIG = {
       description: "1 oylik Telegram Premium",
     },
     {
+      inviteThreshold: 100,
       key: "uc_325",
       label: "325 UC",
       serviceType: "uc",
@@ -72,6 +74,7 @@ const DEFAULT_REFERRAL_REWARD_CONFIG = {
       description: "PUBG UC sovg'asi",
     },
     {
+      inviteThreshold: 150,
       key: "stars_1000",
       label: "1000 Star",
       serviceType: "star",
@@ -93,6 +96,55 @@ const DEFAULT_NFT_WITHDRAWAL_CONFIG = {
 const DEFAULT_SUPPORT_CONFIG = {
   username: "@manager_premium",
 };
+
+function normalizeRewardCatalogItem(item = {}, fallbackInviteThreshold = 0, index = 0) {
+  const key = String(item?.key || item?.rewardKey || `reward_${index + 1}`)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_:-]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  const label = String(item?.label || item?.rewardLabel || "").trim();
+  const hasExplicitThreshold =
+    item?.inviteThreshold !== undefined || item?.threshold !== undefined;
+  const inviteThresholdValue = Number(
+    hasExplicitThreshold
+      ? item?.inviteThreshold ?? item?.threshold
+      : Number(fallbackInviteThreshold || 1) * (index + 1),
+  );
+
+  return {
+    key,
+    label,
+    inviteThreshold:
+      Number.isFinite(inviteThresholdValue) && inviteThresholdValue > 0
+        ? Math.floor(inviteThresholdValue)
+        : Math.max(1, Math.floor(Number(fallbackInviteThreshold || 1))),
+    serviceType: String(item?.serviceType || item?.type || "custom").trim(),
+    serviceValue: Number(item?.serviceValue ?? item?.value ?? 0) || 0,
+    active:
+      typeof item?.active === "boolean" ? item.active : Boolean(item?.active ?? true),
+    description: String(item?.description || item?.note || "").trim(),
+  };
+}
+
+function normalizeRewardCatalog(rawCatalog, fallbackInviteThreshold = 0) {
+  if (!Array.isArray(rawCatalog)) return [];
+
+  return rawCatalog
+    .map((item, index) =>
+      normalizeRewardCatalogItem(item, fallbackInviteThreshold, index),
+    )
+    .filter((item) => item.key && item.label)
+    .sort((left, right) => {
+      const leftThreshold = Number(left.inviteThreshold || 0);
+      const rightThreshold = Number(right.inviteThreshold || 0);
+      if (leftThreshold !== rightThreshold) {
+        return leftThreshold - rightThreshold;
+      }
+      return String(left.key || "").localeCompare(String(right.key || ""));
+    });
+}
 
 async function getStarPricing() {
   const doc = await Settings.findOne({ key: "star_pricing" }).lean();
@@ -237,9 +289,14 @@ async function getReferralRewardConfig() {
   const cooldownDays = Number(doc?.value?.cooldownDays);
   const campaignId = String(doc?.value?.campaignId || "").trim();
   const activeFrom = doc?.value?.activeFrom ? new Date(doc.value.activeFrom) : null;
-  const rewardCatalog = Array.isArray(doc?.value?.rewardCatalog)
-    ? doc.value.rewardCatalog
-    : DEFAULT_REFERRAL_REWARD_CONFIG.rewardCatalog;
+  const rewardCatalog = normalizeRewardCatalog(
+    Array.isArray(doc?.value?.rewardCatalog)
+      ? doc.value.rewardCatalog
+      : DEFAULT_REFERRAL_REWARD_CONFIG.rewardCatalog,
+    Number.isFinite(inviteThreshold) && inviteThreshold > 0
+      ? Math.floor(inviteThreshold)
+      : DEFAULT_REFERRAL_REWARD_CONFIG.inviteThreshold,
+  );
 
   return {
     inviteThreshold:
@@ -555,6 +612,10 @@ async function updateReferralRewardConfig(payload) {
   const activeFrom = shouldStartNewCampaign
     ? new Date().toISOString()
     : current?.activeFrom || null;
+  const normalizedRewardCatalog = normalizeRewardCatalog(
+    rewardCatalog,
+    normalizedThreshold,
+  );
 
   const doc = await Settings.findOneAndUpdate(
     { key: "referral_reward_config" },
@@ -565,7 +626,7 @@ async function updateReferralRewardConfig(payload) {
         cooldownDays: Math.floor(cooldownDays),
         campaignId,
         activeFrom,
-        rewardCatalog,
+        rewardCatalog: normalizedRewardCatalog,
       },
     },
     { new: true, upsert: true },
@@ -587,9 +648,15 @@ async function updateReferralRewardConfig(payload) {
     ),
     activeFrom:
       doc?.value?.activeFrom || DEFAULT_REFERRAL_REWARD_CONFIG.activeFrom,
-    rewardCatalog: Array.isArray(doc?.value?.rewardCatalog)
-      ? doc.value.rewardCatalog
-      : DEFAULT_REFERRAL_REWARD_CONFIG.rewardCatalog,
+    rewardCatalog: normalizeRewardCatalog(
+      Array.isArray(doc?.value?.rewardCatalog)
+        ? doc.value.rewardCatalog
+        : DEFAULT_REFERRAL_REWARD_CONFIG.rewardCatalog,
+      Number(
+        doc?.value?.inviteThreshold ??
+          DEFAULT_REFERRAL_REWARD_CONFIG.inviteThreshold,
+      ),
+    ),
   };
 }
 

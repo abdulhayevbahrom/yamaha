@@ -6,8 +6,10 @@ const {
   getReferralConfig,
   getReferralRewardConfig,
 } = require("./settings.service");
+const { getForceJoin } = require("./settings.service");
 const { sendTelegramText } = require("./telegram-notify.service");
 const { emitAdminUpdate } = require("../socket");
+const { checkForceJoinMembership } = require("./force-join.service");
 
 const ELIGIBLE_REFERRAL_PRODUCTS = new Set([
   "star",
@@ -169,6 +171,43 @@ function buildRewardQualifyingFilter(referrerTgUserId, activeFrom) {
   return filter;
 }
 
+async function filterForceJoinQualifiedUsers(users = []) {
+  const list = Array.isArray(users) ? users.filter((item) => item?.tgUserId) : [];
+  if (!list.length) return [];
+
+  const forceJoin = await getForceJoin();
+  if (!forceJoin.enabled || !String(forceJoin.channelId || "").trim()) {
+    return list;
+  }
+
+  const membershipResults = await Promise.allSettled(
+    list.map((user) => checkForceJoinMembership(user.tgUserId, forceJoin)),
+  );
+
+  return list.filter((user, index) => {
+    const result = membershipResults[index];
+    return Boolean(result?.status === "fulfilled" && result.value?.canProceed);
+  });
+}
+
+async function getQualifiedReferralUsers(referrerTgUserId, activeFrom = null) {
+  const users = await User.find(
+    buildRewardQualifyingFilter(referrerTgUserId, activeFrom),
+  )
+    .sort({ referralActivatedAt: -1, createdAt: -1 })
+    .select({
+      tgUserId: 1,
+      username: 1,
+      profileName: 1,
+      referredAt: 1,
+      referralActivatedAt: 1,
+      createdAt: 1,
+    })
+    .lean();
+
+  return filterForceJoinQualifiedUsers(users);
+}
+
 async function maybeNotifyReferralMilestone(referrerOrId) {
   const referrerTgUserId =
     typeof referrerOrId === "object" && referrerOrId?.tgUserId
@@ -190,12 +229,11 @@ async function maybeNotifyReferralMilestone(referrerOrId) {
   ).trim();
   const activeFrom = normalizeRewardActiveFrom(rewardConfig?.activeFrom);
 
-  const qualifyingFilter = buildRewardQualifyingFilter(
+  const qualifyingUsers = await getQualifiedReferralUsers(
     referrerTgUserId,
     activeFrom,
   );
-
-  const qualifyingCount = await User.countDocuments(qualifyingFilter);
+  const qualifyingCount = qualifyingUsers.length;
 
   if (qualifyingCount < inviteThreshold) {
     return {
@@ -239,19 +277,7 @@ async function maybeNotifyReferralMilestone(referrerOrId) {
     })
     .lean();
 
-  const referredUsers = await User.find({
-    ...buildRewardQualifyingFilter(referrerTgUserId, activeFrom),
-  })
-    .sort({ referralActivatedAt: -1, createdAt: -1 })
-    .select({
-      tgUserId: 1,
-      username: 1,
-      profileName: 1,
-      referredAt: 1,
-      referralActivatedAt: 1,
-      createdAt: 1,
-    })
-    .lean();
+  const referredUsers = qualifyingUsers;
 
   referredUsers.length = Math.min(
     referredUsers.length,
@@ -624,6 +650,7 @@ module.exports = {
   ensureReferralIdentity,
   activateReferralOnMiniAppOpen,
   awardReferralCommissionForOrder,
+  getQualifiedReferralUsers,
   maybeNotifyReferralMilestone,
   generateReferralCode,
 };

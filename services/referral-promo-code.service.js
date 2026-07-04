@@ -5,6 +5,7 @@ const { sendTelegramText } = require("./telegram-notify.service");
 const { getReferralRewardConfig } = require("./settings.service");
 const { emitUserUpdate } = require("../socket");
 const { emitAdminUpdate } = require("../socket");
+const { getQualifiedReferralUsers } = require("./referral.service");
 
 function normalizeString(value) {
   return String(value || "").trim();
@@ -18,7 +19,7 @@ function normalizeProfileName(value) {
   return normalizeString(value).replace(/\s+/g, " ").trim();
 }
 
-function buildRewardCatalog(rawCatalog) {
+function buildRewardCatalog(rawCatalog, fallbackInviteThreshold = 0) {
   if (!Array.isArray(rawCatalog)) return [];
 
   return rawCatalog
@@ -29,10 +30,21 @@ function buildRewardCatalog(rawCatalog) {
         .replace(/_+/g, "_")
         .replace(/^_+|_+$/g, "");
       const label = normalizeString(item?.label || item?.rewardLabel || "");
+      const hasExplicitThreshold =
+        item?.inviteThreshold !== undefined || item?.threshold !== undefined;
+      const inviteThresholdValue = Number(
+        hasExplicitThreshold
+          ? item?.inviteThreshold ?? item?.threshold
+          : Number(fallbackInviteThreshold || 1) * (index + 1),
+      );
       if (!key || !label) return null;
       return {
         key,
         label,
+        inviteThreshold:
+          Number.isFinite(inviteThresholdValue) && inviteThresholdValue > 0
+            ? Math.floor(inviteThresholdValue)
+            : 0,
         serviceType: normalizeString(item?.serviceType || item?.type || "custom"),
         serviceValue: Number(item?.serviceValue ?? item?.value ?? 0) || 0,
         active:
@@ -40,11 +52,20 @@ function buildRewardCatalog(rawCatalog) {
         description: normalizeString(item?.description || ""),
       };
     })
-    .filter(Boolean);
+    .filter(Boolean)
+    .sort((left, right) => {
+      const leftThreshold = Number(left.inviteThreshold || 0);
+      const rightThreshold = Number(right.inviteThreshold || 0);
+      if (leftThreshold !== rightThreshold) return leftThreshold - rightThreshold;
+      return String(left.key || "").localeCompare(String(right.key || ""));
+    });
 }
 
 function getActiveRewardCatalog(config) {
-  const catalog = buildRewardCatalog(config?.rewardCatalog || []);
+  const catalog = buildRewardCatalog(
+    config?.rewardCatalog || [],
+    Number(config?.inviteThreshold || 0),
+  );
   return catalog.filter((item) => item.active);
 }
 
@@ -63,32 +84,42 @@ function normalizeActiveFrom(value) {
   return parsed && Number.isFinite(parsed.getTime()) ? parsed : null;
 }
 
-function buildQualifiedInviteFilter({ tgUserId, activeFrom = null }) {
-  const filter = {
-    referredByUserId: tgUserId,
-    referralActivatedAt: { $ne: null },
-    isBlocked: { $ne: true },
-  };
-
-  if (activeFrom) {
-    filter.$or = [
-      { referredAt: { $gte: activeFrom } },
-      {
-        referredAt: null,
-        createdAt: { $gte: activeFrom },
-      },
-      {
-        referredAt: { $exists: false },
-        createdAt: { $gte: activeFrom },
-      },
-    ];
-  }
-
-  return filter;
+async function getReferralQualifiedInviteCount({ tgUserId, activeFrom = null }) {
+  const qualifiedUsers = await getQualifiedReferralUsers(tgUserId, activeFrom);
+  return qualifiedUsers.length;
 }
 
-async function getReferralQualifiedInviteCount({ tgUserId, activeFrom = null }) {
-  return User.countDocuments(buildQualifiedInviteFilter({ tgUserId, activeFrom }));
+function getRewardThreshold(reward = {}, fallbackThreshold = 0) {
+  const threshold = Number(reward?.inviteThreshold || fallbackThreshold || 0);
+  return Number.isFinite(threshold) && threshold > 0
+    ? Math.floor(threshold)
+    : Math.max(1, Math.floor(Number(fallbackThreshold || 1)));
+}
+
+function buildRewardProgressState(rewardCatalog = [], qualifiedInviteCount = 0) {
+  const activeRewards = Array.isArray(rewardCatalog)
+    ? rewardCatalog.filter((item) => item?.active !== false)
+    : [];
+  const sortedRewards = [...activeRewards].sort((left, right) => {
+    const leftThreshold = getRewardThreshold(left);
+    const rightThreshold = getRewardThreshold(right);
+    if (leftThreshold !== rightThreshold) return leftThreshold - rightThreshold;
+    return String(left.key || "").localeCompare(String(right.key || ""));
+  });
+
+  const qualifiedCount = Math.max(0, Math.floor(Number(qualifiedInviteCount || 0)));
+  const eligibleRewards = sortedRewards.filter(
+    (reward) => getRewardThreshold(reward) <= qualifiedCount,
+  );
+
+  return {
+    sortedRewards,
+    eligibleRewards,
+    availableRewardCount: eligibleRewards.length,
+    nextMilestoneInviteCount:
+      sortedRewards.find((reward) => getRewardThreshold(reward) > qualifiedCount)
+        ?.inviteThreshold || 0,
+  };
 }
 
 async function getReferralRedemptionState(tgUserId) {
@@ -98,7 +129,7 @@ async function getReferralRedemptionState(tgUserId) {
   const config = await getReferralRewardConfig();
   const activeFrom = normalizeActiveFrom(config?.activeFrom);
 
-  const [owner, qualifiedInviteCount, latestRedemption, claimedRewardCount] = await Promise.all([
+  const [owner, qualifiedInviteCount, latestRedemption, claimedRewardKeys] = await Promise.all([
     User.findOne({ tgUserId: ownerTgUserId })
       .select({
         tgUserId: 1,
@@ -111,7 +142,7 @@ async function getReferralRedemptionState(tgUserId) {
       .lean(),
     getReferralQualifiedInviteCount({ tgUserId: ownerTgUserId, activeFrom }),
     ReferralPromoCode.findOne({ ownerTgUserId }).sort({ createdAt: -1 }).lean(),
-    ReferralPromoCode.countDocuments({
+    ReferralPromoCode.distinct("rewardKey", {
       ownerTgUserId,
       status: { $ne: "cancelled" },
     }),
@@ -130,12 +161,13 @@ async function getReferralRedemptionState(tgUserId) {
     ? new Date(requestedAtMs + cooldownMs)
     : null;
   const nowMs = Date.now();
-  const availableRewardCount = Math.floor(
-    Number(qualifiedInviteCount || 0) / inviteThreshold,
-  );
+  const progress = buildRewardProgressState(activeRewards, qualifiedInviteCount);
+  const claimedRewardCount = Array.isArray(claimedRewardKeys)
+    ? claimedRewardKeys.filter(Boolean).length
+    : 0;
   const remainingRewardCount = Math.max(
     0,
-    availableRewardCount - Number(claimedRewardCount || 0),
+    progress.availableRewardCount - Number(claimedRewardCount || 0),
   );
   const hasThreshold = remainingRewardCount > 0;
   const isCoolingDown = Boolean(nextAvailableAt && nextAvailableAt.getTime() > nowMs);
@@ -146,12 +178,15 @@ async function getReferralRedemptionState(tgUserId) {
     inviteThreshold,
     cooldownDays,
     rewardLabel: String(config?.rewardLabel || "Telegram Premium").trim(),
-    rewardCatalog: activeRewards,
+    rewardCatalog: progress.sortedRewards,
     qualifiedInviteCount: Number(qualifiedInviteCount || 0),
-    availableRewardCount,
+    availableRewardCount: progress.availableRewardCount,
     claimedRewardCount: Number(claimedRewardCount || 0),
     remainingRewardCount,
-    nextMilestoneInviteCount: (availableRewardCount + 1) * inviteThreshold,
+    nextMilestoneInviteCount: progress.nextMilestoneInviteCount,
+    claimedRewardKeys: Array.isArray(claimedRewardKeys)
+      ? claimedRewardKeys.filter(Boolean)
+      : [],
     canRedeem: Boolean(
       owner && !owner.isBlocked && hasThreshold && !isCoolingDown && !hasPendingRequest,
     ),
@@ -201,14 +236,49 @@ async function requestReferralPromoCode({
   }
 
   const rewardCatalog = Array.isArray(state.rewardCatalog) ? state.rewardCatalog : [];
+  const alreadyClaimedKeys = new Set(
+    Array.isArray(state.claimedRewardKeys) ? state.claimedRewardKeys : [],
+  );
   const selectedRewardKey = normalizeString(rewardKey).toLowerCase();
   const selectedReward =
     rewardCatalog.find((item) => item.key === selectedRewardKey) ||
-    rewardCatalog[0] ||
+    rewardCatalog.find(
+      (item) =>
+        Number(item.inviteThreshold || 0) <= Number(state.qualifiedInviteCount || 0) &&
+        !alreadyClaimedKeys.has(item.key),
+    ) ||
     null;
 
   if (!selectedReward) {
     return { ok: false, reason: "no_reward_configured" };
+  }
+
+  const selectedThreshold = Number(selectedReward.inviteThreshold || 0);
+  if (
+    !Number.isFinite(selectedThreshold) ||
+    selectedThreshold <= 0 ||
+    selectedThreshold > Number(state.qualifiedInviteCount || 0)
+  ) {
+    return {
+      ok: false,
+      reason: "threshold_not_reached",
+      inviteThreshold: state.inviteThreshold,
+      qualifiedInviteCount: state.qualifiedInviteCount,
+      availableRewardCount: state.availableRewardCount,
+      claimedRewardCount: state.claimedRewardCount,
+      remainingRewardCount: state.remainingRewardCount,
+      nextMilestoneInviteCount: state.nextMilestoneInviteCount,
+    };
+  }
+
+  if (alreadyClaimedKeys.has(selectedReward.key)) {
+    return {
+      ok: false,
+      reason: "duplicate_reward",
+      rewardKey: selectedReward.key,
+      rewardLabel: selectedReward.label,
+      inviteThreshold: selectedThreshold,
+    };
   }
 
   if (state.remainingRewardCount <= 0) {
@@ -243,7 +313,13 @@ async function requestReferralPromoCode({
 
   const now = new Date();
   const code = makePromoCode();
-  const milestoneIndex = Number(state.claimedRewardCount || 0) + 1;
+  const eligibleRewards = rewardCatalog.filter(
+    (item) => Number(item.inviteThreshold || 0) <= Number(state.qualifiedInviteCount || 0),
+  );
+  const milestoneIndex =
+    rewardCatalog.findIndex((item) => item.key === selectedReward.key) + 1 ||
+    eligibleRewards.findIndex((item) => item.key === selectedReward.key) + 1 ||
+    1;
 
   const promoDoc = await ReferralPromoCode.create({
     code,
@@ -254,7 +330,7 @@ async function requestReferralPromoCode({
     rewardLabel: selectedReward.label,
     rewardType: selectedReward.serviceType,
     rewardValue: Number(selectedReward.serviceValue || 0),
-    inviteThreshold: state.inviteThreshold,
+    inviteThreshold: selectedThreshold,
     milestoneIndex,
     qualifiedInviteCountAtRequest: state.qualifiedInviteCount,
     cooldownDays: state.cooldownDays,
@@ -310,11 +386,14 @@ async function requestReferralPromoCode({
     rewardLabel: selectedReward.label,
     rewardType: selectedReward.serviceType,
     rewardValue: Number(selectedReward.serviceValue || 0),
-    inviteThreshold: state.inviteThreshold,
+    inviteThreshold: selectedThreshold,
     qualifiedInviteCount: state.qualifiedInviteCount,
     availableRewardCount: state.availableRewardCount,
-    claimedRewardCount: milestoneIndex,
-    remainingRewardCount: Math.max(0, state.availableRewardCount - milestoneIndex),
+    claimedRewardCount: Number(state.claimedRewardCount || 0) + 1,
+    remainingRewardCount: Math.max(
+      0,
+      state.availableRewardCount - (Number(state.claimedRewardCount || 0) + 1),
+    ),
     milestoneIndex,
     cooldownDays: state.cooldownDays,
     requestedAt: promoDoc.requestedAt,

@@ -18,6 +18,7 @@ const {
   activateReferralOnMiniAppOpen,
   buildReferralLink,
   ensureReferralIdentity,
+  getQualifiedReferralUsers,
 } = require("../services/referral.service");
 const {
   getReferralRedemptionState,
@@ -233,6 +234,9 @@ async function getMe(req, res) {
           claimedRewardCount: Number(
             redemptionState?.claimedRewardCount || 0,
           ),
+          claimedRewardKeys: Array.isArray(redemptionState?.claimedRewardKeys)
+            ? redemptionState.claimedRewardKeys
+            : [],
           remainingRewardCount: Number(
             redemptionState?.remainingRewardCount || 0,
           ),
@@ -341,6 +345,9 @@ async function getMyReferrals(req, res) {
           claimedRewardCount: Number(
             redemptionState?.claimedRewardCount || 0,
           ),
+          claimedRewardKeys: Array.isArray(redemptionState?.claimedRewardKeys)
+            ? redemptionState.claimedRewardKeys
+            : [],
           remainingRewardCount: Number(
             redemptionState?.remainingRewardCount || 0,
           ),
@@ -406,6 +413,10 @@ async function getMyReferrals(req, res) {
         },
       ]),
     ]);
+    const qualifiedNowUsers = await getQualifiedReferralUsers(tgUser.tgUserId);
+    const qualifiedNowSet = new Set(
+      qualifiedNowUsers.map((item) => String(item.tgUserId || "")),
+    );
 
     const earningsMap = new Map(
       earningRows.map((item) => [String(item._id), item]),
@@ -422,6 +433,7 @@ async function getMyReferrals(req, res) {
         displayName: username ? `@${username}` : "Mijoz",
         referredAt: referredUser.referredAt || referredUser.createdAt || null,
         referralActivatedAt: referredUser.referralActivatedAt || null,
+        isQualifiedNow: qualifiedNowSet.has(String(referredUser.tgUserId || "")),
         totalOrders: Number(order.totalOrders || 0),
         totalSpent: Number(order.totalSpent || 0),
         totalEarned: Number(earning.totalEarned || 0),
@@ -499,6 +511,13 @@ async function requestReferralPromoCodeHandler(req, res) {
         return response.error(res, "Avvalgi promo kod hali adminga yuborilgan", {
           code: reason,
           activeRequest: result.activeRequest || null,
+        });
+      }
+      if (reason === "duplicate_reward") {
+        return response.error(res, "Bu sovg'a allaqachon olingan", {
+          code: reason,
+          rewardKey: String(result.rewardKey || ""),
+          rewardLabel: String(result.rewardLabel || ""),
         });
       }
 
