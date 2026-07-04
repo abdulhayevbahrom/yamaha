@@ -54,6 +54,10 @@ const {
 const {
   listSuspiciousDevices,
 } = require("../services/security-device.service");
+const {
+  listReferralPromoCodes: listReferralPromoCodesService,
+  markReferralPromoCodeUsed: markReferralPromoCodeUsedService,
+} = require("../services/referral-promo-code.service");
 
 const PURCHASE_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb"];
 const PAID_STATUSES = ["paid_auto_processed", "completed"];
@@ -794,6 +798,68 @@ const updateSettings = async (req, res) => {
     return response.serverError(
       res,
       "Settings yangilashda xatolik",
+      error.message,
+    );
+  }
+};
+
+const getReferralPromoCodes = async (req, res) => {
+  try {
+    const query = String(req.query?.q || req.query?.query || "").trim();
+    const requestedPage = Number(req.query?.page || 1);
+    const requestedLimit = Number(req.query?.limit || 20);
+    const page =
+      Number.isFinite(requestedPage) && requestedPage > 0
+        ? Math.floor(requestedPage)
+        : 1;
+    const limit =
+      Number.isFinite(requestedLimit) && requestedLimit > 0
+        ? Math.min(100, Math.floor(requestedLimit))
+        : 20;
+
+    const result = await listReferralPromoCodesService({ query, page, limit });
+    return response.success(res, "Referral promo codes", result);
+  } catch (error) {
+    return response.serverError(
+      res,
+      "Referral promo code'larni olishda xatolik",
+      error.message,
+    );
+  }
+};
+
+const markReferralPromoCodeUsed = async (req, res) => {
+  try {
+    const code = String(req.body?.code || req.params?.code || "").trim();
+    const usedPurpose = String(req.body?.usedPurpose || "").trim();
+    const adminNote = String(req.body?.adminNote || "").trim();
+    const result = await markReferralPromoCodeUsedService({
+      code,
+      usedPurpose,
+      adminId: req?.admin?.tgUserId || "",
+      adminUsername: req?.admin?.username || "",
+      adminNote,
+    });
+
+    if (!result?.ok) {
+      return response.error(
+        res,
+        result?.reason === "not_found"
+          ? "Promo kod topilmadi"
+          : "Promo kodni yangilab bo'lmadi",
+        { code: result?.reason || "promo_code_update_failed" },
+      );
+    }
+
+    return response.success(
+      res,
+      result.alreadyUsed ? "Promo kod avval ishlatilgan" : "Promo kod ishlatilgan",
+      result,
+    );
+  } catch (error) {
+    return response.serverError(
+      res,
+      "Promo kodni yangilashda xatolik",
       error.message,
     );
   }
@@ -2086,6 +2152,8 @@ module.exports = {
   deletePlan,
   getSettings,
   updateSettings,
+  getReferralPromoCodes,
+  markReferralPromoCodeUsed,
   getPaymentCards,
   getStaticGifts,
   getHeroSlides,
@@ -2112,8 +2180,4 @@ module.exports = {
   getSuspiciousDevices,
   getActiveUsers,
 };
-
-
-
-
 

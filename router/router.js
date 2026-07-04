@@ -89,6 +89,15 @@ router.get(
   userController.getMyReferrals,
 );
 router.post(
+  "/referrals/redeem",
+  telegramAuthMiddleware,
+  freshTelegramWriteAuth,
+  requireRegisteredUser,
+  userWriteRateLimit,
+  botActiveMiddleware,
+  userController.requestReferralPromoCodeHandler,
+);
+router.post(
   "/balance/topup",
   telegramAuthMiddleware,
   freshTelegramWriteAuth,
@@ -339,6 +348,16 @@ router.get(
   adminController.getActiveUsers,
 );
 router.put("/admin/settings", authMiddleware, adminController.updateSettings);
+router.get(
+  "/admin/referral-promo-codes",
+  authMiddleware,
+  adminController.getReferralPromoCodes,
+);
+router.post(
+  "/admin/referral-promo-codes/use",
+  authMiddleware,
+  adminController.markReferralPromoCodeUsed,
+);
 router.get("/admin/users/search", authMiddleware, adminController.searchUsers);
 router.get("/admin/assets/search", authMiddleware, adminController.searchAssets);
 router.get(

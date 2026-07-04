@@ -264,6 +264,22 @@ async function maybeNotifyReferralMilestone(referrerOrId) {
     "Admin sovg'ani qo'lda topshiradi.",
   ].join("\n");
 
+  const webAppUrl = normalizeString(process.env.WEB_APP_URL);
+  const userKeyboard = webAppUrl
+    ? {
+        inline_keyboard: [
+          [{ text: "Sovg'ani olish", web_app: { url: webAppUrl } }],
+        ],
+      }
+    : undefined;
+  const userMessage = [
+    "🎉 Tabriklaymiz!",
+    `Siz ${inviteThreshold} ta haqiqiy do'stingizni taklif qilish limitiga yetdingiz.`,
+    `Sovga: ${rewardLabel}`,
+    "",
+    "Mini appdagi Profil bo'limida Referral daromadini ishlatish tugmasini bosing va promo kod oling.",
+  ].join("\n");
+
   if (adminIds.length > 0) {
     await Promise.allSettled(
       adminIds.map((adminId) =>
@@ -276,6 +292,10 @@ async function maybeNotifyReferralMilestone(referrerOrId) {
       ),
     );
   }
+
+  const userNotifyResult = await sendTelegramText(referrerTgUserId, userMessage, {
+    ...(userKeyboard ? { reply_markup: userKeyboard } : {}),
+  });
 
   emitAdminUpdate({
     type: "referral_reward_milestone_reached",
@@ -294,6 +314,7 @@ async function maybeNotifyReferralMilestone(referrerOrId) {
     inviteThreshold,
     rewardLabel,
     campaignId,
+    userNotified: Boolean(userNotifyResult?.ok),
   };
 }
 
@@ -430,6 +451,13 @@ async function activateReferralOnMiniAppOpen({
     return User.findOne({ tgUserId: user.tgUserId }).lean();
   }
 
+  void maybeNotifyReferralMilestone(user.referredByUserId).catch((error) => {
+    console.error(
+      "Referral milestone notification error:",
+      error?.message || error,
+    );
+  });
+
   if (signupBonusAmount <= 0) {
     return activatedUser;
   }
@@ -477,13 +505,6 @@ async function activateReferralOnMiniAppOpen({
     amount: signupBonusAmount,
     referredUserId: user.tgUserId,
     referredUsername: user.username || "",
-  });
-
-  void maybeNotifyReferralMilestone(referrer.tgUserId).catch((error) => {
-    console.error(
-      "Referral milestone notification error:",
-      error?.message || error,
-    );
   });
 
   return activatedUser;

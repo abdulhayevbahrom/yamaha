@@ -19,6 +19,10 @@ const {
   ensureReferralIdentity,
 } = require("../services/referral.service");
 const {
+  getReferralRedemptionState,
+  requestReferralPromoCode,
+} = require("../services/referral-promo-code.service");
+const {
   recordDeviceActivity,
 } = require("../services/security-device.service");
 const {
@@ -94,6 +98,7 @@ async function getMe(req, res) {
       totalOrders,
       spending,
       inviteCount,
+      redemptionState,
       referralConfig,
       giftStats,
       nftTradeCount,
@@ -122,6 +127,7 @@ async function getMe(req, res) {
           },
         ]),
         User.countDocuments({ referredByUserId: tgUser.tgUserId }),
+        getReferralRedemptionState(tgUser.tgUserId),
         getReferralConfig(),
         UserGift.aggregate([
           {
@@ -188,6 +194,22 @@ async function getMe(req, res) {
         orderPercent: Number(referralConfig?.orderPercent || 0),
         botUsername: String(referralConfig?.botUsername || ""),
         botLink: String(referralConfig?.botLink || ""),
+        redemption: {
+          inviteThreshold: Number(redemptionState?.inviteThreshold || 0),
+          cooldownDays: Number(redemptionState?.cooldownDays || 0),
+          rewardLabel: String(redemptionState?.rewardLabel || ""),
+          rewardCatalog: Array.isArray(redemptionState?.rewardCatalog)
+            ? redemptionState.rewardCatalog
+            : [],
+          qualifiedInviteCount: Number(
+            redemptionState?.qualifiedInviteCount || 0,
+          ),
+          canRedeem: Boolean(redemptionState?.canRedeem),
+          isCoolingDown: Boolean(redemptionState?.isCoolingDown),
+          nextAvailableAt: redemptionState?.nextAvailableAt || null,
+          lastRedemption: redemptionState?.lastRedemption || null,
+          activeRequest: redemptionState?.activeRequest || null,
+        },
       },
     });
   } catch (error) {
@@ -230,10 +252,11 @@ async function getMyReferrals(req, res) {
         ? Math.min(100, Math.floor(requestedLimit))
         : 20;
 
-    const [user, referralConfig, totalItems] = await Promise.all([
+    const [user, referralConfig, totalItems, redemptionState] = await Promise.all([
       ensureUser(tgUser),
       getReferralConfig(),
       User.countDocuments({ referredByUserId: tgUser.tgUserId }),
+      getReferralRedemptionState(tgUser.tgUserId),
     ]);
 
     const totalPages = Math.max(1, Math.ceil(Number(totalItems || 0) / limit));
@@ -266,6 +289,22 @@ async function getMyReferrals(req, res) {
           commissionTotal: Number(user?.referralOrderCommissionTotal || 0),
           signupBonusAmount: Number(referralConfig?.signupBonusAmount || 0),
           orderPercent: Number(referralConfig?.orderPercent || 0),
+        },
+        redemption: {
+          inviteThreshold: Number(redemptionState?.inviteThreshold || 0),
+          cooldownDays: Number(redemptionState?.cooldownDays || 0),
+          rewardLabel: String(redemptionState?.rewardLabel || ""),
+          rewardCatalog: Array.isArray(redemptionState?.rewardCatalog)
+            ? redemptionState.rewardCatalog
+            : [],
+          qualifiedInviteCount: Number(
+            redemptionState?.qualifiedInviteCount || 0,
+          ),
+          canRedeem: Boolean(redemptionState?.canRedeem),
+          isCoolingDown: Boolean(redemptionState?.isCoolingDown),
+          nextAvailableAt: redemptionState?.nextAvailableAt || null,
+          lastRedemption: redemptionState?.lastRedemption || null,
+          activeRequest: redemptionState?.activeRequest || null,
         },
         pagination: {
           page: safePage,
@@ -367,6 +406,61 @@ async function getMyReferrals(req, res) {
     return response.serverError(
       res,
       "Referral ma'lumotlarini olishda xatolik",
+      error.message,
+    );
+  }
+}
+
+async function requestReferralPromoCodeHandler(req, res) {
+  try {
+    const tgUser = getTelegramUserFromRequest(req);
+    if (!tgUser.tgUserId) {
+      return response.error(
+        res,
+        "Telegram profilingiz aniqlanmadi. Ilovani qayta ochib ko'ring.",
+      );
+    }
+
+    const result = await requestReferralPromoCode({
+      tgUserId: tgUser.tgUserId,
+      username: tgUser.username,
+      profileName: tgUser.profileName,
+      rewardKey: req.body?.rewardKey || "",
+    });
+
+    if (!result?.ok) {
+      const reason = String(result?.reason || "");
+      if (reason === "threshold_not_reached") {
+        return response.error(res, "Referral limit hali yetmagan", {
+          code: reason,
+          inviteThreshold: Number(result.inviteThreshold || 0),
+          qualifiedInviteCount: Number(result.qualifiedInviteCount || 0),
+        });
+      }
+      if (reason === "cooldown_active") {
+        return response.error(res, "Promo kod olish uchun muddat hali tugamagan", {
+          code: reason,
+          nextAvailableAt: result.nextAvailableAt || null,
+          cooldownDays: Number(result.cooldownDays || 0),
+        });
+      }
+      if (reason === "pending_request") {
+        return response.error(res, "Avvalgi promo kod hali adminga yuborilgan", {
+          code: reason,
+          activeRequest: result.activeRequest || null,
+        });
+      }
+
+      return response.error(res, "Promo kod yaratib bo'lmadi", {
+        code: reason || "promo_code_failed",
+      });
+    }
+
+    return response.created(res, "Promo kod yaratildi", result);
+  } catch (error) {
+    return response.serverError(
+      res,
+      "Promo kod yaratishda xatolik",
       error.message,
     );
   }
@@ -831,5 +925,6 @@ module.exports = {
   getBalance,
   createNftWithdrawalRequest,
   getMyOrders,
+  requestReferralPromoCodeHandler,
   createBalanceTopup,
 };

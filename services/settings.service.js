@@ -51,8 +51,35 @@ const DEFAULT_REFERRAL_CONFIG = {
 const DEFAULT_REFERRAL_REWARD_CONFIG = {
   inviteThreshold: 50,
   rewardLabel: "Telegram Premium",
+  cooldownDays: 30,
   campaignId: "referral_reward_default",
   activeFrom: null,
+  rewardCatalog: [
+    {
+      key: "premium_1m",
+      label: "1 oylik Premium",
+      serviceType: "premium",
+      serviceValue: 1,
+      active: true,
+      description: "1 oylik Telegram Premium",
+    },
+    {
+      key: "uc_325",
+      label: "325 UC",
+      serviceType: "uc",
+      serviceValue: 325,
+      active: true,
+      description: "PUBG UC sovg'asi",
+    },
+    {
+      key: "stars_1000",
+      label: "1000 Star",
+      serviceType: "star",
+      serviceValue: 1000,
+      active: true,
+      description: "Telegram Stars sovg'asi",
+    },
+  ],
 };
 
 const DEFAULT_NFT_MARKETPLACE_CONFIG = {
@@ -207,8 +234,12 @@ async function getReferralRewardConfig() {
   const doc = await Settings.findOne({ key: "referral_reward_config" }).lean();
   const inviteThreshold = Number(doc?.value?.inviteThreshold);
   const rewardLabel = String(doc?.value?.rewardLabel || "").trim();
+  const cooldownDays = Number(doc?.value?.cooldownDays);
   const campaignId = String(doc?.value?.campaignId || "").trim();
   const activeFrom = doc?.value?.activeFrom ? new Date(doc.value.activeFrom) : null;
+  const rewardCatalog = Array.isArray(doc?.value?.rewardCatalog)
+    ? doc.value.rewardCatalog
+    : DEFAULT_REFERRAL_REWARD_CONFIG.rewardCatalog;
 
   return {
     inviteThreshold:
@@ -217,12 +248,17 @@ async function getReferralRewardConfig() {
         : DEFAULT_REFERRAL_REWARD_CONFIG.inviteThreshold,
     rewardLabel:
       rewardLabel || DEFAULT_REFERRAL_REWARD_CONFIG.rewardLabel,
+    cooldownDays:
+      Number.isFinite(cooldownDays) && cooldownDays >= 0
+        ? Math.floor(cooldownDays)
+        : DEFAULT_REFERRAL_REWARD_CONFIG.cooldownDays,
     campaignId:
       campaignId || DEFAULT_REFERRAL_REWARD_CONFIG.campaignId,
     activeFrom:
       activeFrom && Number.isFinite(activeFrom.getTime())
         ? activeFrom.toISOString()
         : DEFAULT_REFERRAL_REWARD_CONFIG.activeFrom,
+    rewardCatalog,
   };
 }
 
@@ -479,12 +515,32 @@ async function updateReferralRewardConfig(payload) {
   const current = await getReferralRewardConfig();
   const inviteThreshold = Number(payload.inviteThreshold);
   const rewardLabel = String(payload.rewardLabel || "").trim();
+  const cooldownDays = Number(payload.cooldownDays);
+  const rewardCatalogRaw =
+    payload.rewardCatalog !== undefined
+      ? payload.rewardCatalog
+      : payload.rewardCatalogJson;
 
   if (!Number.isFinite(inviteThreshold) || inviteThreshold <= 0) {
     throw new Error("inviteThreshold noto'g'ri");
   }
   if (!rewardLabel) {
     throw new Error("rewardLabel noto'g'ri");
+  }
+  if (!Number.isFinite(cooldownDays) || cooldownDays < 0) {
+    throw new Error("cooldownDays noto'g'ri");
+  }
+
+  let rewardCatalog = current.rewardCatalog || DEFAULT_REFERRAL_REWARD_CONFIG.rewardCatalog;
+  if (rewardCatalogRaw !== undefined) {
+    const candidate =
+      typeof rewardCatalogRaw === "string"
+        ? JSON.parse(rewardCatalogRaw)
+        : rewardCatalogRaw;
+    if (!Array.isArray(candidate)) {
+      throw new Error("rewardCatalog noto'g'ri");
+    }
+    rewardCatalog = candidate;
   }
 
   const normalizedThreshold = Math.floor(inviteThreshold);
@@ -503,8 +559,10 @@ async function updateReferralRewardConfig(payload) {
       value: {
         inviteThreshold: normalizedThreshold,
         rewardLabel,
+        cooldownDays: Math.floor(cooldownDays),
         campaignId,
         activeFrom,
+        rewardCatalog,
       },
     },
     { new: true, upsert: true },
@@ -521,8 +579,14 @@ async function updateReferralRewardConfig(payload) {
     campaignId: String(
       doc?.value?.campaignId ?? DEFAULT_REFERRAL_REWARD_CONFIG.campaignId,
     ),
+    cooldownDays: Number(
+      doc?.value?.cooldownDays ?? DEFAULT_REFERRAL_REWARD_CONFIG.cooldownDays,
+    ),
     activeFrom:
       doc?.value?.activeFrom || DEFAULT_REFERRAL_REWARD_CONFIG.activeFrom,
+    rewardCatalog: Array.isArray(doc?.value?.rewardCatalog)
+      ? doc.value.rewardCatalog
+      : DEFAULT_REFERRAL_REWARD_CONFIG.rewardCatalog,
   };
 }
 
