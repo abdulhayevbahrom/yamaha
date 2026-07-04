@@ -1023,6 +1023,7 @@ const getUserReferrals = async (req, res) => {
           .select({
             tgUserId: 1,
             username: 1,
+            profileName: 1,
             referredAt: 1,
             createdAt: 1,
           })
@@ -1043,6 +1044,7 @@ const getUserReferrals = async (req, res) => {
       items: items.map((item) => ({
         tgUserId: String(item.tgUserId || ""),
         username: String(item.username || ""),
+        profileName: String(item.profileName || ""),
         referredAt: item.referredAt || item.createdAt || null,
       })),
     });
@@ -2180,4 +2182,3 @@ module.exports = {
   getSuspiciousDevices,
   getActiveUsers,
 };
-
