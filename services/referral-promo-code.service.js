@@ -58,20 +58,47 @@ function parseCooldownMs(cooldownDays) {
   return days * 24 * 60 * 60 * 1000;
 }
 
-async function getReferralQualifiedInviteCount(tgUserId) {
-  return User.countDocuments({
+function normalizeActiveFrom(value) {
+  const parsed = value ? new Date(value) : null;
+  return parsed && Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+function buildQualifiedInviteFilter({ tgUserId, activeFrom = null }) {
+  const filter = {
     referredByUserId: tgUserId,
     referralActivatedAt: { $ne: null },
     isBlocked: { $ne: true },
-  });
+  };
+
+  if (activeFrom) {
+    filter.$or = [
+      { referredAt: { $gte: activeFrom } },
+      {
+        referredAt: null,
+        createdAt: { $gte: activeFrom },
+      },
+      {
+        referredAt: { $exists: false },
+        createdAt: { $gte: activeFrom },
+      },
+    ];
+  }
+
+  return filter;
+}
+
+async function getReferralQualifiedInviteCount({ tgUserId, activeFrom = null }) {
+  return User.countDocuments(buildQualifiedInviteFilter({ tgUserId, activeFrom }));
 }
 
 async function getReferralRedemptionState(tgUserId) {
   const ownerTgUserId = normalizeString(tgUserId);
   if (!ownerTgUserId) return null;
 
-  const [config, owner, qualifiedInviteCount, latestRedemption, claimedRewardCount] = await Promise.all([
-    getReferralRewardConfig(),
+  const config = await getReferralRewardConfig();
+  const activeFrom = normalizeActiveFrom(config?.activeFrom);
+
+  const [owner, qualifiedInviteCount, latestRedemption, claimedRewardCount] = await Promise.all([
     User.findOne({ tgUserId: ownerTgUserId })
       .select({
         tgUserId: 1,
@@ -82,7 +109,7 @@ async function getReferralRedemptionState(tgUserId) {
         isBlocked: 1,
       })
       .lean(),
-    getReferralQualifiedInviteCount(ownerTgUserId),
+    getReferralQualifiedInviteCount({ tgUserId: ownerTgUserId, activeFrom }),
     ReferralPromoCode.findOne({ ownerTgUserId }).sort({ createdAt: -1 }).lean(),
     ReferralPromoCode.countDocuments({
       ownerTgUserId,

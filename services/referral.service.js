@@ -140,6 +140,35 @@ function buildInlineKeyboardFromUsers(users = []) {
   return buttons;
 }
 
+function normalizeRewardActiveFrom(value) {
+  const parsed = value ? new Date(value) : null;
+  return parsed && Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+function buildRewardQualifyingFilter(referrerTgUserId, activeFrom) {
+  const filter = {
+    referredByUserId: referrerTgUserId,
+    referralActivatedAt: { $ne: null },
+    isBlocked: { $ne: true },
+  };
+
+  if (activeFrom) {
+    filter.$or = [
+      { referredAt: { $gte: activeFrom } },
+      {
+        referredAt: null,
+        createdAt: { $gte: activeFrom },
+      },
+      {
+        referredAt: { $exists: false },
+        createdAt: { $gte: activeFrom },
+      },
+    ];
+  }
+
+  return filter;
+}
+
 async function maybeNotifyReferralMilestone(referrerOrId) {
   const referrerTgUserId =
     typeof referrerOrId === "object" && referrerOrId?.tgUserId
@@ -159,22 +188,12 @@ async function maybeNotifyReferralMilestone(referrerOrId) {
   const campaignId = String(
     rewardConfig?.campaignId || "referral_reward_default",
   ).trim();
-  const activeFromRaw = rewardConfig?.activeFrom
-    ? new Date(rewardConfig.activeFrom)
-    : null;
-  const activeFrom =
-    activeFromRaw && Number.isFinite(activeFromRaw.getTime())
-      ? activeFromRaw
-      : null;
+  const activeFrom = normalizeRewardActiveFrom(rewardConfig?.activeFrom);
 
-  const qualifyingFilter = {
-    referredByUserId: referrerTgUserId,
-    referralActivatedAt: { $ne: null },
-    isBlocked: { $ne: true },
-  };
-  if (activeFrom) {
-    qualifyingFilter.referralActivatedAt.$gte = activeFrom;
-  }
+  const qualifyingFilter = buildRewardQualifyingFilter(
+    referrerTgUserId,
+    activeFrom,
+  );
 
   const qualifyingCount = await User.countDocuments(qualifyingFilter);
 
@@ -221,34 +240,26 @@ async function maybeNotifyReferralMilestone(referrerOrId) {
     .lean();
 
   const referredUsers = await User.find({
-    referredByUserId: referrerTgUserId,
-    referralActivatedAt: { $ne: null },
-    isBlocked: { $ne: true },
+    ...buildRewardQualifyingFilter(referrerTgUserId, activeFrom),
   })
     .sort({ referralActivatedAt: -1, createdAt: -1 })
     .select({
       tgUserId: 1,
       username: 1,
       profileName: 1,
+      referredAt: 1,
       referralActivatedAt: 1,
       createdAt: 1,
     })
     .lean();
 
-  const qualifyingReferredUsers = activeFrom
-    ? referredUsers.filter((item) => {
-        const activatedAt = new Date(item?.referralActivatedAt || 0).getTime();
-        return Number.isFinite(activatedAt) && activatedAt >= activeFrom.getTime();
-      })
-    : referredUsers;
-
-  qualifyingReferredUsers.length = Math.min(
-    qualifyingReferredUsers.length,
+  referredUsers.length = Math.min(
+    referredUsers.length,
     inviteThreshold,
   );
 
   const adminIds = getAdminAlertRecipientIds();
-  const profileButtons = buildInlineKeyboardFromUsers(qualifyingReferredUsers);
+  const profileButtons = buildInlineKeyboardFromUsers(referredUsers);
   const firstButtons = profileButtons.slice(0, 50);
   const keyboard = [
     ...firstButtons,

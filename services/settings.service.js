@@ -516,6 +516,7 @@ async function updateReferralRewardConfig(payload) {
   const inviteThreshold = Number(payload.inviteThreshold);
   const rewardLabel = String(payload.rewardLabel || "").trim();
   const cooldownDays = Number(payload.cooldownDays);
+  const resetCampaign = Boolean(payload.resetCampaign);
   const rewardCatalogRaw =
     payload.rewardCatalog !== undefined
       ? payload.rewardCatalog
@@ -546,10 +547,12 @@ async function updateReferralRewardConfig(payload) {
   const normalizedThreshold = Math.floor(inviteThreshold);
   const thresholdChanged =
     normalizedThreshold !== Number(current?.inviteThreshold || 0);
-  const campaignId = thresholdChanged
+  const shouldStartNewCampaign =
+    thresholdChanged || resetCampaign || !current?.activeFrom;
+  const campaignId = shouldStartNewCampaign
     ? `referral_reward_${Date.now()}`
     : String(current?.campaignId || DEFAULT_REFERRAL_REWARD_CONFIG.campaignId);
-  const activeFrom = thresholdChanged
+  const activeFrom = shouldStartNewCampaign
     ? new Date().toISOString()
     : current?.activeFrom || null;
 
