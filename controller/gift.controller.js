@@ -16,9 +16,9 @@ const {
   getStarPricing,
   getNftMarketplaceConfig,
 } = require("../services/settings.service");
-const { applyBalanceDeltaOnce } = require("../services/balance-operation.service");
 const {
   notifyAdminsAboutNftWithdrawalRequest,
+  refundUpfrontNftWithdrawalFeeIfCharged,
 } = require("../services/nft-withdrawal-payout.service");
 const {
   getStarGiftsCatalog,
@@ -2480,7 +2480,6 @@ async function buyNftFromMarketplace(req, res) {
 
 async function withdrawMyNft(req, res) {
   let createdOrder = null;
-  let deductedFee = 0;
   let restoreNftState = async () => {};
   try {
     if (
@@ -2547,6 +2546,46 @@ async function withdrawMyNft(req, res) {
     ).lean();
 
     if (!nft) {
+      const pendingOrder = await Order.findOne({
+        product: "nft_withdrawal",
+        tgUserId: user.tgUserId,
+        "fragmentTx.nftWithdrawal.nftId": nftId,
+        status: { $in: ["payment_submitted", "admin_action_processing"] },
+      })
+        .sort({ createdAt: -1 })
+        .lean();
+
+      if (pendingOrder?._id) {
+        const nftTx = pendingOrder?.fragmentTx?.nftWithdrawal || {};
+        const feeRefund = await refundUpfrontNftWithdrawalFeeIfCharged(
+          pendingOrder,
+          "pending_request_retry",
+        ).catch(() => null);
+        if (feeRefund?.refunded) {
+          emitUserUpdate(user.tgUserId, {
+            type: "nft_withdrawal_fee_refunded",
+            refreshBalance: true,
+            refreshOrders: true,
+            orderId: pendingOrder._id,
+            nftId,
+          });
+        }
+        return response.success(res, "NFT yechib olish so'rovi oldin yuborilgan", {
+          orderId: String(pendingOrder._id),
+          nftId,
+          title: normalizeString(nftTx.title) || "NFT Gift",
+          nftNumber: Math.max(0, Math.round(toSafeNumber(nftTx.nftNumber, 0))),
+          withdrawFeeUzs: Math.max(0, Math.round(toSafeNumber(nftTx.withdrawFeeUzs, 0))),
+          status: pendingOrder.status,
+          pending: true,
+          feeRefunded: Boolean(feeRefund?.refunded),
+          balance: Math.max(
+            0,
+            Math.round(Number(feeRefund?.user?.balance ?? user.balance ?? 0)),
+          ),
+        });
+      }
+
       return response.error(res, "NFT topilmadi yoki allaqachon yechib olingan");
     }
 
@@ -2608,27 +2647,6 @@ async function withdrawMyNft(req, res) {
       0,
       Math.round(toSafeNumber(marketConfig?.withdrawFeeUzs, 0)),
     );
-    let balanceAfterFee = Number(user.balance || 0);
-
-    if (withdrawFeeUzs > 0) {
-      const feeResult = await applyBalanceDeltaOnce({
-        tgUserId: user.tgUserId,
-        operationKey: `nft-withdraw-fee:${transferRequestId}`,
-        amount: -withdrawFeeUzs,
-        extraIncrement: { nftEarningsBalance: -withdrawFeeUzs },
-      });
-      if (!feeResult.ok) {
-        await restoreNftState();
-        return response.error(
-          res,
-          `Balans yetarli emas. NFT yechib olish uchun ${withdrawFeeUzs.toLocaleString("uz-UZ")} UZS kerak`,
-        );
-      }
-      deductedFee = withdrawFeeUzs;
-      balanceAfterFee = Number(
-        feeResult.user?.balance ?? balanceAfterFee - withdrawFeeUzs,
-      );
-    }
 
     const { title: nftTitle, nftNumber } = splitNftTitleAndNumber(nft.title);
     const nextOrderId = await getNextOrderId();
@@ -2681,14 +2699,6 @@ async function withdrawMyNft(req, res) {
     const sentNotifications = await notifyAdminsAboutNftWithdrawalRequest(order);
     if (!sentNotifications.length) {
       await Order.deleteOne({ _id: order._id }).catch(() => {});
-      if (withdrawFeeUzs > 0) {
-        await applyBalanceDeltaOnce({
-          tgUserId: user.tgUserId,
-          operationKey: `nft-withdraw-fee-revert:${transferRequestId}`,
-          amount: withdrawFeeUzs,
-          extraIncrement: { nftEarningsBalance: withdrawFeeUzs },
-        }).catch(() => {});
-      }
       await restoreNftState();
       return response.serverError(
         res,
@@ -2699,7 +2709,7 @@ async function withdrawMyNft(req, res) {
     emitUserUpdate(user.tgUserId, {
       type: "nft_withdrawal_requested",
       refreshOrders: true,
-      refreshBalance: withdrawFeeUzs > 0,
+      refreshBalance: false,
       refreshNfts: true,
       nftId,
       orderId: order._id,
@@ -2720,19 +2730,11 @@ async function withdrawMyNft(req, res) {
       title: nftTitle || "NFT Gift",
       nftNumber: Math.max(0, Math.round(toSafeNumber(nftNumber, 0))),
       withdrawFeeUzs,
-      balance: Math.max(0, Math.round(balanceAfterFee)),
+      balance: Math.max(0, Math.round(Number(user.balance || 0))),
     });
   } catch (error) {
     if (createdOrder?._id) {
       await Order.deleteOne({ _id: createdOrder._id }).catch(() => {});
-    }
-    if (deductedFee > 0 && String(req?.telegramAuth?.tgUserId || "").trim()) {
-      await applyBalanceDeltaOnce({
-        tgUserId: String(req.telegramAuth.tgUserId),
-        operationKey: `nft-withdraw-fee-revert:${createdOrder?._id || req.body?.nftId || "rollback"}`,
-        amount: deductedFee,
-        extraIncrement: { nftEarningsBalance: deductedFee },
-      }).catch(() => {});
     }
 
     await restoreNftState().catch(() => {});

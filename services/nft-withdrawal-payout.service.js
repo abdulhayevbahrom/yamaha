@@ -1,4 +1,5 @@
 const Order = require("../model/order.model");
+const User = require("../model/user.model");
 const UserNft = require("../model/user-nft.model");
 const { emitAdminUpdate, emitUserUpdate } = require("../socket");
 const { applyBalanceDeltaOnce } = require("./balance-operation.service");
@@ -53,6 +54,71 @@ function getAdminNotifyIds() {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function getNftFeeOperationKey(order) {
+  const fragmentTx = getSafeFragmentTx(order);
+  const nftTx = fragmentTx.nftWithdrawal || {};
+  return `nft-withdraw-fee:${normalizeString(
+    nftTx.transferRequestId || order?._id || "",
+  )}`;
+}
+
+async function refundUpfrontNftWithdrawalFeeIfCharged(
+  order,
+  reason = "upfront_fee_released",
+) {
+  const fragmentTx = getSafeFragmentTx(order);
+  const nftTx = fragmentTx.nftWithdrawal || {};
+  const amount = Math.max(
+    0,
+    Math.round(toSafeNumber(nftTx.withdrawFeeUzs || order?.expectedAmount || 0)),
+  );
+  const tgUserId = normalizeString(nftTx.ownerTgUserId || order?.tgUserId);
+  const feeOperationKey = getNftFeeOperationKey(order);
+  const refundOperationKey = `nft-withdraw-fee-refund:${feeOperationKey}`;
+
+  if (!amount || !tgUserId || !feeOperationKey) {
+    return { ok: false, skipped: true, reason: "missing_fee_data" };
+  }
+
+  const user = await User.findOne({ tgUserId })
+    .select("+balanceOperationKeys")
+    .lean();
+  const operationKeys = Array.isArray(user?.balanceOperationKeys)
+    ? user.balanceOperationKeys
+    : [];
+  if (!operationKeys.includes(feeOperationKey)) {
+    return { ok: true, skipped: true, reason: "fee_not_charged" };
+  }
+  if (operationKeys.includes(refundOperationKey)) {
+    return { ok: true, skipped: true, reason: "already_refunded" };
+  }
+
+  const refundResult = await applyBalanceDeltaOnce({
+    tgUserId,
+    operationKey: refundOperationKey,
+    amount,
+    extraIncrement: { nftEarningsBalance: amount },
+  });
+  if (!refundResult.ok) {
+    return refundResult;
+  }
+
+  const now = new Date();
+  await Order.findByIdAndUpdate(order._id, {
+    $set: {
+      "fragmentTx.nftWithdrawal.upfrontFeeRefundedAt": now.toISOString(),
+      "fragmentTx.nftWithdrawal.upfrontFeeRefundReason": normalizeString(reason),
+    },
+  }).catch(() => {});
+
+  return {
+    ok: true,
+    refunded: true,
+    amount,
+    user: refundResult.user || null,
+  };
 }
 
 function buildNftWithdrawalRequestText(order) {
@@ -335,11 +401,73 @@ async function confirmNftWithdrawalById(orderId) {
     return { ok: false, reason: "not_ready" };
   }
 
+  const fragmentTx = getSafeFragmentTx(order);
+  const nftTx = fragmentTx.nftWithdrawal || {};
+  const withdrawFeeUzs = Math.max(
+    0,
+    Math.round(toSafeNumber(nftTx.withdrawFeeUzs || order?.expectedAmount || 0)),
+  );
+  const ownerTgUserId = normalizeString(nftTx.ownerTgUserId || order?.tgUserId);
+  const feeOperationKey = getNftFeeOperationKey(order);
+  const feeRefundOperationKey = `nft-withdraw-fee-refund:${feeOperationKey}`;
+  const confirmFeeOperationKey = `nft-withdraw-fee-confirm:${String(order._id)}`;
+  let activeFeeOperationKey = feeOperationKey;
+  let feeCharged = false;
+
+  if (withdrawFeeUzs > 0 && ownerTgUserId) {
+    const user = await User.findOne({ tgUserId: ownerTgUserId })
+      .select("+balanceOperationKeys")
+      .lean();
+    const operationKeys = Array.isArray(user?.balanceOperationKeys)
+      ? user.balanceOperationKeys
+      : [];
+    const requestFeeStillActive =
+      operationKeys.includes(feeOperationKey) &&
+      !operationKeys.includes(feeRefundOperationKey);
+    const confirmFeeAlreadyCharged = operationKeys.includes(confirmFeeOperationKey);
+
+    if (requestFeeStillActive || confirmFeeAlreadyCharged) {
+      activeFeeOperationKey = confirmFeeAlreadyCharged
+        ? confirmFeeOperationKey
+        : feeOperationKey;
+      feeCharged = true;
+    } else {
+      activeFeeOperationKey = confirmFeeOperationKey;
+      const feeChargeResult = await applyBalanceDeltaOnce({
+        tgUserId: ownerTgUserId,
+        operationKey: activeFeeOperationKey,
+        amount: -withdrawFeeUzs,
+        extraIncrement: { nftEarningsBalance: -withdrawFeeUzs },
+      });
+      if (!feeChargeResult.ok) {
+        await Order.updateOne(
+          { _id: order._id, status: "admin_action_processing" },
+          {
+            $set: {
+              status: "payment_submitted",
+              fulfillmentStatus: "needs_review",
+              fulfillmentError: "nft_withdrawal_fee_not_available",
+            },
+          },
+        );
+        return { ok: false, reason: "insufficient_balance" };
+      }
+      feeCharged = true;
+    }
+  }
+
   const transferResult = await transferNftForWithdrawal(order);
   if (!transferResult.ok) {
     if (transferResult.reason === "needs_review") {
+      if (feeCharged && ownerTgUserId && withdrawFeeUzs > 0) {
+        await applyBalanceDeltaOnce({
+          tgUserId: ownerTgUserId,
+          operationKey: `nft-withdraw-fee-refund:${activeFeeOperationKey}`,
+          amount: withdrawFeeUzs,
+          extraIncrement: { nftEarningsBalance: withdrawFeeUzs },
+        }).catch(() => {});
+      }
       const now = new Date();
-      const fragmentTx = getSafeFragmentTx(order);
       order.status = "failed";
       order.fulfillmentStatus = "needs_review";
       order.completionMode = "manual";
@@ -378,6 +506,15 @@ async function confirmNftWithdrawalById(orderId) {
       return { ok: false, reason: "needs_review" };
     }
 
+    if (feeCharged && ownerTgUserId && withdrawFeeUzs > 0) {
+      await applyBalanceDeltaOnce({
+        tgUserId: ownerTgUserId,
+        operationKey: `nft-withdraw-fee-refund:${activeFeeOperationKey}`,
+        amount: withdrawFeeUzs,
+        extraIncrement: { nftEarningsBalance: withdrawFeeUzs },
+      }).catch(() => {});
+    }
+
     await Order.updateOne(
       { _id: order._id, status: "admin_action_processing" },
       {
@@ -393,7 +530,6 @@ async function confirmNftWithdrawalById(orderId) {
   }
 
   const now = new Date();
-  const fragmentTx = getSafeFragmentTx(order);
   order.status = "completed";
   order.fulfillmentStatus = "success";
   order.completionMode = "manual";
@@ -406,6 +542,7 @@ async function confirmNftWithdrawalById(orderId) {
       confirmedByAdmin: true,
       confirmedAt: now.toISOString(),
       transferredTo: transferResult.recipientIdentifier,
+      feeChargedAt: feeCharged ? now.toISOString() : "",
     },
   };
   await order.save();
@@ -465,6 +602,19 @@ async function cancelNftWithdrawalById(orderId) {
   const managerUsername = String(supportConfig?.username || getManagerUsername()).trim();
   const managerUrl = getManagerUrl(managerUsername);
   const fragmentTx = getSafeFragmentTx(order);
+  const nftTx = fragmentTx.nftWithdrawal || {};
+  const feeOperationKey = getNftFeeOperationKey(order);
+  const feeRefundKey = `nft-withdraw-fee-refund:${feeOperationKey}`;
+  const chargedUser = String(order.tgUserId || "").trim()
+    ? await User.findOne({ tgUserId: String(order.tgUserId || "").trim() })
+        .select("+balanceOperationKeys")
+        .lean()
+    : null;
+  const feeWasCharged =
+    Boolean(nftTx?.feeChargedAt) ||
+    (Array.isArray(chargedUser?.balanceOperationKeys)
+      ? chargedUser.balanceOperationKeys.includes(feeOperationKey)
+      : false);
 
   const restoreResult = await restoreNftWithdrawalState(order);
   if (!restoreResult.ok) {
@@ -475,10 +625,10 @@ async function cancelNftWithdrawalById(orderId) {
     return { ok: false, reason: "restore_failed" };
   }
 
-  if (amount > 0 && String(order.tgUserId || "").trim()) {
+  if (feeWasCharged && amount > 0 && String(order.tgUserId || "").trim()) {
     const creditResult = await applyBalanceDeltaOnce({
       tgUserId: order.tgUserId,
-      operationKey: `nft-withdrawal-cancel:${String(order._id)}`,
+      operationKey: feeRefundKey,
       amount,
       extraIncrement: { nftEarningsBalance: amount },
     });
@@ -546,6 +696,7 @@ async function cancelNftWithdrawalById(orderId) {
 module.exports = {
   buildNftWithdrawalRequestText,
   notifyAdminsAboutNftWithdrawalRequest,
+  refundUpfrontNftWithdrawalFeeIfCharged,
   confirmNftWithdrawalById,
   cancelNftWithdrawalById,
   buildAdminText,

@@ -48,7 +48,7 @@ async function applyBalanceDeltaOnce({
   }
 
   const existing = await User.findOne({ tgUserId: userId })
-    .select({ balance: 1, balanceOperationKeys: 1 })
+    .select("balance +balanceOperationKeys")
     .lean();
   if (Array.isArray(existing?.balanceOperationKeys)) {
     if (existing.balanceOperationKeys.includes(key)) {
