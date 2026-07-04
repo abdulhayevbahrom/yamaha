@@ -140,7 +140,6 @@ async function recordDeviceActivity({
   const update = {
     $setOnInsert: {
       firstSeenAt: now,
-      requestCount: 0,
       uniqueUserCount: 0,
       alertCount: 0,
       lastAlertMilestone: 0,
