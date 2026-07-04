@@ -797,7 +797,15 @@ async function startBot({ strict = false } = {}) {
       const orderId = query.data.replace("CONFIRM_NFT_WITHDRAWAL:", "").trim();
       const result = await confirmNftWithdrawalById(orderId);
       if (!result.ok) {
-        await bot.answerCallbackQuery(query.id, { text: "Tasdiqlash xatolik", show_alert: true });
+        await bot.answerCallbackQuery(query.id, {
+          text:
+            result.reason === "needs_review"
+              ? "Transfer natijasi noaniq. So'rov tekshiruvga o‘tdi."
+              : result.reason === "not_ready"
+              ? "So'rov hozir tasdiqlashga tayyor emas"
+              : "Tasdiqlash xatolik",
+          show_alert: true,
+        });
         return;
       }
       await bot.answerCallbackQuery(query.id, { text: result.alreadyCompleted ? "Avval tasdiqlangan" : "Pul o'tkazish tasdiqlandi" });
@@ -821,7 +829,15 @@ async function startBot({ strict = false } = {}) {
       const orderId = query.data.replace("CANCEL_NFT_WITHDRAWAL:", "").trim();
       const result = await cancelNftWithdrawalById(orderId);
       if (!result.ok) {
-        await bot.answerCallbackQuery(query.id, { text: "Bekor qilish xatolik", show_alert: true });
+        await bot.answerCallbackQuery(query.id, {
+          text:
+            result.reason === "not_ready"
+              ? "So'rov hozir bekor qilishga tayyor emas"
+              : result.reason === "already_completed"
+              ? "So'rov allaqachon tasdiqlangan"
+              : "Bekor qilish xatolik",
+          show_alert: true,
+        });
         return;
       }
       await bot.answerCallbackQuery(query.id, { text: result.alreadyCancelled ? "Avval bekor qilingan" : "Buyurtma bekor qilindi" });
