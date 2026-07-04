@@ -163,7 +163,15 @@ function buildAdminText(order, statusText) {
 
 async function notifyAdminsAboutNftWithdrawalRequest(order) {
   const adminIds = getAdminNotifyIds();
-  if (!adminIds.length || !order?._id) return [];
+  if (!adminIds.length || !order?._id) {
+    console.warn("[NFT_WITHDRAW_ADMIN_NOTIFY]", JSON.stringify({
+      at: new Date().toISOString(),
+      event: "skipped",
+      orderId: String(order?._id || ""),
+      reason: !adminIds.length ? "admin_notify_chat_id_empty" : "order_missing",
+    }));
+    return [];
+  }
 
   const text = buildNftWithdrawalRequestText(order);
   const results = await Promise.allSettled(
@@ -196,6 +204,27 @@ async function notifyAdminsAboutNftWithdrawalRequest(order) {
       messageId: Number(item.messageId || 0),
     }))
     .filter((item) => item.chatId && item.messageId > 0);
+
+  if (sentNotifications.length !== adminIds.length) {
+    const failed = results
+      .map((item, index) => ({
+        adminId: adminIds[index],
+        status: item.status,
+        reason:
+          item.status === "fulfilled"
+            ? normalizeString(item.value?.reason)
+            : normalizeString(item.reason?.message || item.reason),
+      }))
+      .filter((item) => item.status !== "fulfilled" || item.reason);
+    console.warn("[NFT_WITHDRAW_ADMIN_NOTIFY]", JSON.stringify({
+      at: new Date().toISOString(),
+      event: "partial_or_failed",
+      orderId: String(order._id),
+      sent: sentNotifications.length,
+      total: adminIds.length,
+      failed,
+    }));
+  }
 
   if (!sentNotifications.length) return [];
 

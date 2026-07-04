@@ -2570,6 +2570,13 @@ async function withdrawMyNft(req, res) {
             nftId,
           });
         }
+        logNftWithdrawSecurity("pending_request_found", {
+          tgUserId: normalizeString(user?.tgUserId),
+          nftId,
+          ip: requestMeta.ip,
+          userAgent: requestMeta.userAgent,
+          reason: `order:${String(pendingOrder._id)}`,
+        });
         return response.success(res, "NFT yechib olish so'rovi oldin yuborilgan", {
           orderId: String(pendingOrder._id),
           nftId,
@@ -2586,8 +2593,76 @@ async function withdrawMyNft(req, res) {
         });
       }
 
+      const lockedNft = await UserNft.findOne({
+        nftId,
+        ownerTgUserId: user.tgUserId,
+        transferStatus: "processing",
+      }).lean();
+      if (lockedNft?._id) {
+        const startedAtMs = new Date(lockedNft.transferStartedAt || 0).getTime();
+        const isStale =
+          !Number.isFinite(startedAtMs) || Date.now() - startedAtMs > 15_000;
+        if (isStale) {
+          await UserNft.updateOne(
+            {
+              _id: lockedNft._id,
+              ownerTgUserId: user.tgUserId,
+              transferStatus: "processing",
+            },
+            {
+              $set: {
+                isTelegramPresent: true,
+                transferStatus: "idle",
+                transferRequestId: "",
+                transferStartedAt: null,
+                transferError: "",
+              },
+            },
+          );
+          logNftWithdrawSecurity("stale_processing_reset", {
+            tgUserId: normalizeString(user?.tgUserId),
+            nftId,
+            ip: requestMeta.ip,
+            userAgent: requestMeta.userAgent,
+            reason: normalizeString(lockedNft.transferRequestId),
+          });
+          return response.error(
+            res,
+            "NFT holati tiklandi. Iltimos, yechib olishni qayta bosing.",
+            { code: "NFT_WITHDRAW_STATE_RESET" },
+          );
+        }
+
+        logNftWithdrawSecurity("processing_request_still_active", {
+          tgUserId: normalizeString(user?.tgUserId),
+          nftId,
+          ip: requestMeta.ip,
+          userAgent: requestMeta.userAgent,
+          reason: normalizeString(lockedNft.transferRequestId),
+        });
+        return response.error(
+          res,
+          "NFT yechib olish so'rovi hozir ishlanmoqda. Birozdan keyin tekshiring.",
+          { code: "NFT_WITHDRAW_PROCESSING" },
+        );
+      }
+
+      logNftWithdrawSecurity("nft_not_available", {
+        tgUserId: normalizeString(user?.tgUserId),
+        nftId,
+        ip: requestMeta.ip,
+        userAgent: requestMeta.userAgent,
+        reason: "nft_not_found_or_withdrawn",
+      });
       return response.error(res, "NFT topilmadi yoki allaqachon yechib olingan");
     }
+    logNftWithdrawSecurity("nft_reserved_for_admin_review", {
+      tgUserId: normalizeString(user?.tgUserId),
+      nftId,
+      ip: requestMeta.ip,
+      userAgent: requestMeta.userAgent,
+      reason: transferRequestId,
+    });
 
     const wasListed = normalizeString(nft.marketStatus) === "listed";
     restoreNftState = async () => {
@@ -2695,16 +2770,37 @@ async function withdrawMyNft(req, res) {
       },
     });
     createdOrder = order;
+    logNftWithdrawSecurity("order_created", {
+      tgUserId: normalizeString(user?.tgUserId),
+      nftId,
+      ip: requestMeta.ip,
+      userAgent: requestMeta.userAgent,
+      reason: `order:${String(order._id)}`,
+    });
 
     const sentNotifications = await notifyAdminsAboutNftWithdrawalRequest(order);
     if (!sentNotifications.length) {
       await Order.deleteOne({ _id: order._id }).catch(() => {});
       await restoreNftState();
-      return response.serverError(
+      logNftWithdrawSecurity("admin_notify_failed", {
+        tgUserId: normalizeString(user?.tgUserId),
+        nftId,
+        ip: requestMeta.ip,
+        userAgent: requestMeta.userAgent,
+        reason: "no_admin_messages_sent",
+      });
+      return response.error(
         res,
-        "Adminga so'rov yuborilmadi. Keyinroq qayta urinib ko'ring.",
+        "Adminga so'rov yuborilmadi. ADMIN_NOTIFY_CHAT_ID yoki bot xabar yuborishini tekshiring.",
       );
     }
+    logNftWithdrawSecurity("admin_notify_sent", {
+      tgUserId: normalizeString(user?.tgUserId),
+      nftId,
+      ip: requestMeta.ip,
+      userAgent: requestMeta.userAgent,
+      reason: `messages:${sentNotifications.length}`,
+    });
 
     emitUserUpdate(user.tgUserId, {
       type: "nft_withdrawal_requested",
@@ -2738,6 +2834,14 @@ async function withdrawMyNft(req, res) {
     }
 
     await restoreNftState().catch(() => {});
+    const requestMeta = buildRequestMeta(req);
+    logNftWithdrawSecurity("request_crashed", {
+      tgUserId: normalizeString(req?.telegramAuth?.tgUserId),
+      nftId: normalizeString(req?.body?.nftId),
+      ip: requestMeta.ip,
+      userAgent: requestMeta.userAgent,
+      reason: normalizeString(error?.message),
+    });
 
     return response.serverError(
       res,
