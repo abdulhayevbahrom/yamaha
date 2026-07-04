@@ -51,6 +51,15 @@ const referralPromoCodeSchema = new Schema(
       type: Number,
       default: 0,
     },
+    milestoneIndex: {
+      type: Number,
+      default: 1,
+      index: true,
+    },
+    qualifiedInviteCountAtRequest: {
+      type: Number,
+      default: 0,
+    },
     cooldownDays: {
       type: Number,
       default: 0,

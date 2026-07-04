@@ -204,6 +204,18 @@ async function getMe(req, res) {
           qualifiedInviteCount: Number(
             redemptionState?.qualifiedInviteCount || 0,
           ),
+          availableRewardCount: Number(
+            redemptionState?.availableRewardCount || 0,
+          ),
+          claimedRewardCount: Number(
+            redemptionState?.claimedRewardCount || 0,
+          ),
+          remainingRewardCount: Number(
+            redemptionState?.remainingRewardCount || 0,
+          ),
+          nextMilestoneInviteCount: Number(
+            redemptionState?.nextMilestoneInviteCount || 0,
+          ),
           canRedeem: Boolean(redemptionState?.canRedeem),
           isCoolingDown: Boolean(redemptionState?.isCoolingDown),
           nextAvailableAt: redemptionState?.nextAvailableAt || null,
@@ -299,6 +311,18 @@ async function getMyReferrals(req, res) {
             : [],
           qualifiedInviteCount: Number(
             redemptionState?.qualifiedInviteCount || 0,
+          ),
+          availableRewardCount: Number(
+            redemptionState?.availableRewardCount || 0,
+          ),
+          claimedRewardCount: Number(
+            redemptionState?.claimedRewardCount || 0,
+          ),
+          remainingRewardCount: Number(
+            redemptionState?.remainingRewardCount || 0,
+          ),
+          nextMilestoneInviteCount: Number(
+            redemptionState?.nextMilestoneInviteCount || 0,
           ),
           canRedeem: Boolean(redemptionState?.canRedeem),
           isCoolingDown: Boolean(redemptionState?.isCoolingDown),
@@ -435,6 +459,10 @@ async function requestReferralPromoCodeHandler(req, res) {
           code: reason,
           inviteThreshold: Number(result.inviteThreshold || 0),
           qualifiedInviteCount: Number(result.qualifiedInviteCount || 0),
+          availableRewardCount: Number(result.availableRewardCount || 0),
+          claimedRewardCount: Number(result.claimedRewardCount || 0),
+          remainingRewardCount: Number(result.remainingRewardCount || 0),
+          nextMilestoneInviteCount: Number(result.nextMilestoneInviteCount || 0),
         });
       }
       if (reason === "cooldown_active") {
