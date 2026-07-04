@@ -753,6 +753,7 @@ async function createNftWithdrawalRequest(req, res) {
       fulfillmentStatus: "needs_review",
       completionMode: "",
       fulfillmentError: "",
+      sequence: nextOrderId,
       fragmentTx: {
         nftWithdrawal: {
           nftId,
