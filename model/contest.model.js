@@ -25,6 +25,11 @@ const contestPrizeSchema = new Schema(
       default: "",
       trim: true,
     },
+    nftSlug: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     title: {
       type: String,
       default: "",
@@ -95,6 +100,11 @@ const contestWinnerSchema = new Schema(
       trim: true,
     },
     nftId: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    nftSlug: {
       type: String,
       default: "",
       trim: true,

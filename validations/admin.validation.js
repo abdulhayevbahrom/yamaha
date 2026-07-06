@@ -76,6 +76,12 @@ function normalizeContestPrizes(value) {
               ? ""
               : String(item.nftId).trim()
             : "",
+        nftSlug:
+          prizeType === "nft"
+            ? typeof item?.nftSlug === "undefined"
+              ? ""
+              : String(item.nftSlug).trim()
+            : "",
         giftImageUrl:
           typeof item?.giftImageUrl === "undefined"
             ? ""

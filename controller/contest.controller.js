@@ -13,12 +13,53 @@ const {
   toDate,
 } = require("../services/contest.service");
 
+function escapeRegex(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function extractTelegramNftCandidate(value) {
+  const raw = normalizeString(value);
+  if (!raw) return "";
+
+  let candidate = raw;
+  const directMatch = raw.match(
+    /(?:https?:\/\/)?(?:t(?:elegram)?\.me)\/nft\/([^\s/?#]+)/i,
+  );
+
+  if (directMatch?.[1]) {
+    candidate = directMatch[1];
+  } else {
+    try {
+      const candidateUrl = raw.includes("://") ? raw : "https://" + raw;
+      const url = new URL(candidateUrl);
+      const parts = String(url.pathname || "")
+        .split("/")
+        .filter(Boolean);
+      const nftIndex = parts.findIndex((part) => /^nft$/i.test(part));
+      if (nftIndex >= 0 && parts[nftIndex + 1]) {
+        candidate = parts[nftIndex + 1];
+      }
+    } catch (_) {
+      // Oddiy NFT ID bo'lsa URL parser kerak emas.
+    }
+  }
+
+  const candidateRaw = String(candidate || "").split(/[?#]/)[0].replace(/\/+$/, "");
+  try {
+    return normalizeString(decodeURIComponent(candidateRaw));
+  } catch (_) {
+    return normalizeString(candidateRaw);
+  }
+}
+
 function buildContestNftPrizePayload(doc = {}) {
   const normalizedNftId = normalizeString(doc?.nftId || doc?.giftId);
+  const normalizedSlug = normalizeString(doc?.slug || doc?.nftSlug);
   return {
     prizeType: "nft",
     giftId: normalizeString(doc?.giftId),
     nftId: normalizedNftId,
+    nftSlug: normalizedSlug,
     title: normalizeString(doc?.title) || "NFT Gift",
     giftImageUrl: normalizedNftId
       ? `/api/gifts/nft-image/${encodeURIComponent(normalizedNftId)}`
@@ -48,6 +89,7 @@ async function enrichContestPrize(item = {}) {
       prizeType: "gift",
       giftId: normalizeString(item?.giftId),
       nftId: "",
+      nftSlug: "",
       title: normalizeString(item?.title),
       giftImageUrl: normalizeString(item?.giftImageUrl),
       patternImageUrl: "",
@@ -60,13 +102,14 @@ async function enrichContestPrize(item = {}) {
     };
   }
 
-  const nftId = normalizeString(item?.nftId || item?.giftId);
-  if (!nftId) {
+  const nftCandidate = extractTelegramNftCandidate(item?.nftId || item?.giftId || item?.nftSlug);
+  if (!nftCandidate) {
     return {
       place: Number(item?.place || 0),
       prizeType: "nft",
       giftId: "",
       nftId: "",
+      nftSlug: "",
       title: normalizeString(item?.title) || "NFT Gift",
       giftImageUrl: normalizeString(item?.giftImageUrl),
       patternImageUrl: "",
@@ -79,17 +122,28 @@ async function enrichContestPrize(item = {}) {
     };
   }
 
-  const nftDoc = await UserNft.findOne({ nftId })
+  const candidateRegex = new RegExp("^" + escapeRegex(nftCandidate) + "$", "i");
+  const nftDoc = await UserNft.findOne({
+    $or: [
+      { nftId: nftCandidate },
+      { slug: nftCandidate },
+      { nftId: candidateRegex },
+      { slug: candidateRegex },
+    ],
+  })
     .select({
       nftId: 1,
       giftId: 1,
+      slug: 1,
       title: 1,
       patternAssetStatus: 1,
       backdropColors: 1,
     })
     .lean();
 
-  const normalized = nftDoc ? buildContestNftPrizePayload(nftDoc) : buildContestNftPrizePayload(item);
+  const normalized = nftDoc
+    ? buildContestNftPrizePayload(nftDoc)
+    : buildContestNftPrizePayload({ ...item, nftId: nftCandidate, nftSlug: nftCandidate });
   return {
     place: Number(item?.place || 0),
     ...normalized,
