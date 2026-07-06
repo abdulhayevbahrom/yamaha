@@ -17,6 +17,44 @@ function escapeRegex(value) {
   return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function parseNftSlugAndNumber(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) {
+    return {
+      slug: "",
+      nftNumber: 0,
+      nftNumberText: "",
+    };
+  }
+
+  const match = normalized.match(/^(.*)-(\d{1,18})$/);
+  if (!match) {
+    return {
+      slug: "",
+      nftNumber: 0,
+      nftNumberText: "",
+    };
+  }
+
+  const slug = normalizeString(match[1]).replace(/[-_]+$/, "");
+  const nftNumberText = normalizeString(match[2]);
+  const nftNumber = Number(nftNumberText);
+
+  if (!slug || !Number.isFinite(nftNumber) || nftNumber <= 0) {
+    return {
+      slug: "",
+      nftNumber: 0,
+      nftNumberText: "",
+    };
+  }
+
+  return {
+    slug,
+    nftNumber,
+    nftNumberText,
+  };
+}
+
 function extractTelegramNftCandidate(value) {
   const raw = normalizeString(value);
   if (!raw) return "";
@@ -123,13 +161,48 @@ async function enrichContestPrize(item = {}) {
   }
 
   const candidateRegex = new RegExp("^" + escapeRegex(nftCandidate) + "$", "i");
+  const parsed = parseNftSlugAndNumber(nftCandidate);
+  const nftOr = [
+    { nftId: nftCandidate },
+    { slug: nftCandidate },
+    { nftId: candidateRegex },
+    { slug: candidateRegex },
+  ];
+
+  if (parsed.slug) {
+    const slugRegex = new RegExp("^" + escapeRegex(parsed.slug) + "$", "i");
+    const titleFromSlug = normalizeString(
+      parsed.slug
+        .replace(/[-_]+/g, " ")
+        .replace(/([a-z])([A-Z])/g, "$1 $2"),
+    );
+    const titleFromSlugRegex = new RegExp(
+      "^" + escapeRegex(titleFromSlug).replace(/\s+/g, "\\s*") + "$",
+      "i",
+    );
+    nftOr.push({ slug: parsed.slug });
+    nftOr.push({ slug: slugRegex });
+    if (parsed.nftNumber > 0) {
+      nftOr.push({ $and: [{ title: titleFromSlugRegex }, { nftNumber: parsed.nftNumber }] });
+      nftOr.push({ $and: [{ slug: slugRegex }, { nftNumber: parsed.nftNumber }] });
+    }
+  }
+
+  if (parsed.nftNumber > 0) {
+    nftOr.push({ nftId: parsed.nftNumberText });
+  }
+
+  if (parsed.slug && parsed.nftNumberText) {
+    const composite = parsed.slug + "-" + parsed.nftNumberText;
+    const compositeRegex = new RegExp("^" + escapeRegex(composite) + "$", "i");
+    nftOr.push({ nftId: composite });
+    nftOr.push({ slug: composite });
+    nftOr.push({ nftId: compositeRegex });
+    nftOr.push({ slug: compositeRegex });
+  }
+
   const nftDoc = await UserNft.findOne({
-    $or: [
-      { nftId: nftCandidate },
-      { slug: nftCandidate },
-      { nftId: candidateRegex },
-      { slug: candidateRegex },
-    ],
+    $or: nftOr,
   })
     .select({
       nftId: 1,
@@ -195,13 +268,17 @@ async function listContests(req, res, options = {}) {
       contests.map(async (contest) => {
         const finalized = await finalizeContestIfNeeded(contest);
         const source = finalized || contest;
+        const enrichedSource = {
+          ...source,
+          prizes: await sortPrizes(source?.prizes || []),
+        };
         const stats =
-          source && getContestPhase(source) === "active"
-            ? await buildContestLeaderboard(source)
+          enrichedSource && getContestPhase(enrichedSource) === "active"
+            ? await buildContestLeaderboard(enrichedSource)
             : null;
-        const limit = getContestLeaderboardLimit(source);
+        const limit = getContestLeaderboardLimit(enrichedSource);
         return {
-          ...mapContest(source),
+          ...mapContest(enrichedSource),
           leaderboard: stats?.leaderboard?.slice(0, limit) || [],
         };
       }),
@@ -241,8 +318,12 @@ const getCurrentContest = async (req, res) => {
       });
     }
 
-    const stats = await buildContestLeaderboard(activeContest);
-    const limit = getContestLeaderboardLimit(activeContest);
+    const enrichedContest = {
+      ...activeContest,
+      prizes: await sortPrizes(activeContest?.prizes || []),
+    };
+    const stats = await buildContestLeaderboard(enrichedContest);
+    const limit = getContestLeaderboardLimit(enrichedContest);
     const myRank = findContestUserRank(
       stats.leaderboard,
       req?.telegramAuth?.tgUserId || req.headers["x-tg-user-id"],
@@ -250,7 +331,7 @@ const getCurrentContest = async (req, res) => {
 
     return response.success(res, "Contest", {
       contest: {
-        ...mapContest(activeContest),
+        ...mapContest(enrichedContest),
         leaderboard: stats.leaderboard.slice(0, limit),
       },
       leaderboard: stats.leaderboard.slice(0, limit),

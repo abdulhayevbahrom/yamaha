@@ -1064,17 +1064,20 @@ async function getGiftImage(req, res) {
 }
 
 async function getNftImage(req, res) {
-  const nftId = normalizeString(req.params?.nftId);
-  if (!nftId) {
+  const nftIdOrSlug = normalizeString(req.params?.nftId);
+  if (!nftIdOrSlug) {
     return response.notFound(res, "NFT topilmadi");
   }
 
   try {
-    const nftDoc = await UserNft.findOne({ nftId })
-      .select({ slug: 1 })
+    const nftDoc = await UserNft.findOne({
+      $or: [{ nftId: nftIdOrSlug }, { slug: nftIdOrSlug }],
+    })
+      .select({ nftId: 1, slug: 1 })
       .lean();
+    const resolvedNftId = normalizeString(nftDoc?.nftId) || nftIdOrSlug;
     const image = await getNftImageBuffer({
-      nftId,
+      nftId: resolvedNftId,
       slug: normalizeString(nftDoc?.slug),
     });
 
@@ -1089,18 +1092,21 @@ async function getNftImage(req, res) {
 }
 
 async function getNftPattern(req, res) {
-  const nftId = normalizeString(req.params?.nftId);
-  if (!nftId) {
+  const nftIdOrSlug = normalizeString(req.params?.nftId);
+  if (!nftIdOrSlug) {
     return response.notFound(res, "NFT topilmadi");
   }
 
   try {
-    const nftDoc = await UserNft.findOne({ nftId })
-      .select({ slug: 1 })
+    const nftDoc = await UserNft.findOne({
+      $or: [{ nftId: nftIdOrSlug }, { slug: nftIdOrSlug }],
+    })
+      .select({ nftId: 1, slug: 1 })
       .lean();
+    const resolvedNftId = normalizeString(nftDoc?.nftId) || nftIdOrSlug;
 
     const image = await getNftPatternImageBuffer({
-      nftId,
+      nftId: resolvedNftId,
       slug: normalizeString(nftDoc?.slug),
     });
 
