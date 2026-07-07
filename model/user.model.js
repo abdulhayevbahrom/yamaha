@@ -43,6 +43,29 @@ const userSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    referralExcludedAt: {
+      type: Date,
+      default: null,
+    },
+    referralExcludedReason: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    referralExcludedByAdminId: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    referralRestoredAt: {
+      type: Date,
+      default: null,
+    },
+    referralRestoredByAdminId: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     referralSignupBonusGrantedAt: {
       type: Date,
       default: null,

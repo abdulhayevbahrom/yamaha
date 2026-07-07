@@ -150,7 +150,7 @@ async function getMe(req, res) {
             },
           },
         ]),
-        User.countDocuments({ referredByUserId: tgUser.tgUserId }),
+        User.countDocuments({ referredByUserId: tgUser.tgUserId, referralExcludedAt: null }),
         getReferralRedemptionState(tgUser.tgUserId),
         getReferralConfig(),
         UserGift.aggregate([
@@ -294,7 +294,7 @@ async function getMyReferrals(req, res) {
     const [user, referralConfig, totalItems, redemptionState] = await Promise.all([
       ensureUser(tgUser),
       getReferralConfig(),
-      User.countDocuments({ referredByUserId: tgUser.tgUserId }),
+      User.countDocuments({ referredByUserId: tgUser.tgUserId, referralExcludedAt: null }),
       getReferralRedemptionState(tgUser.tgUserId),
     ]);
 
@@ -302,7 +302,7 @@ async function getMyReferrals(req, res) {
     const safePage = Math.min(page, totalPages);
 
     const referredUsers = totalItems
-      ? await User.find({ referredByUserId: tgUser.tgUserId })
+      ? await User.find({ referredByUserId: tgUser.tgUserId, referralExcludedAt: null })
           .sort({ referredAt: -1, createdAt: -1 })
           .skip((safePage - 1) * limit)
           .limit(limit)

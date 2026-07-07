@@ -151,6 +151,7 @@ function buildRewardQualifyingFilter(referrerTgUserId, activeFrom) {
   const filter = {
     referredByUserId: referrerTgUserId,
     referralActivatedAt: { $ne: null },
+    referralExcludedAt: null,
     isBlocked: { $ne: true },
   };
 

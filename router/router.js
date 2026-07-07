@@ -370,6 +370,16 @@ router.get(
   authMiddleware,
   adminController.getUserReferrals,
 );
+router.patch(
+  "/admin/users/:tgUserId/referrals/:referredTgUserId",
+  authMiddleware,
+  adminController.updateUserReferralExclusion,
+);
+router.post(
+  "/admin/users/:tgUserId/referrals/exclude-all",
+  authMiddleware,
+  adminController.excludeAllUserReferrals,
+);
 router.get(
   "/admin/users/:tgUserId/assets",
   authMiddleware,

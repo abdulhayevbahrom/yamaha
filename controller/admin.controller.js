@@ -475,6 +475,16 @@ async function buildAdminUserList(items) {
         $group: {
           _id: "$referredByUserId",
           inviteCount: { $sum: 1 },
+          activeInviteCount: {
+            $sum: {
+              $cond: [{ $eq: ["$referralExcludedAt", null] }, 1, 0],
+            },
+          },
+          excludedInviteCount: {
+            $sum: {
+              $cond: [{ $ne: ["$referralExcludedAt", null] }, 1, 0],
+            },
+          },
         },
       },
     ]),
@@ -504,7 +514,9 @@ async function buildAdminUserList(items) {
       stats: {
         totalOrders: Number(orderRow.totalOrders || 0),
         totalSpent: Number(orderRow.totalSpent || 0),
-        inviteCount: Number(inviteRow.inviteCount || 0),
+        inviteCount: Number(inviteRow.activeInviteCount ?? inviteRow.inviteCount ?? 0),
+        totalInviteCount: Number(inviteRow.inviteCount || 0),
+        excludedInviteCount: Number(inviteRow.excludedInviteCount || 0),
       },
     };
   });
@@ -1011,7 +1023,11 @@ const getUserReferrals = async (req, res) => {
         ? Math.min(100, Math.floor(requestedLimit))
         : 20;
 
-    const totalItems = await User.countDocuments({ referredByUserId: tgUserId });
+    const [totalItems, activeItems, excludedItems] = await Promise.all([
+      User.countDocuments({ referredByUserId: tgUserId }),
+      User.countDocuments({ referredByUserId: tgUserId, referralExcludedAt: null }),
+      User.countDocuments({ referredByUserId: tgUserId, referralExcludedAt: { $ne: null } }),
+    ]);
     const totalPages = Math.max(1, Math.ceil(Number(totalItems || 0) / limit));
     const safePage = Math.min(page, totalPages);
 
@@ -1025,6 +1041,12 @@ const getUserReferrals = async (req, res) => {
             username: 1,
             profileName: 1,
             referredAt: 1,
+            referralActivatedAt: 1,
+            referralExcludedAt: 1,
+            referralExcludedReason: 1,
+            referralExcludedByAdminId: 1,
+            referralRestoredAt: 1,
+            isBlocked: 1,
             createdAt: 1,
           })
           .lean()
@@ -1039,6 +1061,8 @@ const getUserReferrals = async (req, res) => {
         page: safePage,
         limit,
         totalItems: Number(totalItems || 0),
+        activeItems: Number(activeItems || 0),
+        excludedItems: Number(excludedItems || 0),
         totalPages,
       },
       items: items.map((item) => ({
@@ -1046,12 +1070,136 @@ const getUserReferrals = async (req, res) => {
         username: String(item.username || ""),
         profileName: String(item.profileName || ""),
         referredAt: item.referredAt || item.createdAt || null,
+        referralActivatedAt: item.referralActivatedAt || null,
+        referralExcludedAt: item.referralExcludedAt || null,
+        referralExcludedReason: String(item.referralExcludedReason || ""),
+        referralExcludedByAdminId: String(item.referralExcludedByAdminId || ""),
+        referralRestoredAt: item.referralRestoredAt || null,
+        isBlocked: Boolean(item.isBlocked),
+        isReferralExcluded: Boolean(item.referralExcludedAt),
       })),
     });
   } catch (error) {
     return response.serverError(
       res,
       "Taklif qilgan mijozlarni olishda xatolik",
+      error.message,
+    );
+  }
+};
+
+const updateUserReferralExclusion = async (req, res) => {
+  try {
+    const referrerTgUserId = normalizeString(req.params.tgUserId);
+    const referredTgUserId = normalizeString(req.params.referredTgUserId);
+    const excluded = Boolean(req.body?.excluded);
+    const reason = normalizeString(req.body?.reason);
+
+    if (!referrerTgUserId || !referredTgUserId) {
+      return response.error(res, "Referral ma'lumotlari noto'g'ri");
+    }
+
+    const referredUser = await User.findOne({
+      tgUserId: referredTgUserId,
+      referredByUserId: referrerTgUserId,
+    }).lean();
+    if (!referredUser) {
+      return response.notFound(res, "Taklif qilingan mijoz topilmadi");
+    }
+
+    const now = new Date();
+    const adminId = normalizeString(req?.telegramAuth?.tgUserId || req?.admin?.tgUserId);
+    const update = excluded
+      ? {
+          referralExcludedAt: now,
+          referralExcludedReason: reason || "Admin tomonidan bekor qilindi",
+          referralExcludedByAdminId: adminId,
+        }
+      : {
+          referralExcludedAt: null,
+          referralExcludedReason: "",
+          referralExcludedByAdminId: "",
+          referralRestoredAt: now,
+          referralRestoredByAdminId: adminId,
+        };
+
+    const updated = await User.findOneAndUpdate(
+      { tgUserId: referredTgUserId, referredByUserId: referrerTgUserId },
+      { $set: update },
+      { new: true },
+    )
+      .select({
+        tgUserId: 1,
+        username: 1,
+        profileName: 1,
+        referredAt: 1,
+        referralActivatedAt: 1,
+        referralExcludedAt: 1,
+        referralExcludedReason: 1,
+        referralExcludedByAdminId: 1,
+        referralRestoredAt: 1,
+        isBlocked: 1,
+        createdAt: 1,
+      })
+      .lean();
+
+    return response.success(
+      res,
+      excluded ? "Referral hisobdan chiqarildi" : "Referral qayta hisobga qo'shildi",
+      {
+        tgUserId: String(updated.tgUserId || ""),
+        username: String(updated.username || ""),
+        profileName: String(updated.profileName || ""),
+        referredAt: updated.referredAt || updated.createdAt || null,
+        referralActivatedAt: updated.referralActivatedAt || null,
+        referralExcludedAt: updated.referralExcludedAt || null,
+        referralExcludedReason: String(updated.referralExcludedReason || ""),
+        referralExcludedByAdminId: String(updated.referralExcludedByAdminId || ""),
+        referralRestoredAt: updated.referralRestoredAt || null,
+        isBlocked: Boolean(updated.isBlocked),
+        isReferralExcluded: Boolean(updated.referralExcludedAt),
+      },
+    );
+  } catch (error) {
+    return response.serverError(
+      res,
+      "Referral holatini yangilashda xatolik",
+      error.message,
+    );
+  }
+};
+
+const excludeAllUserReferrals = async (req, res) => {
+  try {
+    const referrerTgUserId = normalizeString(req.params.tgUserId);
+    const reason = normalizeString(req.body?.reason) || "Admin tomonidan hammasi bekor qilindi";
+    if (!referrerTgUserId) {
+      return response.error(res, "Foydalanuvchi topilmadi");
+    }
+
+    const now = new Date();
+    const adminId = normalizeString(req?.telegramAuth?.tgUserId || req?.admin?.tgUserId);
+    const result = await User.updateMany(
+      {
+        referredByUserId: referrerTgUserId,
+        referralExcludedAt: null,
+      },
+      {
+        $set: {
+          referralExcludedAt: now,
+          referralExcludedReason: reason,
+          referralExcludedByAdminId: adminId,
+        },
+      },
+    );
+
+    return response.success(res, "Referral takliflari bekor qilindi", {
+      modifiedCount: Number(result.modifiedCount || 0),
+    });
+  } catch (error) {
+    return response.serverError(
+      res,
+      "Referral takliflarini bekor qilishda xatolik",
       error.message,
     );
   }
@@ -2173,6 +2321,8 @@ module.exports = {
   searchAssets,
   getUserProfilePhoto,
   getUserReferrals,
+  updateUserReferralExclusion,
+  excludeAllUserReferrals,
   getUserAssets,
   adminRemoveUserNft,
   adminTransferUserNft,
