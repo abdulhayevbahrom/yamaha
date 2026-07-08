@@ -338,7 +338,9 @@ async function listSuspiciousDevices({ page = 1, limit = 20 } = {}) {
     $or: [
       { suspiciousAt: { $ne: null } },
       { uniqueUserCount: { $gte: 5 } },
-      { requestCount: { $gte: 20 } },
+      // Faqat bitta user bo'lsa, ko'p request'lar o'zi yetarli signal emas.
+      // Bu holat oddiy aktiv ishlatish yoki bitta accountning ko'p ochilishi bo'lishi mumkin.
+      { $and: [{ requestCount: { $gte: 20 } }, { uniqueUserCount: { $gte: 2 } }] },
     ],
   };
 
