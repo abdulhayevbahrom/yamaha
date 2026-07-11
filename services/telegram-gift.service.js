@@ -1716,6 +1716,7 @@ async function transferSavedStarGiftToRecipient({
 
 module.exports = {
   isTelegramGiftConfigured,
+  getTelegramGiftClient,
   getStarGiftsCatalog,
   getGiftById,
   getGiftImageBuffer,
@@ -1726,5 +1727,4 @@ module.exports = {
   sendStarGiftToRecipient,
   transferSavedStarGiftToRecipient,
 };
-
 
