@@ -138,6 +138,7 @@ async function getReferralRedemptionState(tgUserId) {
         referralCode: 1,
         referredByUserId: 1,
         isBlocked: 1,
+        referralBlockedAt: 1,
       })
       .lean(),
     getReferralQualifiedInviteCount({ tgUserId: ownerTgUserId, activeFrom }),
@@ -188,7 +189,7 @@ async function getReferralRedemptionState(tgUserId) {
       ? claimedRewardKeys.filter(Boolean)
       : [],
     canRedeem: Boolean(
-      owner && !owner.isBlocked && hasThreshold && !isCoolingDown && !hasPendingRequest,
+      owner && !owner.isBlocked && !owner.referralBlockedAt && hasThreshold && !isCoolingDown && !hasPendingRequest,
     ),
     isCoolingDown,
     nextAvailableAt: nextAvailableAt ? nextAvailableAt.toISOString() : null,
@@ -233,6 +234,9 @@ async function requestReferralPromoCode({
   const state = await getReferralRedemptionState(ownerTgUserId);
   if (!state?.owner?.tgUserId) {
     return { ok: false, reason: "user_not_found" };
+  }
+  if (state.owner.referralBlockedAt) {
+    return { ok: false, reason: "referral_blocked" };
   }
 
   const rewardCatalog = Array.isArray(state.rewardCatalog) ? state.rewardCatalog : [];

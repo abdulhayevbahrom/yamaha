@@ -380,6 +380,11 @@ router.post(
   authMiddleware,
   adminController.excludeAllUserReferrals,
 );
+router.patch(
+  "/admin/users/:tgUserId/referral-system-block",
+  authMiddleware,
+  adminController.updateUserReferralSystemBlock,
+);
 router.get(
   "/admin/users/:tgUserId/assets",
   authMiddleware,

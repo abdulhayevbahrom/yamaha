@@ -508,6 +508,8 @@ async function buildAdminUserList(items) {
       isBlocked: Boolean(user.isBlocked),
       blockedAt: user.blockedAt || null,
       blockedReason: String(user.blockedReason || ""),
+      referralBlockedAt: user.referralBlockedAt || null,
+      referralBlockedReason: String(user.referralBlockedReason || ""),
       referralEarningsTotal: Number(user.referralEarningsTotal || 0),
       createdAt: user.createdAt || null,
       updatedAt: user.updatedAt || null,
@@ -1056,6 +1058,8 @@ const getUserReferrals = async (req, res) => {
       user: {
         tgUserId: String(user.tgUserId || ""),
         username: String(user.username || ""),
+        referralBlockedAt: user.referralBlockedAt || null,
+        referralBlockedReason: String(user.referralBlockedReason || ""),
       },
       pagination: {
         page: safePage,
@@ -1202,6 +1206,51 @@ const excludeAllUserReferrals = async (req, res) => {
       "Referral takliflarini bekor qilishda xatolik",
       error.message,
     );
+  }
+};
+
+const updateUserReferralSystemBlock = async (req, res) => {
+  try {
+    const tgUserId = normalizeString(req.params.tgUserId);
+    const blocked = Boolean(req.body?.blocked);
+    const reason = normalizeString(req.body?.reason);
+    if (!tgUserId) return response.error(res, "Foydalanuvchi topilmadi");
+
+    const adminId = normalizeString(req?.telegramAuth?.tgUserId || req?.admin?.tgUserId);
+    const update = blocked
+      ? {
+          referralBlockedAt: new Date(),
+          referralBlockedReason: reason || "Referral qoidasi buzilgani uchun bloklandi",
+          referralBlockedByAdminId: adminId,
+        }
+      : {
+          referralBlockedAt: null,
+          referralBlockedReason: "",
+          referralBlockedByAdminId: "",
+        };
+    const user = await User.findOneAndUpdate(
+      { tgUserId },
+      { $set: update },
+      { new: true },
+    ).lean();
+    if (!user) return response.notFound(res, "Foydalanuvchi topilmadi");
+
+    emitUserUpdate(tgUserId, {
+      type: "referral_system_block_changed",
+      refreshReferral: true,
+      referralBlocked: blocked,
+    });
+    return response.success(
+      res,
+      blocked ? "Referral tizimi bloklandi" : "Referral tizimi qayta yoqildi",
+      {
+        tgUserId: String(user.tgUserId || ""),
+        referralBlockedAt: user.referralBlockedAt || null,
+        referralBlockedReason: String(user.referralBlockedReason || ""),
+      },
+    );
+  } catch (error) {
+    return response.serverError(res, "Referral tizimini yangilashda xatolik", error.message);
   }
 };
 
@@ -2323,6 +2372,7 @@ module.exports = {
   getUserReferrals,
   updateUserReferralExclusion,
   excludeAllUserReferrals,
+  updateUserReferralSystemBlock,
   getUserAssets,
   adminRemoveUserNft,
   adminTransferUserNft,

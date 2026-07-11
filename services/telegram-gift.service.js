@@ -590,8 +590,6 @@ async function getTelegramGiftClient() {
       buildTelegramClientOptions({ connectionRetries: 5 }),
     );
 
-    // Bu client faqat RPC uchun ishlatiladi, update loop PM2 logini shovqin qiladi.
-    telegramClient._loopStarted = true;
     patchTelegramInvokeWithRetry(telegramClient, "telegram-gift");
   }
 
@@ -1728,6 +1726,5 @@ module.exports = {
   sendStarGiftToRecipient,
   transferSavedStarGiftToRecipient,
 };
-
 
 

@@ -25,3 +25,11 @@ test("unknown technical gift errors are not exposed to customers", () => {
   );
   assert.doesNotMatch(message, /SECRET_INTERNAL_TELEGRAM_FAILURE/);
 });
+
+test("a missing withdrawal username has a clear recovery instruction", () => {
+  const message = getGiftSendErrorMessage(
+    new Error('Could not find the input entity for {"userId":"7300112885","className":"PeerUser"}'),
+  );
+
+  assert.match(message, /@username/);
+});

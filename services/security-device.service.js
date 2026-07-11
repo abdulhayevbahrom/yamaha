@@ -76,6 +76,13 @@ function formatUserLabel(user = {}) {
   return normalizeString(user.tgUserId) || "-";
 }
 
+function formatReferralAlertUser(user = {}) {
+  const username = normalizeString(user.username);
+  const profileName = normalizeString(user.profileName);
+  const tgUserId = normalizeString(user.tgUserId) || "-";
+  return `@username: ${username ? `@${username}` : "-"} | Profil: ${profileName || "-"} | tgUserId: ${tgUserId}`;
+}
+
 function parseIdList(rawValue) {
   return String(rawValue || "")
     .split(",")
@@ -281,6 +288,22 @@ async function recordDeviceActivity({
       label: formatUserLabel(item),
     }));
 
+  const referralSourceIds = Array.from(
+    new Set(
+      recentUserList
+        .map((item) => normalizeString(item.referredByUserId))
+        .filter(Boolean),
+    ),
+  );
+  const referralSources = referralSourceIds.length
+    ? await User.find({ tgUserId: { $in: referralSourceIds } })
+        .select({ tgUserId: 1, username: 1, profileName: 1 })
+        .lean()
+    : [];
+  const referralSourceMap = new Map(
+    referralSources.map((item) => [normalizeString(item.tgUserId), item]),
+  );
+
   const alertMessage = [
     "⚠️ Referral anti-fraud ogohlantirishi",
     `Qurilma: ${deviceKey.slice(0, 18)}...`,
@@ -290,11 +313,16 @@ async function recordDeviceActivity({
     `24 soatdagi open/start signal: ${recentRequestCount}`,
     `Sabab: ${suspiciousReason}`,
     "",
-    "So'nggi userlar:",
-    ...recentUserList.slice(0, 8).map(
-      (item, index) =>
-        `${index + 1}. ${item.label} | tg:${item.tgUserId || "-"} | block:${item.isBlocked ? "ha" : "yo'q"}`,
-    ),
+    "Referral havolasi egalari:",
+    ...(referralSourceIds.length
+      ? referralSourceIds.slice(0, 10).map((referrerId, index) => {
+          const referrer = referralSourceMap.get(referrerId);
+          return `${index + 1}. ${referrer ? formatReferralAlertUser(referrer) : `Topilmadi | tgUserId: ${referrerId}`}`;
+        })
+      : ["Yo'q"]),
+    ...(referralSourceIds.length > 10
+      ? [`… Yana ${referralSourceIds.length - 10} ta referral havolasi egasi admin panelda ko'rinadi.`]
+      : []),
   ].join("\n");
 
   const adminIds = getAdminAlertRecipientIds();
@@ -457,4 +485,5 @@ async function listSuspiciousDevices({ page = 1, limit = 20 } = {}) {
 module.exports = {
   recordDeviceActivity,
   listSuspiciousDevices,
+  formatReferralAlertUser,
 };

@@ -66,6 +66,21 @@ const userSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    referralBlockedAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+    referralBlockedReason: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    referralBlockedByAdminId: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     referralSignupBonusGrantedAt: {
       type: Date,
       default: null,

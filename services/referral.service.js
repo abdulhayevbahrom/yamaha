@@ -219,6 +219,16 @@ async function maybeNotifyReferralMilestone(referrerOrId) {
     return { ok: false, skipped: true, reason: "missing_referrer" };
   }
 
+  const referralOwner = await User.findOne({
+    tgUserId: referrerTgUserId,
+    referralBlockedAt: null,
+  })
+    .select({ tgUserId: 1 })
+    .lean();
+  if (!referralOwner) {
+    return { ok: true, skipped: true, reason: "referral_blocked" };
+  }
+
   const rewardConfig = await getReferralRewardConfig();
   const inviteThreshold = Math.max(
     1,
@@ -420,6 +430,7 @@ async function bindReferralFromStart({
   const referrer = await User.findOne({
     referralCode,
     tgUserId: { $ne: user.tgUserId },
+    referralBlockedAt: null,
   }).lean();
 
   if (!referrer?.tgUserId) return user;
@@ -459,6 +470,7 @@ async function activateReferralOnMiniAppOpen({
     profileName,
   });
   if (!user?.tgUserId) return null;
+  if (user.referralBlockedAt) return user;
   if (!normalizeString(user.referredByUserId)) return user;
   if (user.referralActivatedAt) return user;
 
@@ -502,6 +514,7 @@ async function activateReferralOnMiniAppOpen({
 
   const referrer = await User.findOne({
     tgUserId: user.referredByUserId,
+    referralBlockedAt: null,
   }).lean();
   if (!referrer?.tgUserId || referrer.tgUserId === user.tgUserId) {
     return User.findOne({ tgUserId: user.tgUserId }).lean();
@@ -565,6 +578,7 @@ async function awardReferralCommissionForOrder(orderOrId) {
 
   const referrer = await User.findOne({
     tgUserId: referredUser.referredByUserId,
+    referralBlockedAt: null,
   }).lean();
   if (!referrer?.tgUserId || referrer.tgUserId === referredUser.tgUserId) {
     return { ok: false, skipped: true, reason: "invalid_referrer" };

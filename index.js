@@ -147,11 +147,17 @@ async function startServer() {
     if (shouldStartTelegramWorkers()) {
       const { startBot } = require("./bot");
       const { startUserClient } = require("./user-client");
+      const {
+        startNftWithdrawalRecipientListener,
+      } = require("./services/nft-withdrawal-recipient-listener.service");
       Promise.resolve(startBot({ strict: true })).catch((error) => {
         console.error("Bot start error:", error?.message || error);
       });
       Promise.resolve(startUserClient({ strict: true })).catch((error) => {
         console.error("User-client start error:", error?.message || error);
+      });
+      Promise.resolve(startNftWithdrawalRecipientListener()).catch((error) => {
+        console.error("NFT recipient listener start error:", error?.message || error);
       });
     } else {
       console.log(

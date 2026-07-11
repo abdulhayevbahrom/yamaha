@@ -208,6 +208,8 @@ async function getMe(req, res) {
         totalSpent,
       },
       referral: {
+        isBlocked: Boolean(user?.referralBlockedAt),
+        blockedReason: String(user?.referralBlockedReason || ""),
         code: String(user?.referralCode || ""),
         link: buildReferralLink(user?.referralCode || ""),
         inviteCount: Number(inviteCount || 0),
@@ -291,8 +293,15 @@ async function getMyReferrals(req, res) {
         ? Math.min(100, Math.floor(requestedLimit))
         : 20;
 
+    const currentUser = await ensureUser(tgUser);
+    if (currentUser?.referralBlockedAt) {
+      return response.error(res, "Siz uchun referral tizimi bloklangan", {
+        code: "REFERRAL_SYSTEM_BLOCKED",
+      });
+    }
+
     const [user, referralConfig, totalItems, redemptionState] = await Promise.all([
-      ensureUser(tgUser),
+      Promise.resolve(currentUser),
       getReferralConfig(),
       User.countDocuments({ referredByUserId: tgUser.tgUserId, referralExcludedAt: null }),
       getReferralRedemptionState(tgUser.tgUserId),
@@ -513,6 +522,11 @@ async function requestReferralPromoCodeHandler(req, res) {
           activeRequest: result.activeRequest || null,
         });
       }
+      if (reason === "referral_blocked") {
+        return response.error(res, "Siz uchun referral tizimi bloklangan", {
+          code: "REFERRAL_SYSTEM_BLOCKED",
+        });
+      }
       if (reason === "duplicate_reward") {
         return response.error(res, "Bu sovg'a allaqachon olingan", {
           code: reason,
@@ -614,7 +628,6 @@ async function createNftWithdrawalRequest(req, res) {
     if (user?.isBlocked) {
       return response.error(res, "Foydalanuvchi bloklangan");
     }
-
     const nftId = normalizeString(req.body?.nftId);
     if (!nftId) {
       return response.error(res, "nftId required");

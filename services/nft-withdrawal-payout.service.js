@@ -24,12 +24,78 @@ const READY_STATUSES = new Set([
   "cancelled",
 ]);
 
+const NFT_WITHDRAW_RECIPIENT_CONTACT_URL = "https://t.me/m/sBLO8M8VNmQ6";
+
 function normalizeString(value) {
   return String(value || "").trim();
 }
 
 function normalizeRecipient(value) {
   return normalizeString(value).replace(/^@+/, "");
+}
+
+function isTelegramUserId(value) {
+  return /^\d+$/.test(normalizeRecipient(value));
+}
+
+async function resolveWithdrawalRecipient(order, nftTx) {
+  const savedRecipient = normalizeRecipient(
+    nftTx.recipientIdentifier || order?.tgUsername || "",
+  );
+
+  // A bare numeric ID cannot reliably be resolved by the Telegram user session:
+  // it also needs Telegram's access hash. Prefer the current username so a
+  // pending request becomes deliverable after the user adds one.
+  if (savedRecipient && !isTelegramUserId(savedRecipient)) {
+    return savedRecipient;
+  }
+
+  // The recipient has written to the gift-service account. Telegram has now
+  // supplied the access hash for their numeric ID to this user session.
+  if (nftTx?.recipientContactConfirmedAt && savedRecipient) {
+    return savedRecipient;
+  }
+
+  const ownerTgUserId = normalizeString(nftTx.ownerTgUserId || order?.tgUserId);
+  if (!ownerTgUserId) return "";
+
+  const owner = await User.findOne({ tgUserId: ownerTgUserId })
+    .select({ username: 1 })
+    .lean();
+  return normalizeRecipient(owner?.username || order?.tgUsername || "");
+}
+
+async function waitForRecipientContact(order) {
+  const now = new Date();
+  const fragmentTx = getSafeFragmentTx(order);
+  order.status = "payment_submitted";
+  order.fulfillmentStatus = "pending";
+  order.fulfillmentError = "recipient_contact_required";
+  order.fragmentTx = {
+    ...fragmentTx,
+    nftWithdrawal: {
+      ...(fragmentTx.nftWithdrawal || {}),
+      awaitingRecipientContact: true,
+      recipientContactRequestedAt: now.toISOString(),
+    },
+  };
+  await order.save();
+  await syncAdminMessages(order, "⏳ Mijoz xizmat akkauntiga yozishini kutyapmiz");
+
+  await sendTelegramText(
+    order.tgUserId,
+    "ℹ️ NFT yechib olish buyurtmangizni davom ettirish uchun quyidagi tugmani bosing va ochilgan xizmat akkauntiga istalgan xabar yuboring. Xabar yuborilgach, NFT avtomatik o'tkaziladi.",
+    {
+      reply_markup: {
+        inline_keyboard: [[{
+          text: "Buyurtmani davom ettirish",
+          url: NFT_WITHDRAW_RECIPIENT_CONTACT_URL,
+        }]],
+      },
+    },
+  );
+
+  return { ok: false, reason: "awaiting_recipient_contact" };
 }
 
 function toSafeNumber(value, fallback = 0) {
@@ -301,15 +367,16 @@ async function transferNftForWithdrawal(order) {
   const nftTx = fragmentTx.nftWithdrawal || {};
   const nftId = normalizeString(nftTx.nftId);
   const ownerTgUserId = normalizeString(nftTx.ownerTgUserId || order?.tgUserId);
-  const recipientIdentifier = normalizeRecipient(
-    nftTx.recipientIdentifier || order?.tgUsername || order?.tgUserId,
-  );
+  const recipientIdentifier = await resolveWithdrawalRecipient(order, nftTx);
   const transferRequestId = normalizeString(
     nftTx.transferRequestId || String(order?._id || ""),
   );
 
-  if (!nftId || !ownerTgUserId || !recipientIdentifier) {
+  if (!nftId || !ownerTgUserId) {
     return { ok: false, reason: "nft_missing" };
+  }
+  if (!recipientIdentifier) {
+    return { ok: false, reason: "recipient_username_required" };
   }
 
   const nft = await UserNft.findOne({
@@ -432,6 +499,10 @@ async function confirmNftWithdrawalById(orderId) {
 
   const fragmentTx = getSafeFragmentTx(order);
   const nftTx = fragmentTx.nftWithdrawal || {};
+  const recipientIdentifier = await resolveWithdrawalRecipient(order, nftTx);
+  if (!recipientIdentifier) {
+    return waitForRecipientContact(order);
+  }
   const withdrawFeeUzs = Math.max(
     0,
     Math.round(toSafeNumber(nftTx.withdrawFeeUzs || order?.expectedAmount || 0)),
@@ -555,7 +626,11 @@ async function confirmNftWithdrawalById(orderId) {
         },
       },
     );
-    return { ok: false, reason: transferResult.reason || "transfer_failed" };
+    return {
+      ok: false,
+      reason: transferResult.reason || "transfer_failed",
+      errorMessage: transferResult.errorMessage || "",
+    };
   }
 
   const now = new Date();

@@ -801,8 +801,14 @@ async function startBot({ strict = false } = {}) {
           text:
             result.reason === "needs_review"
               ? "Transfer natijasi noaniq. So'rov tekshiruvga o‘tdi."
+              : result.reason === "awaiting_recipient_contact"
+              ? "Mijozga xizmat akkauntiga yozish uchun xabar yuborildi."
+              : result.reason === "insufficient_balance"
+              ? "Mijoz balansida xizmat haqi yetarli emas"
               : result.reason === "not_ready"
               ? "So'rov hozir tasdiqlashga tayyor emas"
+              : result.errorMessage || result.reason === "transfer_failed"
+              ? "NFT yuborilmadi. Telegram ulanishi yoki qabul qiluvchi ma'lumotini tekshiring."
               : "Tasdiqlash xatolik",
           show_alert: true,
         });
