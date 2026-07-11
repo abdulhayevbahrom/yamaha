@@ -23,16 +23,23 @@ async function continueWithdrawalAfterRecipientContact(message) {
   const tgUserId = toTelegramId(sender?.id || message.senderId?.userId);
   if (!tgUserId) return;
 
+  console.log("[NFT_WITHDRAW_RECIPIENT_CONTACT] kiruvchi xabar olindi", {
+    tgUserId,
+    messageId: Number(message.id || 0),
+  });
+
   const now = new Date();
   const order = await Order.findOneAndUpdate(
     {
       product: "nft_withdrawal",
-      status: "payment_submitted",
+      status: { $in: ["payment_submitted", "admin_action_processing"] },
       tgUserId,
       "fragmentTx.nftWithdrawal.awaitingRecipientContact": true,
+      fulfillmentError: "recipient_contact_required",
     },
     {
       $set: {
+        status: "payment_submitted",
         "fragmentTx.nftWithdrawal.awaitingRecipientContact": false,
         "fragmentTx.nftWithdrawal.recipientContactConfirmedAt": now.toISOString(),
         "fragmentTx.nftWithdrawal.recipientContactMessageId": Number(message.id || 0),
@@ -40,7 +47,19 @@ async function continueWithdrawalAfterRecipientContact(message) {
     },
     { new: true },
   );
-  if (!order) return;
+  if (!order) {
+    console.log("[NFT_WITHDRAW_RECIPIENT_CONTACT] mos order topilmadi", {
+      tgUserId,
+      messageId: Number(message.id || 0),
+    });
+    return;
+  }
+
+  console.log("[NFT_WITHDRAW_RECIPIENT_CONTACT] order davom ettirilmoqda", {
+    orderId: String(order._id),
+    orderCode: Number(order.orderId || 0),
+    tgUserId,
+  });
 
   const result = await confirmNftWithdrawalById(order._id);
   if (!result.ok) {
@@ -56,6 +75,7 @@ async function startNftWithdrawalRecipientListener() {
   if (listenerStarted) return { ok: true, alreadyStarted: true };
 
   const client = await getTelegramGiftClient();
+  const self = await client.getMe();
   client.addEventHandler(
     (event) => continueWithdrawalAfterRecipientContact(event?.message).catch((error) => {
       console.error("[NFT_WITHDRAW_RECIPIENT_CONTACT] xabarni qayta ishlashda xato:", error?.message || error);
@@ -63,7 +83,10 @@ async function startNftWithdrawalRecipientListener() {
     new NewMessage({ incoming: true }),
   );
   listenerStarted = true;
-  console.log("NFT yechib olish qabul qiluvchi xabarlari kuzatuvi ishga tushdi.");
+  console.log("NFT yechib olish qabul qiluvchi xabarlari kuzatuvi ishga tushdi.", {
+    selfId: toTelegramId(self?.id),
+    selfUsername: normalizeString(self?.username),
+  });
   return { ok: true };
 }
 

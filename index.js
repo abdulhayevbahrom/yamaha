@@ -39,6 +39,19 @@ function shouldStartTelegramWorkers() {
 
   return true;
 }
+
+function shouldStartNftRecipientListener() {
+  if (!isEnabled(process.env.ENABLE_NFT_RECIPIENT_LISTENER, true)) {
+    return false;
+  }
+
+  const appInstance = String(process.env.NODE_APP_INSTANCE || "").trim();
+  if (appInstance && appInstance !== "0") {
+    return false;
+  }
+
+  return true;
+}
 //
 const PORT = Number(process.env.PORT) || 4090;
 const app = express();
@@ -147,22 +160,27 @@ async function startServer() {
     if (shouldStartTelegramWorkers()) {
       const { startBot } = require("./bot");
       const { startUserClient } = require("./user-client");
-      const {
-        startNftWithdrawalRecipientListener,
-      } = require("./services/nft-withdrawal-recipient-listener.service");
       Promise.resolve(startBot({ strict: true })).catch((error) => {
         console.error("Bot start error:", error?.message || error);
       });
       Promise.resolve(startUserClient({ strict: true })).catch((error) => {
         console.error("User-client start error:", error?.message || error);
       });
-      Promise.resolve(startNftWithdrawalRecipientListener()).catch((error) => {
-        console.error("NFT recipient listener start error:", error?.message || error);
-      });
     } else {
       console.log(
         "Telegram workerlar bu processda ishga tushirilmadi (PM2 instance yoki env cheklovi).",
       );
+    }
+
+    if (shouldStartNftRecipientListener()) {
+      const {
+        startNftWithdrawalRecipientListener,
+      } = require("./services/nft-withdrawal-recipient-listener.service");
+      Promise.resolve(startNftWithdrawalRecipientListener()).catch((error) => {
+        console.error("NFT recipient listener start error:", error?.message || error);
+      });
+    } else {
+      console.log("NFT qabul qiluvchi xabar listeneri bu processda o'chirilgan.");
     }
   });
 }

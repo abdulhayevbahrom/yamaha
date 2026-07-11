@@ -19,6 +19,7 @@ module.exports = {
       env: {
         NODE_ENV: "production",
         ENABLE_TELEGRAM_WORKERS: "false",
+        ENABLE_NFT_RECIPIENT_LISTENER: "true",
       },
     },
     {
