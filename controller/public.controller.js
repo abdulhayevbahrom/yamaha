@@ -39,6 +39,16 @@ const profileLookupInFlight = new Map();
 const TOP_SALES_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb"];
 const TOP_SALES_PERIODS = new Set(["today", "week", "month"]);
 
+function getTopSalePurchaseAmount(order) {
+  const paidAmount = Number(order?.paidAmount || 0);
+  if (Number.isFinite(paidAmount) && paidAmount > 0) return paidAmount;
+
+  // Old completed orders can lack paidAmount; their order price is the safe
+  // fallback. Balance top-ups are filtered out before this value is used.
+  const expectedAmount = Number(order?.expectedAmount || 0);
+  return Number.isFinite(expectedAmount) && expectedAmount > 0 ? expectedAmount : 0;
+}
+
 function normalizeLookupUsername(value) {
   return String(value || "")
     .trim()
@@ -283,7 +293,8 @@ const getTopSales = async (req, res) => {
     const startDate = getTopSalesStartDate(period);
 
     const orders = await Order.find({
-      product: { $in: TOP_SALES_PRODUCTS },
+      // Balance top-up orders must never appear in the public sales leaderboard.
+      product: { $in: TOP_SALES_PRODUCTS, $ne: "balance" },
       status: { $in: ["paid_auto_processed", "completed"] },
       $or: [{ paidAt: { $gte: startDate } }, { createdAt: { $gte: startDate } }],
     })
@@ -304,7 +315,7 @@ const getTopSales = async (req, res) => {
     orders.forEach((order) => {
       const user = userMap.get(sanitizeProfileDisplay(order?.tgUserId)) || null;
       const actor = resolveTopSalesActor(order, user);
-      const amount = Number(order.expectedAmount || 0);
+      const amount = getTopSalePurchaseAmount(order);
       const paidAt = order?.paidAt ? new Date(order.paidAt).getTime() : 0;
       const createdAt = order?.createdAt ? new Date(order.createdAt).getTime() : 0;
       const orderTime = paidAt || createdAt || 0;
@@ -506,4 +517,5 @@ module.exports = {
   lookupProfile,
   checkPremiumStatus,
   checkMlbbRole,
+  getTopSalePurchaseAmount,
 };

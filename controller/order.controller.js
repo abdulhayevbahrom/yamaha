@@ -758,10 +758,10 @@ function buildSearchFilter(rawSearch) {
 function buildHistoryFilter(scope) {
   if (scope === "sales") {
     return {
-      $or: [
-        { status: { $in: ["paid_auto_processed", "completed"] } },
-        { product: { $in: ["star_sell", "nft_withdrawal"] } },
-      ],
+      // Admin sales history mirrors the public leaderboard: only completed
+      // customer purchases, never balance top-ups or withdrawal operations.
+      product: { $in: ["star", "premium", "uc", "freefire", "mlbb"] },
+      status: { $in: ["paid_auto_processed", "completed"] },
     };
   }
 

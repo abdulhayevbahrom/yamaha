@@ -2262,7 +2262,14 @@ const getActiveUsers = async (req, res) => {
       const tgUserId = normalizeString(row?.tgUserId);
       if (!tgUserId) return;
       const user = userMap.get(tgUserId) || {};
-      const amount = Number(row?.expectedAmount || 0);
+      const paidAmount = Number(row?.paidAmount || 0);
+      const expectedAmount = Number(row?.expectedAmount || 0);
+      const amount =
+        Number.isFinite(paidAmount) && paidAmount > 0
+          ? paidAmount
+          : Number.isFinite(expectedAmount) && expectedAmount > 0
+            ? expectedAmount
+            : 0;
       const paidAtMs = row?.paidAt ? new Date(row.paidAt).getTime() : 0;
       const createdAtMs = row?.createdAt ? new Date(row.createdAt).getTime() : 0;
       const orderTime = paidAtMs || createdAtMs || 0;
