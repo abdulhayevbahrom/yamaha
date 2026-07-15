@@ -83,6 +83,16 @@ function formatReferralAlertUser(user = {}) {
   return `@username: ${username ? `@${username}` : "-"} | Profil: ${profileName || "-"} | tgUserId: ${tgUserId}`;
 }
 
+function collectReferralSourceIds(users = []) {
+  return Array.from(
+    new Set(
+      users
+        .map((item) => normalizeString(item?.referredByUserId))
+        .filter(Boolean),
+    ),
+  );
+}
+
 function parseIdList(rawValue) {
   return String(rawValue || "")
     .split(",")
@@ -256,8 +266,21 @@ async function recordDeviceActivity({
     { new: true },
   ).lean();
 
+  // Alert 10+ umumiy device user soniga ko'ra yuboriladi. Shu bois referral
+  // havolasi egalarini faqat oxirgi 24 soatdagi eventlardan emas, qurilmaning
+  // to'liq user tarixidan izlaymiz.
+  const trackedDeviceUserIds = Array.from(
+    new Set(
+      [
+        ...recentUserIds,
+        ...(Array.isArray(updated?.uniqueUserIds) ? updated.uniqueUserIds : []),
+      ]
+        .map((item) => normalizeString(item))
+        .filter(Boolean),
+    ),
+  );
   const users = await User.find({
-    tgUserId: { $in: Array.from(recentUserIds).slice(0, 20) },
+    tgUserId: { $in: trackedDeviceUserIds },
   })
     .select({
       tgUserId: 1,
@@ -288,13 +311,7 @@ async function recordDeviceActivity({
       label: formatUserLabel(item),
     }));
 
-  const referralSourceIds = Array.from(
-    new Set(
-      recentUserList
-        .map((item) => normalizeString(item.referredByUserId))
-        .filter(Boolean),
-    ),
-  );
+  const referralSourceIds = collectReferralSourceIds(users);
   const referralSources = referralSourceIds.length
     ? await User.find({ tgUserId: { $in: referralSourceIds } })
         .select({ tgUserId: 1, username: 1, profileName: 1 })
@@ -486,4 +503,5 @@ module.exports = {
   recordDeviceActivity,
   listSuspiciousDevices,
   formatReferralAlertUser,
+  collectReferralSourceIds,
 };
