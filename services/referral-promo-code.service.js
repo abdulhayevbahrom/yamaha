@@ -5,7 +5,7 @@ const { sendTelegramText } = require("./telegram-notify.service");
 const { getReferralRewardConfig } = require("./settings.service");
 const { emitUserUpdate } = require("../socket");
 const { emitAdminUpdate } = require("../socket");
-const { getQualifiedReferralUsers } = require("./referral.service");
+const { getQualifiedReferralResult } = require("./referral.service");
 
 function normalizeString(value) {
   return String(value || "").trim();
@@ -85,8 +85,13 @@ function normalizeActiveFrom(value) {
 }
 
 async function getReferralQualifiedInviteCount({ tgUserId, activeFrom = null }) {
-  const qualifiedUsers = await getQualifiedReferralUsers(tgUserId, activeFrom);
-  return qualifiedUsers.length;
+  const result = await getQualifiedReferralResult(tgUserId, activeFrom);
+  return {
+    qualifiedInviteCount: result.users.length,
+    membershipVerificationFailureCount: Number(
+      result.verificationFailureCount || 0,
+    ),
+  };
 }
 
 function getRewardThreshold(reward = {}, fallbackThreshold = 0) {
@@ -129,7 +134,7 @@ async function getReferralRedemptionState(tgUserId) {
   const config = await getReferralRewardConfig();
   const activeFrom = normalizeActiveFrom(config?.activeFrom);
 
-  const [owner, qualifiedInviteCount, latestRedemption, claimedRewardKeys] = await Promise.all([
+  const [owner, qualification, latestRedemption, claimedRewardKeys] = await Promise.all([
     User.findOne({ tgUserId: ownerTgUserId })
       .select({
         tgUserId: 1,
@@ -150,6 +155,10 @@ async function getReferralRedemptionState(tgUserId) {
   ]);
 
   const inviteThreshold = Math.max(1, Math.floor(Number(config?.inviteThreshold || 50)));
+  const qualifiedInviteCount = Number(qualification?.qualifiedInviteCount || 0);
+  const membershipVerificationFailureCount = Number(
+    qualification?.membershipVerificationFailureCount || 0,
+  );
   const cooldownDays = Math.max(0, Math.floor(Number(config?.cooldownDays || 0)));
   const activeRewards = getActiveRewardCatalog(config);
   const requestedAtMs = latestRedemption?.requestedAt
@@ -181,6 +190,7 @@ async function getReferralRedemptionState(tgUserId) {
     rewardLabel: String(config?.rewardLabel || "Telegram Premium").trim(),
     rewardCatalog: progress.sortedRewards,
     qualifiedInviteCount: Number(qualifiedInviteCount || 0),
+    membershipVerificationFailureCount,
     availableRewardCount: progress.availableRewardCount,
     claimedRewardCount: Number(claimedRewardCount || 0),
     remainingRewardCount,
@@ -263,6 +273,15 @@ async function requestReferralPromoCode({
     selectedThreshold <= 0 ||
     selectedThreshold > Number(state.qualifiedInviteCount || 0)
   ) {
+    if (Number(state.membershipVerificationFailureCount || 0) > 0) {
+      return {
+        ok: false,
+        reason: "membership_check_unavailable",
+        membershipVerificationFailureCount: Number(
+          state.membershipVerificationFailureCount || 0,
+        ),
+      };
+    }
     return {
       ok: false,
       reason: "threshold_not_reached",
@@ -286,6 +305,15 @@ async function requestReferralPromoCode({
   }
 
   if (state.remainingRewardCount <= 0) {
+    if (Number(state.membershipVerificationFailureCount || 0) > 0) {
+      return {
+        ok: false,
+        reason: "membership_check_unavailable",
+        membershipVerificationFailureCount: Number(
+          state.membershipVerificationFailureCount || 0,
+        ),
+      };
+    }
     return {
       ok: false,
       reason: "threshold_not_reached",

@@ -1,6 +1,65 @@
 const { getForceJoin } = require("./settings.service");
 
 const MEMBER_STATUSES = ["creator", "administrator", "member"];
+const membershipCache = new Map();
+
+function parsePositiveInteger(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : fallback;
+}
+
+function getCacheTtlMs() {
+  return parsePositiveInteger(
+    process.env.FORCE_JOIN_MEMBERSHIP_CACHE_TTL_MS,
+    5 * 60 * 1000,
+  );
+}
+
+function getRetryCount() {
+  return Math.min(
+    5,
+    parsePositiveInteger(process.env.FORCE_JOIN_TELEGRAM_RETRY_COUNT, 2),
+  );
+}
+
+function getRetryDelayMs() {
+  return parsePositiveInteger(
+    process.env.FORCE_JOIN_TELEGRAM_RETRY_DELAY_MS,
+    250,
+  );
+}
+
+function wait(delayMs) {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+function getCacheKey(channelId, userId) {
+  return `${String(channelId || "").trim()}:${String(userId || "").trim()}`;
+}
+
+function getCachedMembership(channelId, userId) {
+  const cacheKey = getCacheKey(channelId, userId);
+  const cached = membershipCache.get(cacheKey);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    membershipCache.delete(cacheKey);
+    return null;
+  }
+  return cached.value;
+}
+
+function cacheMembership(channelId, userId, value) {
+  const ttlMs = getCacheTtlMs();
+  if (ttlMs <= 0) return;
+  membershipCache.set(getCacheKey(channelId, userId), {
+    value,
+    expiresAt: Date.now() + ttlMs,
+  });
+}
+
+function clearForceJoinMembershipCache() {
+  membershipCache.clear();
+}
 
 function buildJoinUrl(channelId, joinUrl) {
   const normalizedJoinUrl = String(joinUrl || "").trim();
@@ -24,31 +83,51 @@ async function fetchChatMember(channelId, userId) {
     channelId,
   )}&user_id=${encodeURIComponent(userId)}`;
 
-  try {
-    const response = await fetch(url);
-    const data = await response.json();
+  const retryCount = getRetryCount();
+  for (let attempt = 0; attempt <= retryCount; attempt += 1) {
+    try {
+      const response = await fetch(url);
+      const data = await response.json();
 
-    if (!data?.ok) {
-      return {
-        ok: false,
-        reason: "telegram_api_error",
-        description: String(data?.description || "Telegram API error"),
-      };
+      if (data?.ok) {
+        const status = String(data?.result?.status || "");
+        return {
+          ok: true,
+          status,
+          isMember: MEMBER_STATUSES.includes(status),
+        };
+      }
+
+      const retryable =
+        response?.status === 429 ||
+        Number(response?.status || 0) >= 500 ||
+        Number(data?.error_code || 0) === 429 ||
+        Number(data?.error_code || 0) >= 500;
+      if (!retryable || attempt >= retryCount) {
+        return {
+          ok: false,
+          reason: "telegram_api_error",
+          description: String(data?.description || "Telegram API error"),
+        };
+      }
+    } catch (error) {
+      if (attempt >= retryCount) {
+        return {
+          ok: false,
+          reason: "request_failed",
+          description: error.message,
+        };
+      }
     }
 
-    const status = String(data?.result?.status || "");
-    return {
-      ok: true,
-      status,
-      isMember: MEMBER_STATUSES.includes(status),
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      reason: "request_failed",
-      description: error.message,
-    };
+    await wait(getRetryDelayMs() * 2 ** attempt);
   }
+
+  return {
+    ok: false,
+    reason: "request_failed",
+    description: "Telegram API tekshiruvi yakunlanmadi",
+  };
 }
 
 async function checkForceJoinMembership(userId, forceJoinConfig = null) {
@@ -79,6 +158,11 @@ async function checkForceJoinMembership(userId, forceJoinConfig = null) {
     };
   }
 
+  const cached = getCachedMembership(channelId, normalizedUserId);
+  if (cached) {
+    return { ...cached, cached: true };
+  }
+
   const memberResult = await fetchChatMember(channelId, normalizedUserId);
   if (!memberResult.ok) {
     return {
@@ -87,12 +171,13 @@ async function checkForceJoinMembership(userId, forceJoinConfig = null) {
       joinUrl,
       isMember: false,
       canProceed: false,
+      verificationFailed: true,
       reason: memberResult.reason,
       description: memberResult.description || "",
     };
   }
 
-  return {
+  const result = {
     enabled: true,
     channelId,
     joinUrl,
@@ -100,6 +185,8 @@ async function checkForceJoinMembership(userId, forceJoinConfig = null) {
     canProceed: Boolean(memberResult.isMember),
     status: memberResult.status,
   };
+  cacheMembership(channelId, normalizedUserId, result);
+  return result;
 }
 
 async function isForceJoinQualified(userId, forceJoinConfig = null) {
@@ -110,5 +197,6 @@ async function isForceJoinQualified(userId, forceJoinConfig = null) {
 module.exports = {
   buildJoinUrl,
   checkForceJoinMembership,
+  clearForceJoinMembershipCache,
   isForceJoinQualified,
 };

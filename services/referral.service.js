@@ -174,24 +174,57 @@ function buildRewardQualifyingFilter(referrerTgUserId, activeFrom) {
 
 async function filterForceJoinQualifiedUsers(users = []) {
   const list = Array.isArray(users) ? users.filter((item) => item?.tgUserId) : [];
-  if (!list.length) return [];
+  if (!list.length) {
+    return { users: [], verificationFailureCount: 0 };
+  }
 
   const forceJoin = await getForceJoin();
   if (!forceJoin.enabled || !String(forceJoin.channelId || "").trim()) {
-    return list;
+    return { users: list, verificationFailureCount: 0 };
   }
 
-  const membershipResults = await Promise.allSettled(
-    list.map((user) => checkForceJoinMembership(user.tgUserId, forceJoin)),
+  const concurrency = Math.min(
+    10,
+    Math.max(1, Math.floor(Number(process.env.FORCE_JOIN_CHECK_CONCURRENCY || 5))),
+  );
+  const membershipResults = new Array(list.length);
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < list.length) {
+      const index = cursor;
+      cursor += 1;
+      try {
+        membershipResults[index] = await checkForceJoinMembership(
+          list[index].tgUserId,
+          forceJoin,
+        );
+      } catch (error) {
+        membershipResults[index] = {
+          canProceed: false,
+          verificationFailed: true,
+          reason: "membership_check_failed",
+          description: error?.message || "",
+        };
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, list.length) }, () => worker()),
   );
 
-  return list.filter((user, index) => {
-    const result = membershipResults[index];
-    return Boolean(result?.status === "fulfilled" && result.value?.canProceed);
-  });
+  return {
+    users: list.filter((_, index) =>
+      Boolean(membershipResults[index]?.canProceed),
+    ),
+    verificationFailureCount: membershipResults.filter(
+      (result) => result?.verificationFailed,
+    ).length,
+  };
 }
 
-async function getQualifiedReferralUsers(referrerTgUserId, activeFrom = null) {
+async function getQualifiedReferralResult(referrerTgUserId, activeFrom = null) {
   const users = await User.find(
     buildRewardQualifyingFilter(referrerTgUserId, activeFrom),
   )
@@ -207,6 +240,11 @@ async function getQualifiedReferralUsers(referrerTgUserId, activeFrom = null) {
     .lean();
 
   return filterForceJoinQualifiedUsers(users);
+}
+
+async function getQualifiedReferralUsers(referrerTgUserId, activeFrom = null) {
+  const result = await getQualifiedReferralResult(referrerTgUserId, activeFrom);
+  return result.users;
 }
 
 async function maybeNotifyReferralMilestone(referrerOrId) {
@@ -665,6 +703,7 @@ module.exports = {
   ensureReferralIdentity,
   activateReferralOnMiniAppOpen,
   awardReferralCommissionForOrder,
+  getQualifiedReferralResult,
   getQualifiedReferralUsers,
   maybeNotifyReferralMilestone,
   generateReferralCode,

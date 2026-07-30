@@ -509,6 +509,18 @@ async function requestReferralPromoCodeHandler(req, res) {
           nextMilestoneInviteCount: Number(result.nextMilestoneInviteCount || 0),
         });
       }
+      if (reason === "membership_check_unavailable") {
+        return response.error(
+          res,
+          "Kanal a'zoligini tekshirishda vaqtinchalik xatolik. Qayta urinib ko'ring.",
+          {
+            code: reason,
+            membershipVerificationFailureCount: Number(
+              result.membershipVerificationFailureCount || 0,
+            ),
+          },
+        );
+      }
       if (reason === "cooldown_active") {
         return response.error(res, "Promo kod olish uchun muddat hali tugamagan", {
           code: reason,
