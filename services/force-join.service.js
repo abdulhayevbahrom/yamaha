@@ -185,7 +185,12 @@ async function checkForceJoinMembership(userId, forceJoinConfig = null) {
     canProceed: Boolean(memberResult.isMember),
     status: memberResult.status,
   };
-  cacheMembership(channelId, normalizedUserId, result);
+  // A user can join immediately after receiving a `left` response. Caching a
+  // negative result would keep rejecting the "A'zo bo'ldim" callback until
+  // the cache expires, so only cache confirmed memberships.
+  if (result.canProceed) {
+    cacheMembership(channelId, normalizedUserId, result);
+  }
   return result;
 }
 

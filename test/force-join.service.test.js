@@ -144,3 +144,39 @@ test("force join helper caches successful membership checks", async () => {
     clearForceJoinMembershipCache();
   }
 });
+
+test("force join helper does not cache a negative result after the user joins", async () => {
+  clearForceJoinMembershipCache();
+  const originalFetch = global.fetch;
+  const originalToken = process.env.BOT_TOKEN;
+  process.env.BOT_TOKEN = "test-bot-token";
+  let calls = 0;
+  global.fetch = async () => {
+    calls += 1;
+    return {
+      status: 200,
+      json: async () => ({
+        ok: true,
+        result: { status: calls === 1 ? "left" : "member" },
+      }),
+    };
+  };
+
+  try {
+    const config = {
+      enabled: true,
+      channelId: "@yamaha_channel",
+      joinUrl: "https://t.me/yamaha_channel",
+    };
+    const beforeJoin = await checkForceJoinMembership("new-user", config);
+    const afterJoin = await checkForceJoinMembership("new-user", config);
+
+    assert.equal(beforeJoin.canProceed, false);
+    assert.equal(afterJoin.canProceed, true);
+    assert.equal(calls, 2);
+  } finally {
+    global.fetch = originalFetch;
+    process.env.BOT_TOKEN = originalToken;
+    clearForceJoinMembershipCache();
+  }
+});

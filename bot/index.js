@@ -585,6 +585,13 @@ async function startBot({ strict = false } = {}) {
       }
 
       if (!forceJoin.canProceed) {
+        if (forceJoin.verificationFailed) {
+          await bot.answerCallbackQuery(query.id, {
+            text: "Kanal a'zoligini tekshirishda vaqtinchalik xatolik. Qayta urinib ko'ring.",
+            show_alert: true,
+          });
+          return;
+        }
         await bot.answerCallbackQuery(query.id, {
           text: "Hali kanalga a'zo emassiz",
           show_alert: true,
