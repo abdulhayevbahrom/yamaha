@@ -49,6 +49,19 @@ function getTopSalePurchaseAmount(order) {
   return Number.isFinite(expectedAmount) && expectedAmount > 0 ? expectedAmount : 0;
 }
 
+function getTopSalesOrderFilter(startDate) {
+  return {
+    // Only orders whose purchase was successfully fulfilled belong in the
+    // leaderboard. `paid_auto_processed` is only an intermediate state and
+    // can still be cancelled when fulfillment fails (for example, because
+    // the provider balance is insufficient).
+    product: { $in: TOP_SALES_PRODUCTS, $ne: "balance" },
+    status: "completed",
+    fulfillmentStatus: "success",
+    $or: [{ paidAt: { $gte: startDate } }, { createdAt: { $gte: startDate } }],
+  };
+}
+
 function normalizeLookupUsername(value) {
   return String(value || "")
     .trim()
@@ -292,12 +305,7 @@ const getTopSales = async (req, res) => {
     const period = TOP_SALES_PERIODS.has(rawPeriod) ? rawPeriod : "today";
     const startDate = getTopSalesStartDate(period);
 
-    const orders = await Order.find({
-      // Balance top-up orders must never appear in the public sales leaderboard.
-      product: { $in: TOP_SALES_PRODUCTS, $ne: "balance" },
-      status: { $in: ["paid_auto_processed", "completed"] },
-      $or: [{ paidAt: { $gte: startDate } }, { createdAt: { $gte: startDate } }],
-    })
+    const orders = await Order.find(getTopSalesOrderFilter(startDate))
       .sort({ paidAt: -1, createdAt: -1 })
       .lean();
 
@@ -518,4 +526,5 @@ module.exports = {
   checkPremiumStatus,
   checkMlbbRole,
   getTopSalePurchaseAmount,
+  getTopSalesOrderFilter,
 };
