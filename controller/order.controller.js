@@ -755,13 +755,20 @@ function buildSearchFilter(rawSearch) {
   return { $or: conditions };
 }
 
-function buildHistoryFilter(scope) {
+const SALES_HISTORY_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb", "balance"];
+
+function buildHistoryFilter(scope, product = "") {
   if (scope === "sales") {
+    const normalizedProduct = normalizeScope(product);
+    const products = SALES_HISTORY_PRODUCTS.includes(normalizedProduct)
+      ? [normalizedProduct]
+      : SALES_HISTORY_PRODUCTS;
     return {
-      // Admin sales history mirrors the public leaderboard: only completed
-      // customer purchases, never balance top-ups or withdrawal operations.
-      product: { $in: ["star", "premium", "uc", "freefire", "mlbb"] },
-      status: { $in: ["paid_auto_processed", "completed"] },
+      // Sales history contains only purchases whose delivery/credit actually
+      // succeeded. This includes successfully credited balance top-ups.
+      product: { $in: products },
+      status: "completed",
+      fulfillmentStatus: "success",
     };
   }
 
@@ -965,6 +972,7 @@ const getHistory = async (req, res) => {
   try {
     await expirePendingOrders();
     const scope = normalizeScope(req.query?.scope || "all");
+    const product = normalizeScope(req.query?.product || "");
     const search = normalizeSearch(req.query?.search || "");
     const requestedLimit = Number(req.query?.limit || 3000);
     const limit =
@@ -987,7 +995,7 @@ const getHistory = async (req, res) => {
       });
     }
 
-    const scopeFilter = buildHistoryFilter(scope);
+    const scopeFilter = buildHistoryFilter(scope, product);
     const searchFilter = buildSearchFilter(search);
     const parsedOrderId = parseOrderIdSearch(search);
     let filter = searchFilter
@@ -1020,6 +1028,7 @@ const getHistory = async (req, res) => {
         totalPages,
       },
       scope,
+      product,
       search,
     });
   } catch (error) {
@@ -1400,6 +1409,7 @@ module.exports = {
   createStarsInvoice,
   getReports,
   getHistory,
+  buildHistoryFilter,
   retryFulfillment,
   markAutobuyOrderCompleted,
   confirmStarSellPayout,
