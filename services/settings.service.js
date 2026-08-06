@@ -124,6 +124,8 @@ function normalizeRewardCatalogItem(item = {}, fallbackInviteThreshold = 0, inde
     serviceValue: Number(item?.serviceValue ?? item?.value ?? 0) || 0,
     active:
       typeof item?.active === "boolean" ? item.active : Boolean(item?.active ?? true),
+    repeatable:
+      typeof item?.repeatable === "boolean" ? item.repeatable : index === 0,
     description: String(item?.description || item?.note || "").trim(),
   };
 }

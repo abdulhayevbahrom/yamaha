@@ -49,6 +49,11 @@ function buildRewardCatalog(rawCatalog, fallbackInviteThreshold = 0) {
         serviceValue: Number(item?.serviceValue ?? item?.value ?? 0) || 0,
         active:
           typeof item?.active === "boolean" ? item.active : Boolean(item?.active ?? true),
+        // The primary reward repeats at every threshold multiple (30, 60,
+        // 90...). Other catalog milestones remain one-time rewards unless
+        // explicitly configured as repeatable.
+        repeatable:
+          typeof item?.repeatable === "boolean" ? item.repeatable : index === 0,
         description: normalizeString(item?.description || ""),
       };
     })
@@ -101,7 +106,11 @@ function getRewardThreshold(reward = {}, fallbackThreshold = 0) {
     : Math.max(1, Math.floor(Number(fallbackThreshold || 1)));
 }
 
-function buildRewardProgressState(rewardCatalog = [], qualifiedInviteCount = 0) {
+function buildRewardProgressState(
+  rewardCatalog = [],
+  qualifiedInviteCount = 0,
+  claimedRewardCounts = {},
+) {
   const activeRewards = Array.isArray(rewardCatalog)
     ? rewardCatalog.filter((item) => item?.active !== false)
     : [];
@@ -113,17 +122,46 @@ function buildRewardProgressState(rewardCatalog = [], qualifiedInviteCount = 0) 
   });
 
   const qualifiedCount = Math.max(0, Math.floor(Number(qualifiedInviteCount || 0)));
-  const eligibleRewards = sortedRewards.filter(
-    (reward) => getRewardThreshold(reward) <= qualifiedCount,
+  const rewards = sortedRewards.map((reward) => {
+    const threshold = getRewardThreshold(reward);
+    const availableClaimCount = reward.repeatable
+      ? Math.floor(qualifiedCount / threshold)
+      : threshold <= qualifiedCount
+        ? 1
+        : 0;
+    const claimedCount = Math.max(
+      0,
+      Number(claimedRewardCounts?.[reward.key] || 0),
+    );
+    return {
+      ...reward,
+      availableClaimCount,
+      claimedCount,
+      remainingClaimCount: Math.max(0, availableClaimCount - claimedCount),
+    };
+  });
+  const availableRewardCount = rewards.reduce(
+    (sum, reward) => sum + reward.availableClaimCount,
+    0,
   );
+  const claimedRewardCount = rewards.reduce(
+    (sum, reward) => sum + Math.min(reward.claimedCount, reward.availableClaimCount),
+    0,
+  );
+  const nextMilestones = rewards.map((reward) => {
+    const threshold = getRewardThreshold(reward);
+    if (reward.repeatable) {
+      return (Math.floor(qualifiedCount / threshold) + 1) * threshold;
+    }
+    return threshold > qualifiedCount ? threshold : 0;
+  }).filter(Boolean);
 
   return {
-    sortedRewards,
-    eligibleRewards,
-    availableRewardCount: eligibleRewards.length,
-    nextMilestoneInviteCount:
-      sortedRewards.find((reward) => getRewardThreshold(reward) > qualifiedCount)
-        ?.inviteThreshold || 0,
+    sortedRewards: rewards,
+    availableRewardCount,
+    claimedRewardCount,
+    remainingRewardCount: Math.max(0, availableRewardCount - claimedRewardCount),
+    nextMilestoneInviteCount: nextMilestones.length ? Math.min(...nextMilestones) : 0,
   };
 }
 
@@ -134,7 +172,7 @@ async function getReferralRedemptionState(tgUserId) {
   const config = await getReferralRewardConfig();
   const activeFrom = normalizeActiveFrom(config?.activeFrom);
 
-  const [owner, qualification, latestRedemption, claimedRewardKeys] = await Promise.all([
+  const [owner, qualification, latestRedemption, claimedRewards] = await Promise.all([
     User.findOne({ tgUserId: ownerTgUserId })
       .select({
         tgUserId: 1,
@@ -148,10 +186,10 @@ async function getReferralRedemptionState(tgUserId) {
       .lean(),
     getReferralQualifiedInviteCount({ tgUserId: ownerTgUserId, activeFrom }),
     ReferralPromoCode.findOne({ ownerTgUserId }).sort({ createdAt: -1 }).lean(),
-    ReferralPromoCode.distinct("rewardKey", {
+    ReferralPromoCode.find({
       ownerTgUserId,
       status: { $ne: "cancelled" },
-    }),
+    }).select({ rewardKey: 1 }).lean(),
   ]);
 
   const inviteThreshold = Math.max(1, Math.floor(Number(config?.inviteThreshold || 50)));
@@ -171,14 +209,19 @@ async function getReferralRedemptionState(tgUserId) {
     ? new Date(requestedAtMs + cooldownMs)
     : null;
   const nowMs = Date.now();
-  const progress = buildRewardProgressState(activeRewards, qualifiedInviteCount);
-  const claimedRewardCount = Array.isArray(claimedRewardKeys)
-    ? claimedRewardKeys.filter(Boolean).length
-    : 0;
-  const remainingRewardCount = Math.max(
-    0,
-    progress.availableRewardCount - Number(claimedRewardCount || 0),
+  const claimedRewardCounts = (Array.isArray(claimedRewards) ? claimedRewards : [])
+    .reduce((counts, item) => {
+      const key = normalizeString(item?.rewardKey);
+      if (key) counts[key] = Number(counts[key] || 0) + 1;
+      return counts;
+    }, {});
+  const progress = buildRewardProgressState(
+    activeRewards,
+    qualifiedInviteCount,
+    claimedRewardCounts,
   );
+  const claimedRewardCount = progress.claimedRewardCount;
+  const remainingRewardCount = progress.remainingRewardCount;
   const hasThreshold = remainingRewardCount > 0;
   const isCoolingDown = Boolean(nextAvailableAt && nextAvailableAt.getTime() > nowMs);
   const hasPendingRequest = latestRedemption?.status === "pending";
@@ -195,9 +238,8 @@ async function getReferralRedemptionState(tgUserId) {
     claimedRewardCount: Number(claimedRewardCount || 0),
     remainingRewardCount,
     nextMilestoneInviteCount: progress.nextMilestoneInviteCount,
-    claimedRewardKeys: Array.isArray(claimedRewardKeys)
-      ? claimedRewardKeys.filter(Boolean)
-      : [],
+    claimedRewardKeys: Object.keys(claimedRewardCounts),
+    claimedRewardCounts,
     canRedeem: Boolean(
       owner && !owner.isBlocked && !owner.referralBlockedAt && hasThreshold && !isCoolingDown && !hasPendingRequest,
     ),
@@ -250,16 +292,14 @@ async function requestReferralPromoCode({
   }
 
   const rewardCatalog = Array.isArray(state.rewardCatalog) ? state.rewardCatalog : [];
-  const alreadyClaimedKeys = new Set(
-    Array.isArray(state.claimedRewardKeys) ? state.claimedRewardKeys : [],
-  );
   const selectedRewardKey = normalizeString(rewardKey).toLowerCase();
+  const requestedReward = rewardCatalog.find(
+    (item) => item.key === selectedRewardKey,
+  );
   const selectedReward =
-    rewardCatalog.find((item) => item.key === selectedRewardKey) ||
+    requestedReward ||
     rewardCatalog.find(
-      (item) =>
-        Number(item.inviteThreshold || 0) <= Number(state.qualifiedInviteCount || 0) &&
-        !alreadyClaimedKeys.has(item.key),
+      (item) => Number(item.remainingClaimCount || 0) > 0,
     ) ||
     null;
 
@@ -294,7 +334,7 @@ async function requestReferralPromoCode({
     };
   }
 
-  if (alreadyClaimedKeys.has(selectedReward.key)) {
+  if (Number(selectedReward.remainingClaimCount || 0) <= 0) {
     return {
       ok: false,
       reason: "duplicate_reward",
@@ -345,13 +385,7 @@ async function requestReferralPromoCode({
 
   const now = new Date();
   const code = makePromoCode();
-  const eligibleRewards = rewardCatalog.filter(
-    (item) => Number(item.inviteThreshold || 0) <= Number(state.qualifiedInviteCount || 0),
-  );
-  const milestoneIndex =
-    rewardCatalog.findIndex((item) => item.key === selectedReward.key) + 1 ||
-    eligibleRewards.findIndex((item) => item.key === selectedReward.key) + 1 ||
-    1;
+  const milestoneIndex = Number(selectedReward.claimedCount || 0) + 1;
 
   const promoDoc = await ReferralPromoCode.create({
     code,
@@ -557,6 +591,7 @@ async function markReferralPromoCodeUsed({
 
 module.exports = {
   buildRewardCatalog,
+  buildRewardProgressState,
   getReferralRedemptionState,
   getActiveRewardCatalog,
   requestReferralPromoCode,
