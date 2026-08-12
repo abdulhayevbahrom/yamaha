@@ -154,6 +154,33 @@ app.use((_, res) => {
 
 async function startServer() {
   await connectDB();
+  const {
+    resumeGwPubgPolling,
+  } = require("./services/gw-pubg-fulfillment.service");
+  await resumeGwPubgPolling().catch((error) => {
+    console.error("GW PUBG polling resume error:", error?.message || error);
+  });
+
+  if (
+    ["1", "true", "yes", "on"].includes(
+      String(process.env.GW_PUBG_AUTOBUY_ENABLED || "").trim().toLowerCase(),
+    )
+  ) {
+    const { syncGwPubgCatalog } = require("./services/gw-catalog.service");
+    const syncCatalog = () =>
+      syncGwPubgCatalog().catch((error) => {
+        console.error("GW PUBG catalog sync error:", error?.message || error);
+      });
+    void syncCatalog();
+    const syncInterval = setInterval(
+      syncCatalog,
+      Math.max(
+        60_000,
+        Number(process.env.GW_PUBG_CATALOG_SYNC_INTERVAL_MS || 5 * 60_000),
+      ),
+    );
+    syncInterval.unref();
+  }
 
   server.listen(PORT, () => {
     console.log(`Server: http://localhost:${PORT}`);

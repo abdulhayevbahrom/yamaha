@@ -39,6 +39,21 @@ const profileLookupInFlight = new Map();
 const TOP_SALES_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb"];
 const TOP_SALES_PERIODS = new Set(["today", "week", "month"]);
 
+function isGwPubgAutobuyEnabled() {
+  return ["1", "true", "yes", "on"].includes(
+    String(process.env.GW_PUBG_AUTOBUY_ENABLED || "").trim().toLowerCase(),
+  );
+}
+
+function isGwPlanFresh(plan) {
+  const maxAge = Math.max(
+    60_000,
+    Number(process.env.GW_PUBG_CATALOG_MAX_AGE_MS || 30 * 60_000),
+  );
+  const syncedAt = new Date(plan?.providerSyncedAt || 0).getTime();
+  return syncedAt > 0 && Date.now() - syncedAt <= maxAge;
+}
+
 function getTopSalePurchaseAmount(order) {
   const paidAmount = Number(order?.paidAmount || 0);
   if (Number.isFinite(paidAmount) && paidAmount > 0) return paidAmount;
@@ -140,6 +155,14 @@ function mapCatalog(plans) {
       basePrice: plan.basePrice,
       currency: plan.currency,
       isActive: plan.isActive,
+      available:
+        plan.category === "uc" && isGwPubgAutobuyEnabled()
+          ? plan.provider === "gw" &&
+            Boolean(plan.providerAvailable) &&
+            isGwPlanFresh(plan)
+          : plan.provider === "gw"
+            ? Boolean(plan.providerAvailable)
+            : true,
     });
   });
 

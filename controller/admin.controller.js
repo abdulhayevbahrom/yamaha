@@ -58,6 +58,7 @@ const {
   listReferralPromoCodes: listReferralPromoCodesService,
   markReferralPromoCodeUsed: markReferralPromoCodeUsedService,
 } = require("../services/referral-promo-code.service");
+const { syncGwPubgCatalog } = require("../services/gw-catalog.service");
 
 const PURCHASE_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb"];
 const PAID_STATUSES = ["paid_auto_processed", "completed"];
@@ -638,6 +639,26 @@ const updatePlan = async (req, res) => {
     const { id } = req.params;
     const payload = req.validated;
 
+    const existing = await Plan.findById(id).lean();
+    if (!existing) return response.notFound(res, "Plan topilmadi");
+    if (
+      existing.provider === "gw" &&
+      typeof payload.amount === "number" &&
+      Number(payload.amount) !== Number(existing.amount)
+    ) {
+      return response.error(res, "GW paket miqdorini qo'lda o'zgartirib bo'lmaydi");
+    }
+    const nextActive =
+      typeof payload.isActive === "boolean" ? payload.isActive : existing.isActive;
+    const nextPrice =
+      typeof payload.basePrice === "number" ? payload.basePrice : existing.basePrice;
+    if (nextActive && (!Number.isFinite(nextPrice) || nextPrice <= 0)) {
+      return response.error(
+        res,
+        "Paketni faollashtirishdan oldin mijoz narxini 0 dan katta kiriting",
+      );
+    }
+
     const updated = await Plan.findByIdAndUpdate(id, payload, {
       new: true,
       runValidators: true,
@@ -653,11 +674,32 @@ const updatePlan = async (req, res) => {
 const deletePlan = async (req, res) => {
   try {
     const { id } = req.params;
+    const existing = await Plan.findById(id).lean();
+    if (!existing) return response.notFound(res, "Plan topilmadi");
+    if (existing.provider === "gw") {
+      return response.error(
+        res,
+        "GW paketini o'chirmang; kerak bo'lsa nofaol holatga o'tkazing",
+      );
+    }
     const deleted = await Plan.findByIdAndDelete(id).lean();
     if (!deleted) return response.notFound(res, "Plan topilmadi");
     return response.success(res, "Plan o'chirildi", deleted);
   } catch (error) {
     return response.serverError(res, "Plan o'chirishda xatolik", error.message);
+  }
+};
+
+const syncGwPubgPlans = async (_, res) => {
+  try {
+    const plans = await syncGwPubgCatalog();
+    return response.success(res, "GW PUBG katalogi yangilandi", plans);
+  } catch (error) {
+    return response.serverError(
+      res,
+      "GW PUBG katalogini yangilashda xatolik",
+      error.message,
+    );
   }
 };
 
@@ -2356,6 +2398,7 @@ module.exports = {
   createPlan,
   updatePlan,
   deletePlan,
+  syncGwPubgPlans,
   getSettings,
   updateSettings,
   getReferralPromoCodes,

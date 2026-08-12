@@ -1,0 +1,100 @@
+const Plan = require("../model/plan.model");
+const { getPubgProducts } = require("./gw-api.service");
+
+let syncPromise = null;
+
+async function syncGwPubgCatalog() {
+  if (syncPromise) return syncPromise;
+  syncPromise = performSync();
+  try {
+    return await syncPromise;
+  } finally {
+    syncPromise = null;
+  }
+}
+
+async function performSync() {
+  const products = await getPubgProducts();
+  if (!products.length) {
+    throw new Error("GW PUBG katalogi bo'sh qaytdi");
+  }
+  const duplicatePid = products.find(
+    (item, index) =>
+      products.findIndex((row) => row.providerProductId === item.providerProductId) !== index,
+  );
+  if (duplicatePid) {
+    throw new Error(`GW katalogida takroriy PID: ${duplicatePid.providerProductId}`);
+  }
+  const syncedAt = new Date();
+  const seenIds = products.map((item) => item.providerProductId);
+
+  if (seenIds.length) {
+    await Plan.updateMany(
+      {
+        category: "uc",
+        provider: "gw",
+        providerProductId: { $nin: seenIds },
+      },
+      { $set: { providerAvailable: false, providerSyncedAt: syncedAt } },
+    );
+  }
+
+  for (const item of products) {
+    let existing = await Plan.findOne({
+      category: "uc",
+      provider: "gw",
+      providerProductId: item.providerProductId,
+    });
+
+    if (!existing) {
+      const sameAmount = await Plan.find({
+        category: "uc",
+        amount: item.amount,
+        $or: [{ provider: "manual" }, { provider: { $exists: false } }],
+      });
+      if (sameAmount.length === 1) existing = sameAmount[0];
+    }
+
+    if (existing) {
+      if (
+        Number(existing.providerPriceUsd || 0) !== Number(item.priceUsd) ||
+        Boolean(existing.providerAvailable) !== Boolean(item.available)
+      ) {
+        existing.providerUpdatedAt = syncedAt;
+      }
+      existing.provider = "gw";
+      existing.providerProductId = item.providerProductId;
+      existing.providerPriceUsd = item.priceUsd;
+      existing.providerAvailable = item.available;
+      existing.providerSyncedAt = syncedAt;
+      if (!existing.label) existing.label = item.label;
+      if (!existing.amount) existing.amount = item.amount;
+      await existing.save();
+      continue;
+    }
+
+    const safeCode = `gw_${item.providerProductId}`
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, "_")
+      .slice(0, 80);
+    await Plan.create({
+      category: "uc",
+      code: safeCode,
+      label: item.label || `${item.amount} UC`,
+      amount: item.amount,
+      basePrice: 0,
+      currency: "UZS",
+      isActive: false,
+      provider: "gw",
+      providerProductId: item.providerProductId,
+      providerPriceUsd: item.priceUsd,
+      providerAvailable: item.available,
+      providerSyncedAt: syncedAt,
+      providerUpdatedAt: syncedAt,
+    });
+  }
+
+  return Plan.find({ category: "uc" }).sort({ amount: 1 }).lean();
+}
+
+module.exports = { syncGwPubgCatalog };

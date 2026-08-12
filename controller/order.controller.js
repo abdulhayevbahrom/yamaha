@@ -14,6 +14,11 @@ const {
   cancelGameOrderById,
   isManualGameProduct,
 } = require("../services/uc-fulfillment.service");
+const {
+  isGwPubgAutobuyEnabled,
+  autoFulfillGwPubg,
+  isPlanReady: isGwPubgPlanReady,
+} = require("../services/gw-pubg-fulfillment.service");
 const { cancelPaidOrderById } = require("../services/order-cancel.service");
 const { notifyGamePaid } = require("../services/notify.service");
 const { emitAdminUpdate, emitUserUpdate } = require("../socket");
@@ -461,6 +466,16 @@ const createOrder = async (req, res) => {
         isActive: true,
       }).lean();
       if (!plan) return response.error(res, "Tanlangan paket topilmadi");
+      if (!Number.isFinite(Number(plan.basePrice)) || Number(plan.basePrice) <= 0) {
+        return response.error(res, "Tanlangan paket narxi sozlanmagan");
+      }
+      if (
+        product === "uc" &&
+        isGwPubgAutobuyEnabled() &&
+        !isGwPubgPlanReady(plan)
+      ) {
+        return response.error(res, "Tanlangan PUBG paketi hozir mavjud emas");
+      }
       resolvedAmount = plan.amount;
       resolvedBasePrice = plan.basePrice;
     }
@@ -617,7 +632,10 @@ const createOrder = async (req, res) => {
     }
 
     if (finalStatus === "paid_auto_processed") {
-      if (isManualGameProduct(product)) {
+      if (
+        isManualGameProduct(product) &&
+        !(product === "uc" && isGwPubgAutobuyEnabled())
+      ) {
         emitAdminUpdate({
           type: "game_paid",
           refreshHistory: true,
@@ -646,6 +664,9 @@ const createOrder = async (req, res) => {
 
       if (product === "star" || product === "premium") {
         await autoFulfillOrder(order);
+      }
+      if (product === "uc" && isGwPubgAutobuyEnabled()) {
+        await autoFulfillGwPubg(order);
       }
     }
 

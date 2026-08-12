@@ -10,6 +10,7 @@ const PaymentAmountReservation = require("../model/payment-amount-reservation.mo
 const SecurityNonce = require("../model/security-nonce.model");
 const SecurityRateLimit = require("../model/security-rate-limit.model");
 const User = require("../model/user.model");
+const Plan = require("../model/plan.model");
 
 function normalize(value) {
   return String(value || "").trim();
@@ -46,6 +47,32 @@ async function run() {
     "ADMIN_PASSWORD_HASH",
     "FRAGMENT_API_KEY",
   ];
+
+  if (isEnabled(process.env.GW_PUBG_AUTOBUY_ENABLED)) {
+    if (!normalize(process.env.GW_API_KEY)) {
+      errors.push("GW_PUBG_AUTOBUY_ENABLED=true, lekin GW_API_KEY topilmadi");
+    }
+    const gwApiUrl =
+      normalize(process.env.GW_API_URL) || "https://api.sonofutred.com";
+    validateUrl("GW_API_URL", gwApiUrl, errors);
+    const catalogMaxAge = Number(
+      process.env.GW_PUBG_CATALOG_MAX_AGE_MS || 30 * 60_000,
+    );
+    const syncInterval = Number(
+      process.env.GW_PUBG_CATALOG_SYNC_INTERVAL_MS || 5 * 60_000,
+    );
+    if (!Number.isFinite(catalogMaxAge) || catalogMaxAge < 60_000) {
+      errors.push("GW_PUBG_CATALOG_MAX_AGE_MS kamida 60000 bo'lishi kerak");
+    }
+    if (!Number.isFinite(syncInterval) || syncInterval < 60_000) {
+      errors.push("GW_PUBG_CATALOG_SYNC_INTERVAL_MS kamida 60000 bo'lishi kerak");
+    }
+    if (syncInterval >= catalogMaxAge) {
+      errors.push(
+        "GW katalog sync intervali katalog maksimal yoshidan kichik bo'lishi kerak",
+      );
+    }
+  }
 
   if (normalize(process.env.NODE_ENV).toLowerCase() !== "production") {
     errors.push("NODE_ENV=production bo'lishi kerak");
@@ -135,6 +162,7 @@ async function run() {
       SecurityNonce.init(),
       SecurityRateLimit.init(),
       User.init(),
+      Plan.init(),
     ]);
 
     const [purchaseCards, topupCards] = await Promise.all([

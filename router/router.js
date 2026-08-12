@@ -237,6 +237,11 @@ router.post(
   adminController.login,
 );
 router.get("/admin/plans", authMiddleware, adminController.getPlans);
+router.post(
+  "/admin/providers/gw/pubg/sync",
+  authMiddleware,
+  adminController.syncGwPubgPlans,
+);
 router.get(
   "/admin/payment-cards",
   authMiddleware,
