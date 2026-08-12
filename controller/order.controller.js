@@ -996,10 +996,13 @@ const getHistory = async (req, res) => {
     const product = normalizeScope(req.query?.product || "");
     const search = normalizeSearch(req.query?.search || "");
     const requestedLimit = Number(req.query?.limit || 3000);
-    const limit =
+    const parsedLimit =
       Number.isFinite(requestedLimit) && requestedLimit > 0
         ? Math.min(10000, Math.floor(requestedLimit))
         : 3000;
+    // Star sell is consumed as a paginated admin queue. Keep the payload small
+    // even if an older frontend requests a larger limit.
+    const limit = scope === "star_sell" ? Math.min(25, parsedLimit) : parsedLimit;
     const requestedPage = Number(req.query?.page || 1);
     const page =
       Number.isFinite(requestedPage) && requestedPage > 0
