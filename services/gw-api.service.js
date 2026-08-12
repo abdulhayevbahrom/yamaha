@@ -1,4 +1,5 @@
 const axios = require("axios");
+const https = require("node:https");
 
 const DEFAULT_BASE_URL = "https://api.sonofutred.com";
 
@@ -28,6 +29,10 @@ function createClient() {
   return axios.create({
     baseURL: config.baseURL,
     timeout: config.timeout,
+    // GW access control currently accepts allowlisted IPv4 addresses. Some
+    // production hosts prefer IPv6 for Cloudflare DNS, which would otherwise
+    // produce IP_NOT_ALLOWED even when the server IPv4 is correctly listed.
+    httpsAgent: new https.Agent({ family: 4 }),
     headers: {
       "X-API-Key": config.apiKey,
       Accept: "application/json",

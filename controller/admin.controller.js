@@ -695,11 +695,42 @@ const syncGwPubgPlans = async (_, res) => {
     const plans = await syncGwPubgCatalog();
     return response.success(res, "GW PUBG katalogi yangilandi", plans);
   } catch (error) {
-    return response.serverError(
-      res,
-      "GW PUBG katalogini yangilashda xatolik",
-      error.message,
-    );
+    const status = Number(error?.response?.status || 0);
+    const payload = error?.response?.data;
+    const code = String(payload?.code || payload?.error || "").trim().toUpperCase();
+    const knownMessages = {
+      MISSING_API_KEY: "GW API kaliti serverda topilmadi",
+      INVALID_API_KEY: "GW API kaliti noto'g'ri yoki bekor qilingan",
+      INVALID_API_KEY_FORMAT: "GW API kaliti formati noto'g'ri",
+      API_DISABLED: "GW profilingizda API access yoqilmagan",
+      API_DISABLED_BY_ADMIN: "GW API access administrator tomonidan o'chirilgan",
+      API_NOT_ELIGIBLE: "GW profilingiz API ishlatish talablariga mos emas",
+      IP_ALLOWLIST_REQUIRED: "GW profilida server IPv4 manzilini allowlistga kiriting",
+      IP_NOT_ALLOWED: "Serverning chiqish IPv4 manzili GW allowlistda yo'q",
+      ACCOUNT_BANNED: "GW hisob bloklangan",
+      ACCOUNT_RESTRICTED: "GW hisob vaqtincha cheklangan",
+      RATE_LIMIT: "GW API so'rov limiti oshdi; birozdan keyin qayta urinib ko'ring",
+    };
+    const detail =
+      knownMessages[code] ||
+      (status === 401
+        ? "GW API autentifikatsiyasi muvaffaqiyatsiz"
+        : status === 403
+          ? "GW API ushbu serverga ruxsat bermadi"
+          : status === 429
+            ? "GW API so'rov limiti oshdi"
+            : status >= 500
+              ? "GW API vaqtincha ishlamayapti"
+              : String(error?.message || "GW katalogini olib bo'lmadi").slice(0, 300));
+    console.error("GW PUBG catalog sync failed:", {
+      status,
+      code: code || "UNKNOWN",
+      message: String(error?.message || "").slice(0, 300),
+    });
+    return response.error(res, detail, {
+      code: code || "GW_CATALOG_SYNC_FAILED",
+      providerStatus: status || null,
+    });
   }
 };
 
