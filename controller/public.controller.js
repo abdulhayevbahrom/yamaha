@@ -22,6 +22,7 @@ const {
 } = require("../services/telegram-premium-check.service");
 const { normalizeCardBin, lookupCardBinInfo } = require("../services/card-bin.service");
 const { getTelegramUserInfo } = require("../services/fragment-api.service");
+const { verifyPubgPlayer } = require("../services/gw-api.service");
 // const { ensureDefaultPlans } = require("../services/plan.service");
 
 const categoryNames = {
@@ -537,6 +538,27 @@ const checkMlbbRole = async (req, res) => {
   }
 };
 
+const checkPubgPlayer = async (req, res) => {
+  const playerId = String(req.body?.playerId || "").trim();
+  if (!/^5\d+$/.test(playerId)) {
+    return response.error(res, "Player ID noto‘g‘ri");
+  }
+
+  try {
+    const tgUserId = String(req.telegramAuth?.tgUserId || "user").trim();
+    const trxid = `CHK-PUBG-${tgUserId}-${Date.now()}`.slice(0, 80);
+    const result = await verifyPubgPlayer(playerId, trxid);
+    const playerName = String(result?.playerName || result?.name || "").trim();
+    if (!result?.success || !playerName) {
+      return response.error(res, result?.error || "PUBG profil topilmadi");
+    }
+    return response.success(res, "PUBG profil topildi", { playerId, playerName });
+  } catch (error) {
+    const providerMessage = error?.response?.data?.error || error?.message;
+    return response.serverError(res, "PUBG profil tekshirishda xatolik", providerMessage);
+  }
+};
+
 module.exports = {
   health,
   getCatalog,
@@ -548,6 +570,7 @@ module.exports = {
   lookupProfile,
   checkPremiumStatus,
   checkMlbbRole,
+  checkPubgPlayer,
   getTopSalePurchaseAmount,
   getTopSalesOrderFilter,
 };

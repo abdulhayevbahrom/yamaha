@@ -104,10 +104,16 @@ async function getOrder(orderId) {
   return response.data;
 }
 
+async function verifyPubgPlayer(playerId, trxid) {
+  const response = await createClient().post("/pubgvvfy", { playerId, trxid });
+  return response.data;
+}
+
 module.exports = {
   getPubgProducts,
   createOrder,
   getOrder,
+  verifyPubgPlayer,
   isPubgTopup,
   extractUcAmount,
   normalizeProduct,

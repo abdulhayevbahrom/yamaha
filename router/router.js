@@ -52,6 +52,14 @@ router.get("/force-join/check", publicController.checkForceJoin);
 router.get("/lookup-profile", publicController.lookupProfile);
 router.get("/premium-status", publicController.checkPremiumStatus);
 router.get("/mlbb/check-role", publicController.checkMlbbRole);
+router.post(
+  "/pubg/check-player",
+  telegramAuthMiddleware,
+  freshTelegramWriteAuth,
+  requireRegisteredUser,
+  userWriteRateLimit,
+  publicController.checkPubgPlayer,
+);
 router.post("/calculate-price", orderController.calculatePrice);
 router.post(
   "/orders",
