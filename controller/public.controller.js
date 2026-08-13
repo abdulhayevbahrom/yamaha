@@ -550,7 +550,11 @@ const checkPubgPlayer = async (req, res) => {
     const result = await verifyPubgPlayer(playerId, trxid);
     const playerName = String(result?.playerName || result?.name || "").trim();
     if (!result?.success || !playerName) {
-      return response.error(res, result?.error || "PUBG profil topilmadi");
+      const providerError = String(result?.error || "").trim();
+      const message = /player\s*not\s*found/i.test(providerError)
+        ? "PUBG profil topilmadi"
+        : providerError || "PUBG profil topilmadi";
+      return response.error(res, message);
     }
     return response.success(res, "PUBG profil topildi", { playerId, playerName });
   } catch (error) {
