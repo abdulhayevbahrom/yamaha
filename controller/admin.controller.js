@@ -735,8 +735,11 @@ const syncGwPubgPlans = async (_, res) => {
 };
 
 const syncGwMlbbPlans = async (_, res) => {
+  const traceId = `admin-mlbb-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
   try {
-    const plans = await syncGwMlbbCatalog();
+    console.info("[GW_MLBB_SYNC_REQUEST]", JSON.stringify({ traceId, stage: "received" }));
+    const plans = await syncGwMlbbCatalog({ traceId });
+    console.info("[GW_MLBB_SYNC_REQUEST]", JSON.stringify({ traceId, stage: "success", plans: plans.length }));
     return response.success(res, "GW MLBB katalogi yangilandi", plans);
   } catch (error) {
     const status = Number(error?.response?.status || 0);
@@ -751,9 +754,9 @@ const syncGwMlbbPlans = async (_, res) => {
       RATE_LIMIT: "GW API so'rov limiti oshdi; birozdan keyin qayta urinib ko'ring",
     };
     const detail = knownMessages[code] || String(payload?.message || payload?.error || error?.message || "GW MLBB katalogini olib bo'lmadi").slice(0, 300);
-    console.error("GW MLBB catalog sync failed:", { status, code: code || "UNKNOWN", message: error?.message });
+    console.error("[GW_MLBB_SYNC_REQUEST]", JSON.stringify({ traceId, stage: "failed", status, code: code || "UNKNOWN", message: error?.message, stack: error?.stack }));
     return response.error(res, detail, {
-      code: code || "GW_CATALOG_SYNC_FAILED", providerStatus: status || null,
+      code: code || "GW_CATALOG_SYNC_FAILED", providerStatus: status || null, traceId,
     });
   }
 };

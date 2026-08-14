@@ -1,4 +1,5 @@
 const Plan = require("../model/plan.model");
+const crypto = require("node:crypto");
 const { getPubgProducts, getMlbbProducts } = require("./gw-api.service");
 
 let syncPromise = null;
@@ -106,9 +107,10 @@ async function performSync() {
   return Plan.find({ category: "uc" }).sort({ amount: 1 }).lean();
 }
 
-async function syncGwMlbbCatalog() {
+async function syncGwMlbbCatalog(options = {}) {
   if (mlbbSyncPromise) return mlbbSyncPromise;
-  mlbbSyncPromise = performMlbbSync();
+  const traceId = String(options.traceId || `mlbb-${crypto.randomUUID()}`).slice(0, 80);
+  mlbbSyncPromise = performMlbbSync(traceId);
   try {
     return await mlbbSyncPromise;
   } finally {
@@ -116,8 +118,22 @@ async function syncGwMlbbCatalog() {
   }
 }
 
-async function performMlbbSync() {
-  const fetchedProducts = await getMlbbProducts();
+async function performMlbbSync(traceId) {
+  const startedAt = Date.now();
+  const log = (stage, detail = {}) => console.info("[GW_MLBB_SYNC]", JSON.stringify({ traceId, stage, ...detail }));
+  log("started");
+  let fetchedProducts;
+  try {
+    fetchedProducts = await getMlbbProducts();
+    log("products_fetched", { count: fetchedProducts.length });
+  } catch (error) {
+    console.error("[GW_MLBB_SYNC]", JSON.stringify({
+      traceId, stage: "products_fetch_failed", status: Number(error?.response?.status || 0) || null,
+      providerCode: String(error?.response?.data?.code || error?.response?.data?.error || "").slice(0, 100),
+      message: String(error?.message || error).slice(0, 500), stack: String(error?.stack || "").slice(0, 2000),
+    }));
+    throw error;
+  }
   if (!fetchedProducts.length) throw new Error("GW MLBB katalogi bo'sh qaytdi");
   // GW ayrim region kataloglarida bir PIDni bir necha service ro'yxatida
   // qaytarishi mumkin. Bir xil provider buyurtmasini ikki marta yaratmaslik
@@ -125,14 +141,29 @@ async function performMlbbSync() {
   const products = [...new Map(
     fetchedProducts.map((item) => [String(item.providerProductId).toUpperCase(), item]),
   ).values()];
+  log("products_deduplicated", {
+    fetched: fetchedProducts.length, unique: products.length,
+    removed: fetchedProducts.length - products.length,
+    regions: products.reduce((acc, item) => {
+      const key = String(item.region || "global"); acc[key] = (acc[key] || 0) + 1; return acc;
+    }, {}),
+  });
 
   const syncedAt = new Date();
   const seenIds = products.map((item) => item.providerProductId);
-  await Plan.updateMany(
-    { category: "mlbb", provider: "gw", providerProductId: { $nin: seenIds } },
-    { $set: { providerAvailable: false, providerQuantity: 0, providerSyncedAt: syncedAt } },
-  );
+  try {
+    const staleResult = await Plan.updateMany(
+      { category: "mlbb", provider: "gw", providerProductId: { $nin: seenIds } },
+      { $set: { providerAvailable: false, providerQuantity: 0, providerSyncedAt: syncedAt } },
+    );
+    log("stale_products_updated", { matched: staleResult.matchedCount, modified: staleResult.modifiedCount });
+  } catch (error) {
+    console.error("[GW_MLBB_SYNC]", JSON.stringify({ traceId, stage: "stale_update_failed", message: error.message, stack: error.stack }));
+    throw error;
+  }
 
+  let updatedCount = 0;
+  let createdCount = 0;
   for (const item of products) {
     let existing = await Plan.findOne({
       category: "mlbb", provider: "gw", providerProductId: item.providerProductId,
@@ -163,7 +194,9 @@ async function performMlbbSync() {
       if (!existing.amount) changes.amount = item.amount;
       try {
         await Plan.updateOne({ _id: existing._id }, { $set: changes });
+        updatedCount += 1;
       } catch (error) {
+        console.error("[GW_MLBB_SYNC]", JSON.stringify({ traceId, stage: "product_update_failed", pid: item.providerProductId, region: item.region, message: error.message, stack: error.stack }));
         throw new Error(`GW MLBB PID ${item.providerProductId} yangilanmadi: ${error.message}`);
       }
       continue;
@@ -186,11 +219,15 @@ async function performMlbbSync() {
         },
         { upsert: true },
       );
+      createdCount += 1;
     } catch (error) {
+      console.error("[GW_MLBB_SYNC]", JSON.stringify({ traceId, stage: "product_create_failed", pid: item.providerProductId, code: safeCode, region: item.region, message: error.message, stack: error.stack }));
       throw new Error(`GW MLBB PID ${item.providerProductId} yaratilmadi: ${error.message}`);
     }
   }
-  return Plan.find({ category: "mlbb" }).sort({ amount: 1 }).lean();
+  const plans = await Plan.find({ category: "mlbb" }).sort({ amount: 1 }).lean();
+  log("completed", { updated: updatedCount, created: createdCount, totalPlans: plans.length, durationMs: Date.now() - startedAt });
+  return plans;
 }
 
 module.exports = { syncGwPubgCatalog, syncGwMlbbCatalog };
