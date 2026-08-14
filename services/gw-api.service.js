@@ -81,6 +81,13 @@ function isMlbbTopup(item) {
 
 function extractMlbbRegion(item) {
   const explicit = normalize(item?.region || item?.country || item?.server).toLowerCase();
+  const pid = normalize(item?.id || item?.pid || item?.PID).toUpperCase();
+  if (/^GWMLMY/.test(pid)) return "my";
+  if (/^GWML(?:TU|TR)/.test(pid)) return "tr";
+  if (/^GWMLRU/.test(pid)) return "ru";
+  if (/^GWML?S/.test(pid)) return "sg";
+  if (/^GWMI/.test(pid)) return "id";
+  if (/^GWMP/.test(pid)) return "ph";
   const slug = normalize(item?.slug).toLowerCase().replace(/[^a-z]/g, "");
   const slugRegion = ["ph", "ru", "tr", "id", "sg", "my"].find(
     (key) => slug.endsWith(key) || slug.includes(`mlbb${key}`) || slug.includes(`mobilelegends${key}`),
