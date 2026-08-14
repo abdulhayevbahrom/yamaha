@@ -70,3 +70,18 @@ test("GW UC amount and order status accept documented response shapes", () => {
   assert.equal(normalizeStatus({ status: "processing" }), "processing");
   assert.equal(normalizeStatus({ order: { status: "completed" } }), "completed");
 });
+
+test("GW PUBG Growth Packs without digits remain in the catalog", () => {
+  const products = [
+    ["GWPSFP", "FIRST PURCHASE PACK", 1],
+    ["GWPSMP", "MATERIAL PACK", 2],
+    ["GWPSMYTH", "MYTHIC EMBLEM PACK", 3],
+    ["GWWEMBLM", "WEEKLY EMBLEM", 4],
+  ];
+
+  products.forEach(([id, serviceName, expectedAmount]) => {
+    const raw = { id, category: "Growth Packs", serviceName, price: 1.25 };
+    assert.equal(isPubgTopup(raw), true);
+    assert.equal(normalizeProduct(raw).amount, expectedAmount);
+  });
+});

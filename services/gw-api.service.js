@@ -2,6 +2,12 @@ const axios = require("axios");
 const https = require("node:https");
 
 const DEFAULT_BASE_URL = "https://api.sonofutred.com";
+const PUBG_GROWTH_PACK_AMOUNTS = new Map([
+  ["GWPSFP", 1],
+  ["GWPSMP", 2],
+  ["GWPSMYTH", 3],
+  ["GWWEMBLM", 4],
+]);
 
 function normalize(value) {
   return String(value || "").trim();
@@ -47,6 +53,8 @@ function unwrapProducts(payload) {
 }
 
 function isPubgTopup(item) {
+  const providerProductId = normalize(item?.id || item?.pid || item?.PID).toUpperCase();
+  if (PUBG_GROWTH_PACK_AMOUNTS.has(providerProductId)) return true;
   const text = [item?.slug, item?.gameName, item?.serviceName, item?.category]
     .map((value) => normalize(value).toLowerCase())
     .join(" ");
@@ -69,7 +77,10 @@ function extractUcAmount(item) {
 
 function normalizeProduct(item) {
   const providerProductId = normalize(item?.id || item?.pid || item?.PID);
-  const amount = extractUcAmount(item);
+  const amount =
+    extractUcAmount(item) ||
+    PUBG_GROWTH_PACK_AMOUNTS.get(providerProductId.toUpperCase()) ||
+    0;
   const priceUsd = Number(item?.price || item?.priceUsd || 0);
   return {
     providerProductId,

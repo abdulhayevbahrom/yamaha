@@ -47,12 +47,17 @@ async function performSync() {
     });
 
     if (!existing) {
-      const sameAmount = await Plan.find({
-        category: "uc",
-        amount: item.amount,
-        $or: [{ provider: "manual" }, { provider: { $exists: false } }],
-      });
-      if (sameAmount.length === 1) existing = sameAmount[0];
+      // Only numeric UC products may inherit a legacy manual package by amount.
+      // Subscriptions and Growth Packs can share small numeric sort values, so
+      // matching those by amount could overwrite an unrelated plan.
+      if (/\bUC\b/i.test(String(item.label || ""))) {
+        const sameAmount = await Plan.find({
+          category: "uc",
+          amount: item.amount,
+          $or: [{ provider: "manual" }, { provider: { $exists: false } }],
+        });
+        if (sameAmount.length === 1) existing = sameAmount[0];
+      }
     }
 
     if (existing) {
