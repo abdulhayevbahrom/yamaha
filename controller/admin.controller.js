@@ -742,8 +742,17 @@ const syncGwMlbbPlans = async (_, res) => {
     const status = Number(error?.response?.status || 0);
     const payload = error?.response?.data;
     const code = String(payload?.code || payload?.error || "").trim().toUpperCase();
+    const knownMessages = {
+      MISSING_API_KEY: "GW API kaliti serverda topilmadi",
+      INVALID_API_KEY: "GW API kaliti noto'g'ri yoki bekor qilingan",
+      API_DISABLED: "GW profilingizda API access yoqilmagan",
+      IP_ALLOWLIST_REQUIRED: "GW profilida server IPv4 manzilini allowlistga kiriting",
+      IP_NOT_ALLOWED: "Serverning chiqish IPv4 manzili GW allowlistda yo'q",
+      RATE_LIMIT: "GW API so'rov limiti oshdi; birozdan keyin qayta urinib ko'ring",
+    };
+    const detail = knownMessages[code] || String(payload?.message || payload?.error || error?.message || "GW MLBB katalogini olib bo'lmadi").slice(0, 300);
     console.error("GW MLBB catalog sync failed:", { status, code: code || "UNKNOWN", message: error?.message });
-    return response.error(res, String(payload?.message || error?.message || "GW MLBB katalogini olib bo'lmadi").slice(0, 300), {
+    return response.error(res, detail, {
       code: code || "GW_CATALOG_SYNC_FAILED", providerStatus: status || null,
     });
   }

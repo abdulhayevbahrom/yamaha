@@ -117,12 +117,14 @@ async function syncGwMlbbCatalog() {
 }
 
 async function performMlbbSync() {
-  const products = await getMlbbProducts();
-  if (!products.length) throw new Error("GW MLBB katalogi bo'sh qaytdi");
-  const duplicatePid = products.find(
-    (item, index) => products.findIndex((row) => row.providerProductId === item.providerProductId) !== index,
-  );
-  if (duplicatePid) throw new Error(`GW katalogida takroriy PID: ${duplicatePid.providerProductId}`);
+  const fetchedProducts = await getMlbbProducts();
+  if (!fetchedProducts.length) throw new Error("GW MLBB katalogi bo'sh qaytdi");
+  // GW ayrim region kataloglarida bir PIDni bir necha service ro'yxatida
+  // qaytarishi mumkin. Bir xil provider buyurtmasini ikki marta yaratmaslik
+  // uchun PID bo'yicha bitta yozuv qoldiramiz.
+  const products = [...new Map(
+    fetchedProducts.map((item) => [String(item.providerProductId).toUpperCase(), item]),
+  ).values()];
 
   const syncedAt = new Date();
   const seenIds = products.map((item) => item.providerProductId);
