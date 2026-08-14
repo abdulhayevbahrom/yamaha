@@ -51,6 +51,11 @@ const planSchema = new mongoose.Schema(
       type: Boolean,
       default: true
     },
+    providerQuantity: {
+      type: Number,
+      default: null,
+      min: 0
+    },
     providerSyncedAt: {
       type: Date,
       default: null

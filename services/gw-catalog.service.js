@@ -35,7 +35,7 @@ async function performSync() {
         provider: "gw",
         providerProductId: { $nin: seenIds },
       },
-      { $set: { providerAvailable: false, providerSyncedAt: syncedAt } },
+      { $set: { providerAvailable: false, providerQuantity: 0, providerSyncedAt: syncedAt } },
     );
   }
 
@@ -63,7 +63,8 @@ async function performSync() {
     if (existing) {
       if (
         Number(existing.providerPriceUsd || 0) !== Number(item.priceUsd) ||
-        Boolean(existing.providerAvailable) !== Boolean(item.available)
+        Boolean(existing.providerAvailable) !== Boolean(item.available) ||
+        existing.providerQuantity !== item.stockQuantity
       ) {
         existing.providerUpdatedAt = syncedAt;
       }
@@ -71,6 +72,7 @@ async function performSync() {
       existing.providerProductId = item.providerProductId;
       existing.providerPriceUsd = item.priceUsd;
       existing.providerAvailable = item.available;
+      existing.providerQuantity = item.stockQuantity;
       existing.providerSyncedAt = syncedAt;
       if (!existing.label) existing.label = item.label;
       if (!existing.amount) existing.amount = item.amount;
@@ -94,6 +96,7 @@ async function performSync() {
       providerProductId: item.providerProductId,
       providerPriceUsd: item.priceUsd,
       providerAvailable: item.available,
+      providerQuantity: item.stockQuantity,
       providerSyncedAt: syncedAt,
       providerUpdatedAt: syncedAt,
     });

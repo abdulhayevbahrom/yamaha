@@ -82,12 +82,20 @@ function normalizeProduct(item) {
     PUBG_GROWTH_PACK_AMOUNTS.get(providerProductId.toUpperCase()) ||
     0;
   const priceUsd = Number(item?.price || item?.priceUsd || 0);
+  const rawQuantity = item?.quantity ?? item?.stock ?? item?.availableQuantity;
+  const parsedQuantity = rawQuantity === undefined || rawQuantity === null || rawQuantity === ""
+    ? null
+    : Number(rawQuantity);
+  const stockQuantity = Number.isFinite(parsedQuantity) && parsedQuantity >= 0
+    ? Math.floor(parsedQuantity)
+    : null;
   return {
     providerProductId,
     amount,
     code: amount > 0 ? String(amount) : providerProductId,
     label: normalize(item?.serviceName || item?.name || `${amount} UC`),
     priceUsd: Number.isFinite(priceUsd) ? priceUsd : 0,
+    stockQuantity,
     available:
       Number.isFinite(priceUsd) &&
       priceUsd > 0 &&

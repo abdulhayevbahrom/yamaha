@@ -57,12 +57,24 @@ test("GW PUBG product normalization keeps provider price separate", () => {
     serviceName: "60 UC",
     price: 0.858,
     status: "active",
+    quantity: 947,
   });
   assert.equal(item.providerProductId, "GWPUBG60");
   assert.equal(item.amount, 60);
   assert.equal(item.priceUsd, 0.858);
   assert.equal(item.available, true);
+  assert.equal(item.stockQuantity, 947);
   assert.equal(Object.hasOwn(item, "basePrice"), false);
+});
+
+test("GW product without quantity does not invent a stock count", () => {
+  const item = normalizeProduct({
+    id: "GWP325",
+    gameName: "PUBG Mobile",
+    serviceName: "325 UC",
+    price: 4.45,
+  });
+  assert.equal(item.stockQuantity, null);
 });
 
 test("GW UC amount and order status accept documented response shapes", () => {

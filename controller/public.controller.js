@@ -156,6 +156,13 @@ function mapCatalog(plans) {
       basePrice: plan.basePrice,
       currency: plan.currency,
       isActive: plan.isActive,
+      stockQuantity:
+        plan.category === "uc" &&
+        plan.providerQuantity !== null &&
+        plan.providerQuantity !== undefined &&
+        Number.isFinite(Number(plan.providerQuantity))
+          ? Math.max(0, Math.floor(Number(plan.providerQuantity)))
+          : null,
       available:
         plan.category === "uc" && isGwPubgAutobuyEnabled()
           ? plan.provider === "gw" &&
