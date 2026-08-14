@@ -5,6 +5,7 @@ const {
   isPubgTopup,
   isPubgRedeem,
   isMlbbTopup,
+  isHokTopup,
   extractMlbbRegion,
   extractUcAmount,
   normalizeProduct,
@@ -14,6 +15,7 @@ const {
   isPlanReady,
 } = require("../services/gw-pubg-fulfillment.service");
 const { isPlanReady: isMlbbPlanReady } = require("../services/gw-mlbb-fulfillment.service");
+const { isGwHokPlanReady } = require("../services/gw-hok-fulfillment.service");
 const { getMlbbBonusTier, isMlbbBonusPlan, isBonusTierAvailable } = require("../services/gw-mlbb-verification.service");
 
 test("GW catalog keeps PUBG topups and excludes redeem codes", () => {
@@ -35,6 +37,22 @@ test("GW catalog recognizes PUBG redeem codes separately", () => {
 test("GW catalog recognizes Mobile Legends products", () => {
   assert.equal(isMlbbTopup({ id: "GWML86", gameName: "Mobile Legends", serviceName: "86 Diamonds" }), true);
   assert.equal(isMlbbTopup({ category: "giftcard", serviceName: "MLBB code" }), false);
+});
+
+test("GW catalog recognizes Honor of Kings products", () => {
+  assert.equal(isHokTopup({ id: "GWHKWC", gameName: "Honor of Kings", serviceName: "Weekly Card" }), true);
+  assert.equal(isHokTopup({ id: "GWPSN50", category: "giftcard", serviceName: "PlayStation" }), false);
+});
+
+test("GW HOK plan must be mapped, available and fresh", () => {
+  const previous = process.env.GW_HOK_CATALOG_MAX_AGE_MS;
+  process.env.GW_HOK_CATALOG_MAX_AGE_MS = "60000";
+  try {
+    assert.equal(isGwHokPlanReady({ provider: "gw", providerProductId: "GWHKWC", providerAvailable: true, providerSyncedAt: new Date() }), true);
+  } finally {
+    if (typeof previous === "undefined") delete process.env.GW_HOK_CATALOG_MAX_AGE_MS;
+    else process.env.GW_HOK_CATALOG_MAX_AGE_MS = previous;
+  }
 });
 
 test("GW MLBB products are assigned to their storefront region", () => {

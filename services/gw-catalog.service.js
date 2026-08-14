@@ -1,9 +1,10 @@
 const Plan = require("../model/plan.model");
 const crypto = require("node:crypto");
-const { getPubgProducts, getPubgRedeemProducts, getMlbbProducts } = require("./gw-api.service");
+const { getPubgProducts, getPubgRedeemProducts, getMlbbProducts, getHokProducts } = require("./gw-api.service");
 
 let syncPromise = null;
 let mlbbSyncPromise = null;
+let hokSyncPromise = null;
 
 async function syncGwPubgCatalog() {
   if (syncPromise) return syncPromise;
@@ -253,4 +254,41 @@ async function performMlbbSync(traceId) {
   return plans;
 }
 
-module.exports = { syncGwPubgCatalog, syncGwMlbbCatalog };
+async function syncGwHokCatalog() {
+  if (hokSyncPromise) return hokSyncPromise;
+  hokSyncPromise = performHokSync();
+  try { return await hokSyncPromise; } finally { hokSyncPromise = null; }
+}
+
+async function performHokSync() {
+  const fetched = await getHokProducts();
+  if (!fetched.length) throw new Error("GW Honor of Kings katalogi bo'sh qaytdi");
+  const products = [...new Map(fetched.map((item) => [item.providerProductId.toUpperCase(), item])).values()];
+  const syncedAt = new Date();
+  const seenIds = products.map((item) => item.providerProductId);
+  await Plan.updateMany(
+    { category: "hok", provider: "gw", providerProductId: { $nin: seenIds } },
+    { $set: { providerAvailable: false, providerQuantity: 0, providerSyncedAt: syncedAt } },
+  );
+  for (const item of products) {
+    const safeCode = `gw_${item.providerProductId}`.toLowerCase().replace(/[^a-z0-9_-]/g, "_").slice(0, 80);
+    await Plan.findOneAndUpdate(
+      { category: "hok", provider: "gw", providerProductId: item.providerProductId },
+      {
+        $set: {
+          label: item.label, amount: item.amount || 1, providerPriceUsd: item.priceUsd,
+          providerAvailable: item.available, providerQuantity: item.stockQuantity,
+          providerSyncedAt: syncedAt, providerUpdatedAt: syncedAt,
+        },
+        $setOnInsert: {
+          category: "hok", code: safeCode, basePrice: 0, currency: "UZS",
+          isActive: false, provider: "gw",
+        },
+      },
+      { upsert: true },
+    );
+  }
+  return Plan.find({ category: "hok" }).sort({ amount: 1 }).lean();
+}
+
+module.exports = { syncGwPubgCatalog, syncGwMlbbCatalog, syncGwHokCatalog };

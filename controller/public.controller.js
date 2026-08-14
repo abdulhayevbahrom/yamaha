@@ -33,13 +33,14 @@ const categoryNames = {
   redeem: "PUBG Redeem",
   freefire: "Free Fire Diamond",
   mlbb: "MLBB Diamond",
+  hok: "Honor of Kings Tokens",
 };
 
 const LOOKUP_CACHE_TTL_MS = 5 * 60 * 1000;
 const LOOKUP_CACHE_LIMIT = 500;
 const profileLookupCache = new Map();
 const profileLookupInFlight = new Map();
-const TOP_SALES_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb"];
+const TOP_SALES_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb", "hok"];
 const TOP_SALES_PERIODS = new Set(["today", "week", "month"]);
 
 function isGwPubgAutobuyEnabled() {
@@ -54,12 +55,20 @@ function isGwMlbbAutobuyEnabled() {
   );
 }
 
+function isGwHokAutobuyEnabled() {
+  return ["1", "true", "yes", "on"].includes(
+    String(process.env.GW_HOK_AUTOBUY_ENABLED || "").trim().toLowerCase(),
+  );
+}
+
 function isGwPlanFresh(plan) {
   const maxAge = Math.max(
     60_000,
     Number(
       (plan?.category === "mlbb"
         ? process.env.GW_MLBB_CATALOG_MAX_AGE_MS
+        : plan?.category === "hok"
+          ? process.env.GW_HOK_CATALOG_MAX_AGE_MS
         : process.env.GW_PUBG_CATALOG_MAX_AGE_MS) || 30 * 60_000,
     ),
   );
@@ -158,6 +167,7 @@ function mapCatalog(plans) {
     redeem: { name: "PUBG Redeem", plans: [] },
     freefire: { name: categoryNames.freefire, plans: [] },
     mlbb: { name: categoryNames.mlbb, plans: [] },
+    hok: { name: categoryNames.hok, plans: [] },
   };
 
   plans.forEach((plan) => {
@@ -183,6 +193,8 @@ function mapCatalog(plans) {
             Boolean(plan.providerAvailable) &&
             isGwPlanFresh(plan)
           : plan.category === "mlbb" && isGwMlbbAutobuyEnabled()
+            ? plan.provider === "gw" && Boolean(plan.providerAvailable) && isGwPlanFresh(plan)
+          : plan.category === "hok" && isGwHokAutobuyEnabled()
             ? plan.provider === "gw" && Boolean(plan.providerAvailable) && isGwPlanFresh(plan)
           : plan.provider === "gw"
             ? Boolean(plan.providerAvailable)

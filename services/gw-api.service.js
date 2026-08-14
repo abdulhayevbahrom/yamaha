@@ -89,6 +89,18 @@ function isMlbbTopup(item) {
   );
 }
 
+function isHokTopup(item) {
+  const providerProductId = normalize(item?.id || item?.pid || item?.PID).toUpperCase();
+  const text = [item?.slug, item?.gameName, item?.serviceName, item?.name, item?.category]
+    .map((value) => normalize(value).toLowerCase())
+    .join(" ");
+  return (
+    providerProductId.startsWith("GWHK") ||
+    text.includes("honor of kings") ||
+    text.includes("honour of kings")
+  ) && !text.includes("giftcard") && !text.includes("gamekey");
+}
+
 function extractMlbbRegion(item) {
   const explicit = normalize(item?.region || item?.country || item?.server).toLowerCase();
   const pid = normalize(item?.id || item?.pid || item?.PID).toUpperCase();
@@ -180,6 +192,14 @@ async function getMlbbProducts() {
     .filter((item) => item.providerProductId && item.amount > 0 && item.priceUsd > 0);
 }
 
+async function getHokProducts() {
+  const response = await createClient().get("/products");
+  return unwrapProducts(response.data)
+    .filter(isHokTopup)
+    .map(normalizeProduct)
+    .filter((item) => item.providerProductId && item.priceUsd > 0);
+}
+
 async function createOrder(body) {
   const response = await createClient().post("/orders", body);
   return response.data;
@@ -222,6 +242,7 @@ module.exports = {
   getPubgProducts,
   getPubgRedeemProducts,
   getMlbbProducts,
+  getHokProducts,
   createOrder,
   createGameKeyOrder,
   createRedeemOrder,
@@ -231,6 +252,7 @@ module.exports = {
   isPubgTopup,
   isPubgRedeem,
   isMlbbTopup,
+  isHokTopup,
   extractMlbbRegion,
   extractUcAmount,
   normalizeProduct,

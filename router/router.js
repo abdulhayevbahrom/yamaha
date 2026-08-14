@@ -255,6 +255,11 @@ router.post(
   authMiddleware,
   adminController.syncGwMlbbPlans,
 );
+router.post(
+  "/admin/providers/gw/hok/sync",
+  authMiddleware,
+  adminController.syncGwHokPlans,
+);
 router.get(
   "/admin/payment-cards",
   authMiddleware,

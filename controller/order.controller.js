@@ -25,6 +25,11 @@ const {
   isPlanReady: isGwMlbbPlanReady,
 } = require("../services/gw-mlbb-fulfillment.service");
 const {
+  isGwHokAutobuyEnabled,
+  autoFulfillGwHok,
+  isGwHokPlanReady,
+} = require("../services/gw-hok-fulfillment.service");
+const {
   isGwPubgRedeemEnabled,
   autoFulfillGwPubgRedeem,
   isPlanReady: isGwPubgRedeemPlanReady,
@@ -73,7 +78,7 @@ const { sanitizePublicOrder } = require("../utils/public-payload");
 let sequence = 1;
 const PENDING_TTL_MS = 10 * 60 * 1000;
 const ORDER_PAYMENT_METHODS = ["card", "bankomat", "uzumbank", "paynet", "click", "balance", "stars"];
-const STARS_INVOICE_PRODUCTS = new Set(["uc", "freefire", "mlbb", "star_sell"]);
+const STARS_INVOICE_PRODUCTS = new Set(["uc", "freefire", "mlbb", "hok", "star_sell"]);
 
 function normalizeCardNumber(value) {
   return String(value || "").replace(/\D/g, "").slice(0, 16);
@@ -88,6 +93,7 @@ function getOrderProductLabel(product) {
   if (key === "uc") return "PUBG UC";
   if (key === "redeem") return "PUBG Redeem";
   if (key === "mlbb") return "MLBB Diamond";
+  if (key === "hok") return "Honor of Kings Tokens";
   if (key === "freefire") return "Free Fire Diamond";
   return "Buyurtma";
 }
@@ -102,6 +108,7 @@ function getAdminNotifyIds() {
 function getGameProductLabel(product) {
   const key = String(product || "").trim().toLowerCase();
   if (key === "mlbb") return "MLBB";
+  if (key === "hok") return "Honor of Kings";
   if (key === "freefire") return "Free Fire";
   if (key === "uc") return "PUBG UC";
   return "O'yin";
@@ -402,7 +409,7 @@ const createOrder = async (req, res) => {
     if (currentUser?.isBlocked) {
       return response.error(res, "Foydalanuvchi bloklangan");
     }
-    if (!["star", "premium", "uc", "redeem", "freefire", "mlbb", "star_sell"].includes(product)) {
+    if (!["star", "premium", "uc", "redeem", "freefire", "mlbb", "hok", "star_sell"].includes(product)) {
       return response.error(res, "Tanlangan mahsulot noto'g'ri");
     }
     if (!ORDER_PAYMENT_METHODS.includes(normalizedPaymentMethod)) {
@@ -437,8 +444,11 @@ const createOrder = async (req, res) => {
       if (!normalizedPlayerId || !normalizedZoneId) {
         return response.error(res, "Player ID va Zone ID kiriting");
       }
-    } else if (!['star_sell', 'redeem'].includes(product) && !normalizedUsername) {
+    } else if (!['star_sell', 'redeem'].includes(product) && !normalizedUsername && product !== "hok") {
       return response.error(res, "Username kiriting");
+    }
+    if (product === "hok" && !normalizedPlayerId) {
+      return response.error(res, "Honor of Kings Player ID kiriting");
     }
 
     await expirePendingOrders();
@@ -498,6 +508,9 @@ const createOrder = async (req, res) => {
       }
       if (product === "mlbb" && isGwMlbbAutobuyEnabled() && !isGwMlbbPlanReady(plan)) {
         return response.error(res, "Tanlangan MLBB paketi hozir mavjud emas");
+      }
+      if (product === "hok" && isGwHokAutobuyEnabled() && !isGwHokPlanReady(plan)) {
+        return response.error(res, "Tanlangan Honor of Kings paketi hozir mavjud emas");
       }
       if (product === "mlbb" && isMlbbBonusPlan(plan)) {
         let verification;
@@ -613,6 +626,8 @@ const createOrder = async (req, res) => {
     const resolvedProfileName =
       product === "mlbb"
         ? `Player ID: ${normalizedPlayerId} | Zone ID: ${normalizedZoneId}`
+        : product === "hok"
+        ? `Player ID: ${normalizedPlayerId}`
         : normalizedIncomingProfileName || fallbackProfileName;
 
     const order = await Order.create({
@@ -625,6 +640,8 @@ const createOrder = async (req, res) => {
           ? String(tgUsername || normalizedUsername || tgUserId).trim()
           : product === "mlbb"
           ? `${normalizedPlayerId}:${normalizedZoneId}`
+          : product === "hok"
+          ? normalizedPlayerId
           : product === "redeem"
           ? "PUBG_REDEEM_CODE"
           : normalizedUsername,
@@ -673,6 +690,7 @@ const createOrder = async (req, res) => {
         isManualGameProduct(product) &&
         !(product === "uc" && isGwPubgAutobuyEnabled()) &&
         !(product === "mlbb" && isGwMlbbAutobuyEnabled())
+        && !(product === "hok" && isGwHokAutobuyEnabled())
       ) {
         emitAdminUpdate({
           type: "game_paid",
@@ -711,6 +729,9 @@ const createOrder = async (req, res) => {
       }
       if (product === "mlbb" && isGwMlbbAutobuyEnabled()) {
         await autoFulfillGwMlbb(order);
+      }
+      if (product === "hok" && isGwHokAutobuyEnabled()) {
+        await autoFulfillGwHok(order);
       }
     }
 
@@ -820,7 +841,7 @@ function buildSearchFilter(rawSearch) {
   return { $or: conditions };
 }
 
-const SALES_HISTORY_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb", "balance"];
+const SALES_HISTORY_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb", "hok", "balance"];
 
 function buildHistoryFilter(scope, product = "") {
   if (scope === "sales") {
@@ -845,7 +866,7 @@ function buildHistoryFilter(scope, product = "") {
 
   if (scope === "uc_paid") {
     return {
-      product: { $in: ["uc", "freefire", "mlbb"] },
+      product: { $in: ["uc", "freefire", "mlbb", "hok"] },
       status: "paid_auto_processed",
     };
   }

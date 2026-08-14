@@ -5,7 +5,7 @@ const { sendOrderArchive } = require("./order-archive.service");
 const { emitUserUpdate } = require("../socket");
 const { awardReferralCommissionForOrder } = require("./referral.service");
 
-const MANUAL_GAME_PRODUCTS = ["uc", "freefire", "mlbb"];
+const MANUAL_GAME_PRODUCTS = ["uc", "freefire", "mlbb", "hok"];
 
 function isManualGameProduct(product) {
   return MANUAL_GAME_PRODUCTS.includes(product);
