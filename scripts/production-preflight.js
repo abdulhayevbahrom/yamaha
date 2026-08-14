@@ -74,6 +74,14 @@ async function run() {
     }
   }
 
+  if (isEnabled(process.env.GW_MLBB_AUTOBUY_ENABLED)) {
+    if (!normalize(process.env.GW_API_KEY)) errors.push("GW_MLBB_AUTOBUY_ENABLED=true, lekin GW_API_KEY topilmadi");
+    const maxAge = Number(process.env.GW_MLBB_CATALOG_MAX_AGE_MS || 30 * 60_000);
+    const syncInterval = Number(process.env.GW_MLBB_CATALOG_SYNC_INTERVAL_MS || 5 * 60_000);
+    if (!Number.isFinite(maxAge) || maxAge < 60_000) errors.push("GW_MLBB_CATALOG_MAX_AGE_MS kamida 60000 bo'lishi kerak");
+    if (!Number.isFinite(syncInterval) || syncInterval < 60_000) errors.push("GW_MLBB_CATALOG_SYNC_INTERVAL_MS kamida 60000 bo'lishi kerak");
+  }
+
   if (normalize(process.env.NODE_ENV).toLowerCase() !== "production") {
     errors.push("NODE_ENV=production bo'lishi kerak");
   }

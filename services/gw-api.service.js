@@ -66,6 +66,19 @@ function isPubgTopup(item) {
   );
 }
 
+function isMlbbTopup(item) {
+  const providerProductId = normalize(item?.id || item?.pid || item?.PID).toUpperCase();
+  const text = [item?.slug, item?.gameName, item?.serviceName, item?.category]
+    .map((value) => normalize(value).toLowerCase())
+    .join(" ");
+  return (
+    (providerProductId.startsWith("GWML") || text.includes("mobile legends") || text.includes("mlbb")) &&
+    !text.includes("gamekey") &&
+    !text.includes("giftcard") &&
+    !text.includes("code")
+  );
+}
+
 function extractUcAmount(item) {
   const candidates = [item?.serviceName, item?.name, item?.label, item?.amount];
   for (const value of candidates) {
@@ -113,6 +126,14 @@ async function getPubgProducts() {
     .filter((item) => item.providerProductId && item.amount > 0 && item.priceUsd > 0);
 }
 
+async function getMlbbProducts() {
+  const response = await createClient().get("/products");
+  return unwrapProducts(response.data)
+    .filter(isMlbbTopup)
+    .map(normalizeProduct)
+    .filter((item) => item.providerProductId && item.amount > 0 && item.priceUsd > 0);
+}
+
 async function createOrder(body) {
   const response = await createClient().post("/orders", body);
   return response.data;
@@ -130,10 +151,12 @@ async function verifyPubgPlayer(playerId, trxid) {
 
 module.exports = {
   getPubgProducts,
+  getMlbbProducts,
   createOrder,
   getOrder,
   verifyPubgPlayer,
   isPubgTopup,
+  isMlbbTopup,
   extractUcAmount,
   normalizeProduct,
 };

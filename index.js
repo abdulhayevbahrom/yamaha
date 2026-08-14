@@ -160,6 +160,10 @@ async function startServer() {
   await resumeGwPubgPolling().catch((error) => {
     console.error("GW PUBG polling resume error:", error?.message || error);
   });
+  const { resumeGwMlbbPolling } = require("./services/gw-mlbb-fulfillment.service");
+  await resumeGwMlbbPolling().catch((error) => {
+    console.error("GW MLBB polling resume error:", error?.message || error);
+  });
 
   if (
     ["1", "true", "yes", "on"].includes(
@@ -180,6 +184,16 @@ async function startServer() {
       ),
     );
     syncInterval.unref();
+  }
+
+  if (["1", "true", "yes", "on"].includes(String(process.env.GW_MLBB_AUTOBUY_ENABLED || "").trim().toLowerCase())) {
+    const { syncGwMlbbCatalog } = require("./services/gw-catalog.service");
+    const syncMlbbCatalog = () => syncGwMlbbCatalog().catch((error) => {
+      console.error("GW MLBB catalog sync error:", error?.message || error);
+    });
+    void syncMlbbCatalog();
+    const mlbbSyncInterval = setInterval(syncMlbbCatalog, Math.max(60_000, Number(process.env.GW_MLBB_CATALOG_SYNC_INTERVAL_MS || 5 * 60_000)));
+    mlbbSyncInterval.unref();
   }
 
   server.listen(PORT, () => {

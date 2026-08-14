@@ -19,6 +19,11 @@ const {
   autoFulfillGwPubg,
   isPlanReady: isGwPubgPlanReady,
 } = require("../services/gw-pubg-fulfillment.service");
+const {
+  isGwMlbbAutobuyEnabled,
+  autoFulfillGwMlbb,
+  isPlanReady: isGwMlbbPlanReady,
+} = require("../services/gw-mlbb-fulfillment.service");
 const { cancelPaidOrderById } = require("../services/order-cancel.service");
 const { notifyGamePaid } = require("../services/notify.service");
 const { emitAdminUpdate, emitUserUpdate } = require("../socket");
@@ -476,6 +481,9 @@ const createOrder = async (req, res) => {
       ) {
         return response.error(res, "Tanlangan PUBG paketi hozir mavjud emas");
       }
+      if (product === "mlbb" && isGwMlbbAutobuyEnabled() && !isGwMlbbPlanReady(plan)) {
+        return response.error(res, "Tanlangan MLBB paketi hozir mavjud emas");
+      }
       resolvedAmount = plan.amount;
       resolvedBasePrice = plan.basePrice;
     }
@@ -634,7 +642,8 @@ const createOrder = async (req, res) => {
     if (finalStatus === "paid_auto_processed") {
       if (
         isManualGameProduct(product) &&
-        !(product === "uc" && isGwPubgAutobuyEnabled())
+        !(product === "uc" && isGwPubgAutobuyEnabled()) &&
+        !(product === "mlbb" && isGwMlbbAutobuyEnabled())
       ) {
         emitAdminUpdate({
           type: "game_paid",
@@ -667,6 +676,9 @@ const createOrder = async (req, res) => {
       }
       if (product === "uc" && isGwPubgAutobuyEnabled()) {
         await autoFulfillGwPubg(order);
+      }
+      if (product === "mlbb" && isGwMlbbAutobuyEnabled()) {
+        await autoFulfillGwMlbb(order);
       }
     }
 

@@ -250,6 +250,11 @@ router.post(
   authMiddleware,
   adminController.syncGwPubgPlans,
 );
+router.post(
+  "/admin/providers/gw/mlbb/sync",
+  authMiddleware,
+  adminController.syncGwMlbbPlans,
+);
 router.get(
   "/admin/payment-cards",
   authMiddleware,

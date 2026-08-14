@@ -46,10 +46,20 @@ function isGwPubgAutobuyEnabled() {
   );
 }
 
+function isGwMlbbAutobuyEnabled() {
+  return ["1", "true", "yes", "on"].includes(
+    String(process.env.GW_MLBB_AUTOBUY_ENABLED || "").trim().toLowerCase(),
+  );
+}
+
 function isGwPlanFresh(plan) {
   const maxAge = Math.max(
     60_000,
-    Number(process.env.GW_PUBG_CATALOG_MAX_AGE_MS || 30 * 60_000),
+    Number(
+      (plan?.category === "mlbb"
+        ? process.env.GW_MLBB_CATALOG_MAX_AGE_MS
+        : process.env.GW_PUBG_CATALOG_MAX_AGE_MS) || 30 * 60_000,
+    ),
   );
   const syncedAt = new Date(plan?.providerSyncedAt || 0).getTime();
   return syncedAt > 0 && Date.now() - syncedAt <= maxAge;
@@ -168,6 +178,8 @@ function mapCatalog(plans) {
           ? plan.provider === "gw" &&
             Boolean(plan.providerAvailable) &&
             isGwPlanFresh(plan)
+          : plan.category === "mlbb" && isGwMlbbAutobuyEnabled()
+            ? plan.provider === "gw" && Boolean(plan.providerAvailable) && isGwPlanFresh(plan)
           : plan.provider === "gw"
             ? Boolean(plan.providerAvailable)
             : true,

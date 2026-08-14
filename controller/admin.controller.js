@@ -58,7 +58,7 @@ const {
   listReferralPromoCodes: listReferralPromoCodesService,
   markReferralPromoCodeUsed: markReferralPromoCodeUsedService,
 } = require("../services/referral-promo-code.service");
-const { syncGwPubgCatalog } = require("../services/gw-catalog.service");
+const { syncGwPubgCatalog, syncGwMlbbCatalog } = require("../services/gw-catalog.service");
 
 const PURCHASE_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb"];
 const PAID_STATUSES = ["paid_auto_processed", "completed"];
@@ -730,6 +730,21 @@ const syncGwPubgPlans = async (_, res) => {
     return response.error(res, detail, {
       code: code || "GW_CATALOG_SYNC_FAILED",
       providerStatus: status || null,
+    });
+  }
+};
+
+const syncGwMlbbPlans = async (_, res) => {
+  try {
+    const plans = await syncGwMlbbCatalog();
+    return response.success(res, "GW MLBB katalogi yangilandi", plans);
+  } catch (error) {
+    const status = Number(error?.response?.status || 0);
+    const payload = error?.response?.data;
+    const code = String(payload?.code || payload?.error || "").trim().toUpperCase();
+    console.error("GW MLBB catalog sync failed:", { status, code: code || "UNKNOWN", message: error?.message });
+    return response.error(res, String(payload?.message || error?.message || "GW MLBB katalogini olib bo'lmadi").slice(0, 300), {
+      code: code || "GW_CATALOG_SYNC_FAILED", providerStatus: status || null,
     });
   }
 };
@@ -2430,6 +2445,7 @@ module.exports = {
   updatePlan,
   deletePlan,
   syncGwPubgPlans,
+  syncGwMlbbPlans,
   getSettings,
   updateSettings,
   getReferralPromoCodes,

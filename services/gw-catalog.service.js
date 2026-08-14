@@ -1,7 +1,8 @@
 const Plan = require("../model/plan.model");
-const { getPubgProducts } = require("./gw-api.service");
+const { getPubgProducts, getMlbbProducts } = require("./gw-api.service");
 
 let syncPromise = null;
+let mlbbSyncPromise = null;
 
 async function syncGwPubgCatalog() {
   if (syncPromise) return syncPromise;
@@ -105,4 +106,69 @@ async function performSync() {
   return Plan.find({ category: "uc" }).sort({ amount: 1 }).lean();
 }
 
-module.exports = { syncGwPubgCatalog };
+async function syncGwMlbbCatalog() {
+  if (mlbbSyncPromise) return mlbbSyncPromise;
+  mlbbSyncPromise = performMlbbSync();
+  try {
+    return await mlbbSyncPromise;
+  } finally {
+    mlbbSyncPromise = null;
+  }
+}
+
+async function performMlbbSync() {
+  const products = await getMlbbProducts();
+  if (!products.length) throw new Error("GW MLBB katalogi bo'sh qaytdi");
+  const duplicatePid = products.find(
+    (item, index) => products.findIndex((row) => row.providerProductId === item.providerProductId) !== index,
+  );
+  if (duplicatePid) throw new Error(`GW katalogida takroriy PID: ${duplicatePid.providerProductId}`);
+
+  const syncedAt = new Date();
+  const seenIds = products.map((item) => item.providerProductId);
+  await Plan.updateMany(
+    { category: "mlbb", provider: "gw", providerProductId: { $nin: seenIds } },
+    { $set: { providerAvailable: false, providerQuantity: 0, providerSyncedAt: syncedAt } },
+  );
+
+  for (const item of products) {
+    let existing = await Plan.findOne({
+      category: "mlbb", provider: "gw", providerProductId: item.providerProductId,
+    });
+    if (!existing) {
+      const sameAmount = await Plan.find({
+        category: "mlbb", amount: item.amount,
+        $or: [{ provider: "manual" }, { provider: { $exists: false } }],
+      });
+      if (sameAmount.length === 1) existing = sameAmount[0];
+    }
+    if (existing) {
+      if (
+        Number(existing.providerPriceUsd || 0) !== Number(item.priceUsd) ||
+        Boolean(existing.providerAvailable) !== Boolean(item.available) ||
+        existing.providerQuantity !== item.stockQuantity
+      ) existing.providerUpdatedAt = syncedAt;
+      existing.provider = "gw";
+      existing.providerProductId = item.providerProductId;
+      existing.providerPriceUsd = item.priceUsd;
+      existing.providerAvailable = item.available;
+      existing.providerQuantity = item.stockQuantity;
+      existing.providerSyncedAt = syncedAt;
+      if (!existing.label) existing.label = item.label;
+      if (!existing.amount) existing.amount = item.amount;
+      await existing.save();
+      continue;
+    }
+    const safeCode = `gw_${item.providerProductId}`.toLowerCase().replace(/[^a-z0-9_-]/g, "_").slice(0, 80);
+    await Plan.create({
+      category: "mlbb", code: safeCode, label: item.label || `${item.amount} Diamonds`,
+      amount: item.amount, basePrice: 0, currency: "UZS", isActive: false,
+      provider: "gw", providerProductId: item.providerProductId,
+      providerPriceUsd: item.priceUsd, providerAvailable: item.available,
+      providerQuantity: item.stockQuantity, providerSyncedAt: syncedAt, providerUpdatedAt: syncedAt,
+    });
+  }
+  return Plan.find({ category: "mlbb" }).sort({ amount: 1 }).lean();
+}
+
+module.exports = { syncGwPubgCatalog, syncGwMlbbCatalog };

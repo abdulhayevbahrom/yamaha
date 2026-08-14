@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 
 const {
   isPubgTopup,
+  isMlbbTopup,
   extractUcAmount,
   normalizeProduct,
 } = require("../services/gw-api.service");
@@ -10,6 +11,7 @@ const {
   normalizeStatus,
   isPlanReady,
 } = require("../services/gw-pubg-fulfillment.service");
+const { isPlanReady: isMlbbPlanReady } = require("../services/gw-mlbb-fulfillment.service");
 
 test("GW catalog keeps PUBG topups and excludes redeem codes", () => {
   assert.equal(
@@ -20,6 +22,22 @@ test("GW catalog keeps PUBG topups and excludes redeem codes", () => {
     isPubgTopup({ gameName: "Game Keys — PUBG Mobile", category: "gamekeypubg" }),
     false,
   );
+});
+
+test("GW catalog recognizes Mobile Legends products", () => {
+  assert.equal(isMlbbTopup({ id: "GWML86", gameName: "Mobile Legends", serviceName: "86 Diamonds" }), true);
+  assert.equal(isMlbbTopup({ category: "giftcard", serviceName: "MLBB code" }), false);
+});
+
+test("GW MLBB plan must be mapped, available and fresh", () => {
+  const previous = process.env.GW_MLBB_CATALOG_MAX_AGE_MS;
+  process.env.GW_MLBB_CATALOG_MAX_AGE_MS = "60000";
+  try {
+    assert.equal(isMlbbPlanReady({ provider: "gw", providerProductId: "GWML86", providerAvailable: true, providerSyncedAt: new Date() }), true);
+  } finally {
+    if (typeof previous === "undefined") delete process.env.GW_MLBB_CATALOG_MAX_AGE_MS;
+    else process.env.GW_MLBB_CATALOG_MAX_AGE_MS = previous;
+  }
 });
 
 test("GW plan must be mapped, available and freshly synced", () => {
