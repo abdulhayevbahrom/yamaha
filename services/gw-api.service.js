@@ -66,6 +66,16 @@ function isPubgTopup(item) {
   );
 }
 
+function isPubgRedeem(item) {
+  const text = [item?.slug, item?.gameName, item?.serviceName, item?.category, item?.type]
+    .map((value) => normalize(value).toLowerCase())
+    .join(" ");
+  return text.includes("pubg") && (
+    text.includes("gamekey") || text.includes("game key") ||
+    text.includes("giftcard") || text.includes("redeem") || text.includes("code")
+  );
+}
+
 function isMlbbTopup(item) {
   const providerProductId = normalize(item?.id || item?.pid || item?.PID).toUpperCase();
   const text = [item?.slug, item?.gameName, item?.serviceName, item?.category]
@@ -154,6 +164,14 @@ async function getPubgProducts() {
     .filter((item) => item.providerProductId && item.amount > 0 && item.priceUsd > 0);
 }
 
+async function getPubgRedeemProducts() {
+  const response = await createClient().get("/products");
+  return unwrapProducts(response.data)
+    .filter(isPubgRedeem)
+    .map(normalizeProduct)
+    .filter((item) => item.providerProductId && item.amount > 0 && item.priceUsd > 0);
+}
+
 async function getMlbbProducts() {
   const response = await createClient().get("/products");
   return unwrapProducts(response.data)
@@ -165,6 +183,24 @@ async function getMlbbProducts() {
 async function createOrder(body) {
   const response = await createClient().post("/orders", body);
   return response.data;
+}
+
+async function createGameKeyOrder(body) {
+  const response = await createClient().post("/orders/gamekey", body);
+  return response.data;
+}
+
+async function createRedeemOrder(body) {
+  const client = createClient();
+  try {
+    const response = await client.post("/orders/pid", body);
+    return response.data;
+  } catch (error) {
+    // Keep compatibility with the legacy GW deployment already used by this app.
+    if (Number(error?.response?.status || 0) !== 404) throw error;
+    const response = await client.post("/orders", body);
+    return response.data;
+  }
 }
 
 async function getOrder(orderId) {
@@ -184,12 +220,16 @@ async function verifyMlbbPlayer(userId, zoneId, trxid) {
 
 module.exports = {
   getPubgProducts,
+  getPubgRedeemProducts,
   getMlbbProducts,
   createOrder,
+  createGameKeyOrder,
+  createRedeemOrder,
   getOrder,
   verifyPubgPlayer,
   verifyMlbbPlayer,
   isPubgTopup,
+  isPubgRedeem,
   isMlbbTopup,
   extractMlbbRegion,
   extractUcAmount,

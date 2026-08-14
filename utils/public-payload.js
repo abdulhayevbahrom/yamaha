@@ -24,6 +24,9 @@ function sanitizeFragmentTx(fragmentTx) {
     refundedToBalanceAt: fragmentTx.refundedToBalanceAt || null,
     refundReason: String(fragmentTx.refundReason || ""),
     refundTarget: String(fragmentTx.refundTarget || ""),
+    redeemCodes: Array.isArray(fragmentTx.redeemCodes)
+      ? fragmentTx.redeemCodes.map((code) => String(code || "").trim()).filter(Boolean).slice(0, 10)
+      : [],
   };
 }
 

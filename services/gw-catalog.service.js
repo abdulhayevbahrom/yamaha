@@ -1,6 +1,6 @@
 const Plan = require("../model/plan.model");
 const crypto = require("node:crypto");
-const { getPubgProducts, getMlbbProducts } = require("./gw-api.service");
+const { getPubgProducts, getPubgRedeemProducts, getMlbbProducts } = require("./gw-api.service");
 
 let syncPromise = null;
 let mlbbSyncPromise = null;
@@ -16,7 +16,7 @@ async function syncGwPubgCatalog() {
 }
 
 async function performSync() {
-  const products = await getPubgProducts();
+  const [products, redeemProducts] = await Promise.all([getPubgProducts(), getPubgRedeemProducts()]);
   if (!products.length) {
     throw new Error("GW PUBG katalogi bo'sh qaytdi");
   }
@@ -104,7 +104,24 @@ async function performSync() {
     });
   }
 
-  return Plan.find({ category: "uc" }).sort({ amount: 1 }).lean();
+  const redeemSeenIds = redeemProducts.map((item) => item.providerProductId);
+  await Plan.updateMany(
+    { category: "redeem", provider: "gw", providerProductId: { $nin: redeemSeenIds } },
+    { $set: { providerAvailable: false, providerQuantity: 0, providerSyncedAt: syncedAt } },
+  );
+  for (const item of redeemProducts) {
+    const safeCode = `gw_redeem_${item.providerProductId}`.toLowerCase().replace(/[^a-z0-9_-]/g, "_").slice(0, 80);
+    await Plan.findOneAndUpdate(
+      { category: "redeem", provider: "gw", providerProductId: item.providerProductId },
+      { $set: { label: item.label, amount: item.amount, providerPriceUsd: item.priceUsd,
+        providerAvailable: item.available, providerQuantity: item.stockQuantity,
+        providerSyncedAt: syncedAt, providerUpdatedAt: syncedAt },
+        $setOnInsert: { category: "redeem", code: safeCode, basePrice: 0, currency: "UZS", isActive: false, provider: "gw" } },
+      { upsert: true },
+    );
+  }
+
+  return Plan.find({ category: { $in: ["uc", "redeem"] } }).sort({ category: 1, amount: 1 }).lean();
 }
 
 async function syncGwMlbbCatalog(options = {}) {

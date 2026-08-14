@@ -2,6 +2,7 @@ const crypto = require("crypto");
 const Order = require("../model/order.model");
 const PaymentLog = require("../model/payment-log.model");
 const { autoFulfillOrder } = require("./avtoBuy.service");
+const { autoFulfillGwPubgRedeem } = require("./gw-pubg-redeem.service");
 const { emitAdminUpdate, emitUserUpdate } = require("../socket");
 const { notifyGamePaid } = require("./notify.service");
 const { sendOrderArchive } = require("./order-archive.service");
@@ -366,7 +367,9 @@ async function handlePostPaymentEffects(order, paidAmount, { userEventType = "pa
 
   let fulfillment = null;
   try {
-    fulfillment = await autoFulfillOrder(order);
+    fulfillment = order.product === "redeem"
+      ? await autoFulfillGwPubgRedeem(order)
+      : await autoFulfillOrder(order);
   } catch (error) {
     fulfillment = { ok: false, error: error.message || "auto_fulfill_failed" };
   }

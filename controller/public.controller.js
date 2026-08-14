@@ -30,6 +30,7 @@ const categoryNames = {
   star: "Telegram Star",
   premium: "Telegram Premium",
   uc: "PUBG UC",
+  redeem: "PUBG Redeem",
   freefire: "Free Fire Diamond",
   mlbb: "MLBB Diamond",
 };
@@ -154,6 +155,7 @@ function mapCatalog(plans) {
     star: { name: categoryNames.star, plans: [] },
     premium: { name: categoryNames.premium, plans: [] },
     uc: { name: categoryNames.uc, plans: [] },
+    redeem: { name: "PUBG Redeem", plans: [] },
     freefire: { name: categoryNames.freefire, plans: [] },
     mlbb: { name: categoryNames.mlbb, plans: [] },
   };
@@ -169,14 +171,14 @@ function mapCatalog(plans) {
       region: plan.category === "mlbb" ? String(plan.providerRegion || "global") : undefined,
       isActive: plan.isActive,
       stockQuantity:
-        plan.category === "uc" &&
+        ["uc", "redeem"].includes(plan.category) &&
         plan.providerQuantity !== null &&
         plan.providerQuantity !== undefined &&
         Number.isFinite(Number(plan.providerQuantity))
           ? Math.max(0, Math.floor(Number(plan.providerQuantity)))
           : null,
       available:
-        plan.category === "uc" && isGwPubgAutobuyEnabled()
+        ["uc", "redeem"].includes(plan.category) && isGwPubgAutobuyEnabled()
           ? plan.provider === "gw" &&
             Boolean(plan.providerAvailable) &&
             isGwPlanFresh(plan)

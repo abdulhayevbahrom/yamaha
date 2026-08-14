@@ -25,6 +25,11 @@ const {
   isPlanReady: isGwMlbbPlanReady,
 } = require("../services/gw-mlbb-fulfillment.service");
 const {
+  isGwPubgRedeemEnabled,
+  autoFulfillGwPubgRedeem,
+  isPlanReady: isGwPubgRedeemPlanReady,
+} = require("../services/gw-pubg-redeem.service");
+const {
   verifyMlbbAccount,
   getMlbbBonusTier,
   isMlbbBonusPlan,
@@ -81,6 +86,7 @@ function getOrderProductLabel(product) {
   if (key === "nft_withdrawal") return "NFT Yechib Olish";
   if (key === "premium") return "Telegram Premium";
   if (key === "uc") return "PUBG UC";
+  if (key === "redeem") return "PUBG Redeem";
   if (key === "mlbb") return "MLBB Diamond";
   if (key === "freefire") return "Free Fire Diamond";
   return "Buyurtma";
@@ -396,7 +402,7 @@ const createOrder = async (req, res) => {
     if (currentUser?.isBlocked) {
       return response.error(res, "Foydalanuvchi bloklangan");
     }
-    if (!["star", "premium", "uc", "freefire", "mlbb", "star_sell"].includes(product)) {
+    if (!["star", "premium", "uc", "redeem", "freefire", "mlbb", "star_sell"].includes(product)) {
       return response.error(res, "Tanlangan mahsulot noto'g'ri");
     }
     if (!ORDER_PAYMENT_METHODS.includes(normalizedPaymentMethod)) {
@@ -431,7 +437,7 @@ const createOrder = async (req, res) => {
       if (!normalizedPlayerId || !normalizedZoneId) {
         return response.error(res, "Player ID va Zone ID kiriting");
       }
-    } else if (product !== "star_sell" && !normalizedUsername) {
+    } else if (!['star_sell', 'redeem'].includes(product) && !normalizedUsername) {
       return response.error(res, "Username kiriting");
     }
 
@@ -486,6 +492,9 @@ const createOrder = async (req, res) => {
         !isGwPubgPlanReady(plan)
       ) {
         return response.error(res, "Tanlangan PUBG paketi hozir mavjud emas");
+      }
+      if (product === "redeem" && isGwPubgRedeemEnabled() && !isGwPubgRedeemPlanReady(plan)) {
+        return response.error(res, "Tanlangan redeem kodi hozir mavjud emas");
       }
       if (product === "mlbb" && isGwMlbbAutobuyEnabled() && !isGwMlbbPlanReady(plan)) {
         return response.error(res, "Tanlangan MLBB paketi hozir mavjud emas");
@@ -616,6 +625,8 @@ const createOrder = async (req, res) => {
           ? String(tgUsername || normalizedUsername || tgUserId).trim()
           : product === "mlbb"
           ? `${normalizedPlayerId}:${normalizedZoneId}`
+          : product === "redeem"
+          ? "PUBG_REDEEM_CODE"
           : normalizedUsername,
       playerId: normalizedPlayerId,
       zoneId: normalizedZoneId,
@@ -694,6 +705,9 @@ const createOrder = async (req, res) => {
       }
       if (product === "uc" && isGwPubgAutobuyEnabled()) {
         await autoFulfillGwPubg(order);
+      }
+      if (product === "redeem" && isGwPubgRedeemEnabled()) {
+        await autoFulfillGwPubgRedeem(order);
       }
       if (product === "mlbb" && isGwMlbbAutobuyEnabled()) {
         await autoFulfillGwMlbb(order);

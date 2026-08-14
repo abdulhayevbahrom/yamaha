@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 
 const {
   isPubgTopup,
+  isPubgRedeem,
   isMlbbTopup,
   extractMlbbRegion,
   extractUcAmount,
@@ -24,6 +25,11 @@ test("GW catalog keeps PUBG topups and excludes redeem codes", () => {
     isPubgTopup({ gameName: "Game Keys — PUBG Mobile", category: "gamekeypubg" }),
     false,
   );
+});
+
+test("GW catalog recognizes PUBG redeem codes separately", () => {
+  assert.equal(isPubgRedeem({ gameName: "Game Keys — PUBG Mobile", category: "gamekeypubg", serviceName: "60 UC code" }), true);
+  assert.equal(isPubgRedeem({ gameName: "PUBG Mobile", serviceName: "60 UC" }), false);
 });
 
 test("GW catalog recognizes Mobile Legends products", () => {
