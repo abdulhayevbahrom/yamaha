@@ -162,18 +162,38 @@ async function performMlbbSync(traceId) {
     throw error;
   }
 
-  let updatedCount = 0;
-  let createdCount = 0;
-  for (const item of products) {
-    let existing = await Plan.findOne({
-      category: "mlbb", provider: "gw", providerProductId: item.providerProductId,
+  const existingPlans = await Plan.find({ category: "mlbb" }).lean();
+  const existingByPid = new Map(
+    existingPlans
+      .filter((plan) => plan.provider === "gw" && plan.providerProductId)
+      .map((plan) => [String(plan.providerProductId).toUpperCase(), plan]),
+  );
+  const manualByAmount = new Map();
+  existingPlans
+    .filter((plan) => !plan.provider || plan.provider === "manual")
+    .forEach((plan) => {
+      const key = Number(plan.amount || 0);
+      const rows = manualByAmount.get(key) || [];
+      rows.push(plan);
+      manualByAmount.set(key, rows);
     });
+  log("plans_loaded", {
+    total: existingPlans.length,
+    gw: existingByPid.size,
+    manual: existingPlans.length - existingByPid.size,
+  });
+
+  const claimedManualIds = new Set();
+  const operations = [];
+  for (const item of products) {
+    let existing = existingByPid.get(String(item.providerProductId).toUpperCase());
     if (!existing) {
-      const sameAmount = await Plan.find({
-        category: "mlbb", amount: item.amount,
-        $or: [{ provider: "manual" }, { provider: { $exists: false } }],
-      });
-      if (sameAmount.length === 1) existing = sameAmount[0];
+      const sameAmount = (manualByAmount.get(Number(item.amount || 0)) || [])
+        .filter((plan) => !claimedManualIds.has(String(plan._id)));
+      if (sameAmount.length === 1) {
+        existing = sameAmount[0];
+        claimedManualIds.add(String(existing._id));
+      }
     }
     if (existing) {
       const providerChanged =
@@ -192,20 +212,16 @@ async function performMlbbSync(traceId) {
       if (providerChanged) changes.providerUpdatedAt = syncedAt;
       if (!existing.label) changes.label = item.label;
       if (!existing.amount) changes.amount = item.amount;
-      try {
-        await Plan.updateOne({ _id: existing._id }, { $set: changes });
-        updatedCount += 1;
-      } catch (error) {
-        console.error("[GW_MLBB_SYNC]", JSON.stringify({ traceId, stage: "product_update_failed", pid: item.providerProductId, region: item.region, message: error.message, stack: error.stack }));
-        throw new Error(`GW MLBB PID ${item.providerProductId} yangilanmadi: ${error.message}`);
-      }
+      operations.push({
+        updateOne: { filter: { _id: existing._id }, update: { $set: changes } },
+      });
       continue;
     }
     const safeCode = `gw_${item.providerProductId}`.toLowerCase().replace(/[^a-z0-9_-]/g, "_").slice(0, 80);
-    try {
-      await Plan.updateOne(
-        { category: "mlbb", code: safeCode },
-        {
+    operations.push({
+      updateOne: {
+        filter: { category: "mlbb", code: safeCode },
+        update: {
           $set: {
             provider: "gw", providerProductId: item.providerProductId,
             providerRegion: item.region || "global", providerPriceUsd: item.priceUsd,
@@ -217,16 +233,36 @@ async function performMlbbSync(traceId) {
             amount: item.amount, basePrice: 0, currency: "UZS", isActive: false,
           },
         },
-        { upsert: true },
-      );
-      createdCount += 1;
-    } catch (error) {
-      console.error("[GW_MLBB_SYNC]", JSON.stringify({ traceId, stage: "product_create_failed", pid: item.providerProductId, code: safeCode, region: item.region, message: error.message, stack: error.stack }));
-      throw new Error(`GW MLBB PID ${item.providerProductId} yaratilmadi: ${error.message}`);
-    }
+        upsert: true,
+      },
+    });
+  }
+
+  log("bulk_prepared", { operations: operations.length });
+  let bulkResult;
+  try {
+    bulkResult = await Plan.bulkWrite(operations, { ordered: true });
+    log("bulk_completed", {
+      matched: bulkResult.matchedCount,
+      modified: bulkResult.modifiedCount,
+      upserted: bulkResult.upsertedCount,
+    });
+  } catch (error) {
+    console.error("[GW_MLBB_SYNC]", JSON.stringify({
+      traceId, stage: "bulk_write_failed", message: String(error?.message || error).slice(0, 1000),
+      code: error?.code || null, writeErrors: (error?.writeErrors || []).slice(0, 5).map((row) => ({
+        index: row.index, code: row.code, message: String(row.errmsg || row.message || "").slice(0, 500),
+      })), stack: String(error?.stack || "").slice(0, 3000),
+    }));
+    throw new Error(`GW MLBB bulk yangilash bajarilmadi: ${error.message}`);
   }
   const plans = await Plan.find({ category: "mlbb" }).sort({ amount: 1 }).lean();
-  log("completed", { updated: updatedCount, created: createdCount, totalPlans: plans.length, durationMs: Date.now() - startedAt });
+  log("completed", {
+    updated: Number(bulkResult.modifiedCount || 0),
+    created: Number(bulkResult.upsertedCount || 0),
+    totalPlans: plans.length,
+    durationMs: Date.now() - startedAt,
+  });
   return plans;
 }
 
