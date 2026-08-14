@@ -79,6 +79,27 @@ function isMlbbTopup(item) {
   );
 }
 
+function extractMlbbRegion(item) {
+  const explicit = normalize(item?.region || item?.country || item?.server).toLowerCase();
+  const slug = normalize(item?.slug).toLowerCase().replace(/[^a-z]/g, "");
+  const slugRegion = ["ph", "ru", "tr", "id", "sg", "my"].find(
+    (key) => slug.endsWith(key) || slug.includes(`mlbb${key}`) || slug.includes(`mobilelegends${key}`),
+  );
+  if (slugRegion) return slugRegion;
+  const text = [item?.slug, item?.gameName, item?.serviceName, item?.category, explicit]
+    .map((value) => normalize(value).toLowerCase())
+    .join(" ");
+  const checks = [
+    ["ph", /(^|[^a-z])(ph|philippines|philippine)([^a-z]|$)/],
+    ["ru", /(^|[^a-z])(ru|russia|russian|cis)([^a-z]|$)/],
+    ["tr", /(^|[^a-z])(tr|turkey|turkish|turkiye)([^a-z]|$)/],
+    ["id", /(^|[^a-z])(id|indonesia|indonesian)([^a-z]|$)/],
+    ["sg", /(^|[^a-z])(sg|singapore)([^a-z]|$)/],
+    ["my", /(^|[^a-z])(my|malaysia|malaysian)([^a-z]|$)/],
+  ];
+  return checks.find(([, pattern]) => pattern.test(text))?.[0] || "global";
+}
+
 function extractUcAmount(item) {
   const candidates = [item?.serviceName, item?.name, item?.label, item?.amount];
   for (const value of candidates) {
@@ -130,7 +151,7 @@ async function getMlbbProducts() {
   const response = await createClient().get("/products");
   return unwrapProducts(response.data)
     .filter(isMlbbTopup)
-    .map(normalizeProduct)
+    .map((item) => ({ ...normalizeProduct(item), region: extractMlbbRegion(item) }))
     .filter((item) => item.providerProductId && item.amount > 0 && item.priceUsd > 0);
 }
 
@@ -157,6 +178,7 @@ module.exports = {
   verifyPubgPlayer,
   isPubgTopup,
   isMlbbTopup,
+  extractMlbbRegion,
   extractUcAmount,
   normalizeProduct,
 };

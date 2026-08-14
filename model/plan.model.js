@@ -43,6 +43,12 @@ const planSchema = new mongoose.Schema(
       default: "",
       trim: true
     },
+    providerRegion: {
+      type: String,
+      enum: ["global", "ph", "ru", "tr", "id", "sg", "my"],
+      default: "global",
+      trim: true
+    },
     providerPriceUsd: {
       type: Number,
       default: 0

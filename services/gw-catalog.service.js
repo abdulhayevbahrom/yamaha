@@ -150,6 +150,7 @@ async function performMlbbSync() {
       ) existing.providerUpdatedAt = syncedAt;
       existing.provider = "gw";
       existing.providerProductId = item.providerProductId;
+      existing.providerRegion = item.region || "global";
       existing.providerPriceUsd = item.priceUsd;
       existing.providerAvailable = item.available;
       existing.providerQuantity = item.stockQuantity;
@@ -164,6 +165,7 @@ async function performMlbbSync() {
       category: "mlbb", code: safeCode, label: item.label || `${item.amount} Diamonds`,
       amount: item.amount, basePrice: 0, currency: "UZS", isActive: false,
       provider: "gw", providerProductId: item.providerProductId,
+      providerRegion: item.region || "global",
       providerPriceUsd: item.priceUsd, providerAvailable: item.available,
       providerQuantity: item.stockQuantity, providerSyncedAt: syncedAt, providerUpdatedAt: syncedAt,
     });

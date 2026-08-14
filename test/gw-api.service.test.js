@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const {
   isPubgTopup,
   isMlbbTopup,
+  extractMlbbRegion,
   extractUcAmount,
   normalizeProduct,
 } = require("../services/gw-api.service");
@@ -27,6 +28,12 @@ test("GW catalog keeps PUBG topups and excludes redeem codes", () => {
 test("GW catalog recognizes Mobile Legends products", () => {
   assert.equal(isMlbbTopup({ id: "GWML86", gameName: "Mobile Legends", serviceName: "86 Diamonds" }), true);
   assert.equal(isMlbbTopup({ category: "giftcard", serviceName: "MLBB code" }), false);
+});
+
+test("GW MLBB products are assigned to their storefront region", () => {
+  assert.equal(extractMlbbRegion({ slug: "mobile-legends-ph", serviceName: "86 Diamonds" }), "ph");
+  assert.equal(extractMlbbRegion({ gameName: "Mobile Legends Indonesia" }), "id");
+  assert.equal(extractMlbbRegion({ gameName: "Mobile Legends Global" }), "global");
 });
 
 test("GW MLBB plan must be mapped, available and fresh", () => {
