@@ -145,32 +145,50 @@ async function performMlbbSync() {
       if (sameAmount.length === 1) existing = sameAmount[0];
     }
     if (existing) {
-      if (
+      const providerChanged =
         Number(existing.providerPriceUsd || 0) !== Number(item.priceUsd) ||
         Boolean(existing.providerAvailable) !== Boolean(item.available) ||
-        existing.providerQuantity !== item.stockQuantity
-      ) existing.providerUpdatedAt = syncedAt;
-      existing.provider = "gw";
-      existing.providerProductId = item.providerProductId;
-      existing.providerRegion = item.region || "global";
-      existing.providerPriceUsd = item.priceUsd;
-      existing.providerAvailable = item.available;
-      existing.providerQuantity = item.stockQuantity;
-      existing.providerSyncedAt = syncedAt;
-      if (!existing.label) existing.label = item.label;
-      if (!existing.amount) existing.amount = item.amount;
-      await existing.save();
+        existing.providerQuantity !== item.stockQuantity;
+      const changes = {
+        provider: "gw",
+        providerProductId: item.providerProductId,
+        providerRegion: item.region || "global",
+        providerPriceUsd: item.priceUsd,
+        providerAvailable: item.available,
+        providerQuantity: item.stockQuantity,
+        providerSyncedAt: syncedAt,
+      };
+      if (providerChanged) changes.providerUpdatedAt = syncedAt;
+      if (!existing.label) changes.label = item.label;
+      if (!existing.amount) changes.amount = item.amount;
+      try {
+        await Plan.updateOne({ _id: existing._id }, { $set: changes });
+      } catch (error) {
+        throw new Error(`GW MLBB PID ${item.providerProductId} yangilanmadi: ${error.message}`);
+      }
       continue;
     }
     const safeCode = `gw_${item.providerProductId}`.toLowerCase().replace(/[^a-z0-9_-]/g, "_").slice(0, 80);
-    await Plan.create({
-      category: "mlbb", code: safeCode, label: item.label || `${item.amount} Diamonds`,
-      amount: item.amount, basePrice: 0, currency: "UZS", isActive: false,
-      provider: "gw", providerProductId: item.providerProductId,
-      providerRegion: item.region || "global",
-      providerPriceUsd: item.priceUsd, providerAvailable: item.available,
-      providerQuantity: item.stockQuantity, providerSyncedAt: syncedAt, providerUpdatedAt: syncedAt,
-    });
+    try {
+      await Plan.updateOne(
+        { category: "mlbb", code: safeCode },
+        {
+          $set: {
+            provider: "gw", providerProductId: item.providerProductId,
+            providerRegion: item.region || "global", providerPriceUsd: item.priceUsd,
+            providerAvailable: item.available, providerQuantity: item.stockQuantity,
+            providerSyncedAt: syncedAt, providerUpdatedAt: syncedAt,
+          },
+          $setOnInsert: {
+            category: "mlbb", code: safeCode, label: item.label || `${item.amount} Diamonds`,
+            amount: item.amount, basePrice: 0, currency: "UZS", isActive: false,
+          },
+        },
+        { upsert: true },
+      );
+    } catch (error) {
+      throw new Error(`GW MLBB PID ${item.providerProductId} yaratilmadi: ${error.message}`);
+    }
   }
   return Plan.find({ category: "mlbb" }).sort({ amount: 1 }).lean();
 }
