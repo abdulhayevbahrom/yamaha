@@ -177,12 +177,18 @@ async function verifyPubgPlayer(playerId, trxid) {
   return response.data;
 }
 
+async function verifyMlbbPlayer(userId, zoneId, trxid) {
+  const response = await createClient().post("/mlvfy", { userId, zoneId, trxid });
+  return response.data;
+}
+
 module.exports = {
   getPubgProducts,
   getMlbbProducts,
   createOrder,
   getOrder,
   verifyPubgPlayer,
+  verifyMlbbPlayer,
   isPubgTopup,
   isMlbbTopup,
   extractMlbbRegion,

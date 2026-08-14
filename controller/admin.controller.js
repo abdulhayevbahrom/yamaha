@@ -737,9 +737,7 @@ const syncGwPubgPlans = async (_, res) => {
 const syncGwMlbbPlans = async (_, res) => {
   const traceId = `admin-mlbb-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
   try {
-    console.info("[GW_MLBB_SYNC_REQUEST]", JSON.stringify({ traceId, stage: "received" }));
     const plans = await syncGwMlbbCatalog({ traceId });
-    console.info("[GW_MLBB_SYNC_REQUEST]", JSON.stringify({ traceId, stage: "success", plans: plans.length }));
     return response.success(res, "GW MLBB katalogi yangilandi", plans);
   } catch (error) {
     const status = Number(error?.response?.status || 0);

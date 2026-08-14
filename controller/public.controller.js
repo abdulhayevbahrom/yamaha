@@ -23,6 +23,7 @@ const {
 const { normalizeCardBin, lookupCardBinInfo } = require("../services/card-bin.service");
 const { getTelegramUserInfo } = require("../services/fragment-api.service");
 const { verifyPubgPlayer } = require("../services/gw-api.service");
+const { verifyMlbbAccount } = require("../services/gw-mlbb-verification.service");
 // const { ensureDefaultPlans } = require("../services/plan.service");
 
 const categoryNames = {
@@ -520,41 +521,23 @@ const checkMlbbRole = async (req, res) => {
   }
 
   try {
-    const external = await fetch(
-      "https://www.smile.one/merchant/mobilelegends/checkrole",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          user_id: playerId,
-          zone_id: zoneId,
-        }),
-      },
-    );
-
-    const data = await external.json().catch(() => null);
-    const profileName = String(
-      data?.username || data?.name?.value || "",
-    ).trim();
-
-    if (!external.ok || data?.status === "FAILED" || data?.code === 201 || !profileName) {
-      return response.error(res, "Profil topilmadi");
-    }
+    const verification = await verifyMlbbAccount(playerId, zoneId);
 
     return response.success(res, "MLBB profile topildi", {
       playerId,
       zoneId,
-      profileName,
-      payload: data,
+      profileName: verification.profileName,
+      region: verification.region,
+      firstTimeBonus: verification.firstTimeBonus,
+      payload: verification.payload,
     });
   } catch (error) {
-    return response.serverError(
-      res,
-      "MLBB profil qidirishda xatolik",
-      error.message,
-    );
+    const status = Number(error?.response?.status || 0);
+    const providerMessage = String(error?.response?.data?.error || error?.message || "").trim();
+    if (status === 400 || /not found|invalid|region check failed/i.test(providerMessage)) {
+      return response.error(res, "Profil topilmadi");
+    }
+    return response.serverError(res, "MLBB profil qidirishda xatolik", providerMessage);
   }
 };
 

@@ -24,6 +24,12 @@ const {
   autoFulfillGwMlbb,
   isPlanReady: isGwMlbbPlanReady,
 } = require("../services/gw-mlbb-fulfillment.service");
+const {
+  verifyMlbbAccount,
+  getMlbbBonusTier,
+  isMlbbBonusPlan,
+  isBonusTierAvailable,
+} = require("../services/gw-mlbb-verification.service");
 const { cancelPaidOrderById } = require("../services/order-cancel.service");
 const { notifyGamePaid } = require("../services/notify.service");
 const { emitAdminUpdate, emitUserUpdate } = require("../socket");
@@ -483,6 +489,18 @@ const createOrder = async (req, res) => {
       }
       if (product === "mlbb" && isGwMlbbAutobuyEnabled() && !isGwMlbbPlanReady(plan)) {
         return response.error(res, "Tanlangan MLBB paketi hozir mavjud emas");
+      }
+      if (product === "mlbb" && isMlbbBonusPlan(plan)) {
+        let verification;
+        try {
+          verification = await verifyMlbbAccount(normalizedPlayerId, normalizedZoneId);
+        } catch (error) {
+          return response.error(res, "MLBB bonus holatini tekshirib bo'lmadi", error.message);
+        }
+        const tier = getMlbbBonusTier(plan);
+        if (!isBonusTierAvailable(verification, tier)) {
+          return response.error(res, "Bu akkaunt uchun tanlangan First Bonus mavjud emas");
+        }
       }
       resolvedAmount = plan.amount;
       resolvedBasePrice = plan.basePrice;

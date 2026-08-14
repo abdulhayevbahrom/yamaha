@@ -13,6 +13,7 @@ const {
   isPlanReady,
 } = require("../services/gw-pubg-fulfillment.service");
 const { isPlanReady: isMlbbPlanReady } = require("../services/gw-mlbb-fulfillment.service");
+const { getMlbbBonusTier, isMlbbBonusPlan, isBonusTierAvailable } = require("../services/gw-mlbb-verification.service");
 
 test("GW catalog keeps PUBG topups and excludes redeem codes", () => {
   assert.equal(
@@ -48,6 +49,19 @@ test("GW MLBB plan must be mapped, available and fresh", () => {
     if (typeof previous === "undefined") delete process.env.GW_MLBB_CATALOG_MAX_AGE_MS;
     else process.env.GW_MLBB_CATALOG_MAX_AGE_MS = previous;
   }
+});
+
+test("GW MLBB first bonus eligibility matches the exact tier", () => {
+  const plan = { label: "50+50 First Bonus" };
+  const verification = { firstTimeBonus: [
+    { tier: "50+50", status: "available" },
+    { tier: "150+150", status: "already_claimed" },
+  ] };
+  assert.equal(isMlbbBonusPlan(plan), true);
+  assert.equal(getMlbbBonusTier(plan), "50+50");
+  assert.equal(isBonusTierAvailable(verification, "50+50"), true);
+  assert.equal(isBonusTierAvailable(verification, "150+150"), false);
+  assert.equal(isMlbbBonusPlan({ label: "86 Diamonds" }), false);
 });
 
 test("GW plan must be mapped, available and freshly synced", () => {
