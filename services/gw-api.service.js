@@ -58,6 +58,47 @@ function unwrapProducts(payload) {
   return Array.isArray(rows) ? rows : [];
 }
 
+function unwrapServices(payload) {
+  const rows =
+    payload?.services ||
+    payload?.data?.services ||
+    payload?.innerData?.services ||
+    (Array.isArray(payload?.data) ? payload.data : null) ||
+    (Array.isArray(payload?.innerData) ? payload.innerData : null);
+  return Array.isArray(rows) ? rows : [];
+}
+
+function compactGwRow(row) {
+  if (!row || typeof row !== "object") return row;
+  return {
+    id: normalize(row.id || row.pid || row.PID),
+    slug: normalize(row.slug),
+    gameName: normalize(row.gameName),
+    serviceName: normalize(row.serviceName || row.name || row.label),
+    category: normalize(row.category),
+    type: normalize(row.type),
+    price: row.price ?? row.priceUsd ?? null,
+    status: normalize(row.status),
+  };
+}
+
+function logGwSnapshot({ source, endpoint, payload, rows }) {
+  const safeRows = (Array.isArray(rows) ? rows : [])
+    .slice(0, 20)
+    .map(compactGwRow);
+  const keys =
+    payload && typeof payload === "object" && !Array.isArray(payload)
+      ? Object.keys(payload).slice(0, 20)
+      : [];
+  console.log("[GW_Genshin_Debug]", JSON.stringify({
+    source,
+    endpoint,
+    topLevelKeys: keys,
+    count: Array.isArray(rows) ? rows.length : 0,
+    sample: safeRows,
+  }));
+}
+
 function createClientForBaseUrl(baseURL) {
   const apiKey = normalize(process.env.GW_API_KEY);
   if (!apiKey) throw new Error("GW_API_KEY topilmadi");
@@ -76,6 +117,35 @@ function createClientForBaseUrl(baseURL) {
 async function fetchProductsFromClient(client) {
   const response = await client.get("/products");
   return unwrapProducts(response.data);
+}
+
+async function fetchGwEndpointSnapshot(baseUrl, endpoint) {
+  const client = createClientForBaseUrl(baseUrl);
+  const response = await client.get(endpoint);
+  const payload = response.data;
+  const rows = endpoint === "/services" ? unwrapServices(payload) : unwrapProducts(payload);
+  return { payload, rows };
+}
+
+async function logGwGenshinDebugSnapshots() {
+  const config = getConfig();
+  const baseUrls = [...new Set([config.baseURL, GW_V1_BASE_URL])];
+  for (const baseUrl of baseUrls) {
+    for (const endpoint of ["/services", "/products"]) {
+      try {
+        const { payload, rows } = await fetchGwEndpointSnapshot(baseUrl, endpoint);
+        logGwSnapshot({ source: baseUrl, endpoint, payload, rows });
+      } catch (error) {
+        const status = Number(error?.response?.status || 0);
+        console.error("[GW_Genshin_Debug]", JSON.stringify({
+          source: baseUrl,
+          endpoint,
+          error: status || error?.code || error?.message || "failed",
+          message: String(error?.response?.data?.message || error?.response?.data?.error || error?.message || "").slice(0, 500),
+        }));
+      }
+    }
+  }
 }
 
 async function fetchProductsWithFallback() {
@@ -292,6 +362,7 @@ async function getHokProducts() {
 }
 
 async function getGenshinProducts() {
+  await logGwGenshinDebugSnapshots();
   const { results, errors } = await fetchProductsFromBaseUrls();
   const summaries = [];
 
