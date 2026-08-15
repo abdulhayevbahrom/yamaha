@@ -13,7 +13,11 @@ const isGwHokAutobuyEnabled = () => enabled(process.env.GW_HOK_AUTOBUY_ENABLED);
 const statusOf = (payload) => String(payload?.status || payload?.order?.status || "").trim().toLowerCase();
 const externalId = (payload) => String(payload?.orderId || payload?.id || payload?.order?.orderId || "").trim();
 const errorOf = (payload, fallback = "") => String(payload?.error || payload?.code || payload?.message || fallback || "GW order failed").trim();
-const maxAge = () => Math.max(60_000, Number(process.env.GW_HOK_CATALOG_MAX_AGE_MS || 30 * 60_000));
+const maxAge = () => Math.max(
+  60_000,
+  Number(process.env.GW_HOK_CATALOG_MAX_AGE_MS || 30 * 60_000),
+  Number(process.env.GW_HOK_CATALOG_SYNC_INTERVAL_MS || 5 * 60_000) * 2,
+);
 
 function isGwHokPlanReady(plan) {
   const syncedAt = new Date(plan?.providerSyncedAt || 0).getTime();

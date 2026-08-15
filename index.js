@@ -196,6 +196,19 @@ async function startServer() {
     mlbbSyncInterval.unref();
   }
 
+  if (["1", "true", "yes", "on"].includes(String(process.env.GW_HOK_AUTOBUY_ENABLED || "").trim().toLowerCase())) {
+    const { syncGwHokCatalog } = require("./services/gw-catalog.service");
+    const syncHokCatalog = () => syncGwHokCatalog().catch((error) => {
+      console.error("GW HOK catalog sync error:", error?.message || error);
+    });
+    void syncHokCatalog();
+    const hokSyncInterval = setInterval(
+      syncHokCatalog,
+      Math.max(60_000, Number(process.env.GW_HOK_CATALOG_SYNC_INTERVAL_MS || 5 * 60_000)),
+    );
+    hokSyncInterval.unref();
+  }
+
   if (["1", "true", "yes", "on"].includes(String(process.env.GW_GENSHIN_AUTOBUY_ENABLED || "").trim().toLowerCase())) {
     const { syncGwGenshinCatalog } = require("./services/gw-catalog.service");
     const syncGenshinCatalog = () => syncGwGenshinCatalog().catch((error) => {

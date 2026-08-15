@@ -66,19 +66,34 @@ function isGwHokAutobuyEnabled() {
   );
 }
 
+function getGwCatalogFreshnessMs(category) {
+  const maxAgeByCategory = {
+    mlbb: process.env.GW_MLBB_CATALOG_MAX_AGE_MS,
+    hok: process.env.GW_HOK_CATALOG_MAX_AGE_MS,
+    genshin: process.env.GW_GENSHIN_CATALOG_MAX_AGE_MS,
+    pubg: process.env.GW_PUBG_CATALOG_MAX_AGE_MS,
+  };
+  const intervalByCategory = {
+    mlbb: process.env.GW_MLBB_CATALOG_SYNC_INTERVAL_MS,
+    hok: process.env.GW_HOK_CATALOG_SYNC_INTERVAL_MS,
+    genshin: process.env.GW_GENSHIN_CATALOG_SYNC_INTERVAL_MS,
+    pubg: process.env.GW_PUBG_CATALOG_SYNC_INTERVAL_MS,
+  };
+  const configuredMaxAge = Number(maxAgeByCategory[category] || 30 * 60_000);
+  const configuredInterval = Number(intervalByCategory[category] || 5 * 60_000);
+  return Math.max(60_000, configuredMaxAge, configuredInterval * 2);
+}
+
 function isGwPlanFresh(plan) {
-  const maxAge = Math.max(
-    60_000,
-    Number(
-      (plan?.category === "mlbb"
-        ? process.env.GW_MLBB_CATALOG_MAX_AGE_MS
-        : plan?.category === "hok"
-          ? process.env.GW_HOK_CATALOG_MAX_AGE_MS
+  const category =
+    plan?.category === "mlbb"
+      ? "mlbb"
+      : plan?.category === "hok"
+        ? "hok"
         : plan?.category === "genshin"
-          ? process.env.GW_GENSHIN_CATALOG_MAX_AGE_MS
-        : process.env.GW_PUBG_CATALOG_MAX_AGE_MS) || 30 * 60_000,
-    ),
-  );
+          ? "genshin"
+          : "pubg";
+  const maxAge = getGwCatalogFreshnessMs(category);
   const syncedAt = new Date(plan?.providerSyncedAt || 0).getTime();
   return syncedAt > 0 && Date.now() - syncedAt <= maxAge;
 }
