@@ -74,6 +74,7 @@ const {
   applyBalanceDeltaOnce,
 } = require("../services/balance-operation.service");
 const { sanitizePublicOrder } = require("../utils/public-payload");
+const { verifyVolseverHokPlayer } = require("../services/volsever-hok-verification.service");
 
 let sequence = 1;
 const PENDING_TTL_MS = 10 * 60 * 1000;
@@ -449,6 +450,17 @@ const createOrder = async (req, res) => {
     }
     if (product === "hok" && !normalizedPlayerId) {
       return response.error(res, "Honor of Kings Player ID kiriting");
+    }
+    if (product === "hok") {
+      try {
+        await verifyVolseverHokPlayer(normalizedPlayerId);
+      } catch (error) {
+        const status = Number(error?.response?.status || 0);
+        if ([400, 404, 422].includes(status) || error?.code === "PLAYER_NOT_FOUND") {
+          return response.error(res, "Honor of Kings profil topilmadi");
+        }
+        return response.error(res, "Honor of Kings profilini tekshirib bo‘lmadi");
+      }
     }
 
     await expirePendingOrders();

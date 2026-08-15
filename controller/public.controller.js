@@ -22,7 +22,8 @@ const {
 } = require("../services/telegram-premium-check.service");
 const { normalizeCardBin, lookupCardBinInfo } = require("../services/card-bin.service");
 const { getTelegramUserInfo } = require("../services/fragment-api.service");
-const { verifyPubgPlayer, verifyHokPlayer } = require("../services/gw-api.service");
+const { verifyPubgPlayer } = require("../services/gw-api.service");
+const { verifyVolseverHokPlayer } = require("../services/volsever-hok-verification.service");
 const { verifyMlbbAccount } = require("../services/gw-mlbb-verification.service");
 // const { ensureDefaultPlans } = require("../services/plan.service");
 
@@ -582,27 +583,23 @@ const checkPubgPlayer = async (req, res) => {
 
 const checkHokPlayer = async (req, res) => {
   const playerId = String(req.body?.playerId || "").trim();
-  if (!/^\d{4,32}$/.test(playerId)) {
-    return response.error(res, "Honor of Kings Player ID noto‘g‘ri");
-  }
+  if (!/^\d{4,32}$/.test(playerId)) return response.error(res, "Honor of Kings Player ID noto‘g‘ri");
   try {
-    const tgUserId = String(req.telegramAuth?.tgUserId || "user").trim();
-    const trxid = `CHK-HOK-${tgUserId}-${Date.now()}`.slice(0, 80);
-    const result = await verifyHokPlayer(playerId, trxid);
-    const playerName = String(
-      result?.playerName || result?.name || result?.nickname || result?.username || result?.data?.playerName || result?.data?.name || "",
-    ).trim();
-    if (result?.success === false || !playerName) {
-      return response.error(res, String(result?.error || result?.message || "Honor of Kings profil topilmadi").trim());
-    }
-    return response.success(res, "Honor of Kings profil topildi", { playerId, playerName });
+    const result = await verifyVolseverHokPlayer(playerId);
+    return response.success(res, "Honor of Kings profil topildi", {
+      playerId: result.playerId,
+      playerName: result.playerName,
+      game: result.game,
+    });
   } catch (error) {
     const status = Number(error?.response?.status || 0);
-    const providerMessage = String(error?.response?.data?.error || error?.response?.data?.message || error?.message || "").trim();
-    if ([400, 404, 422].includes(status) || /not found|invalid player|invalid uid/i.test(providerMessage)) {
+    if ([400, 404, 422].includes(status) || error?.code === "PLAYER_NOT_FOUND") {
       return response.error(res, "Honor of Kings profil topilmadi");
     }
-    return response.serverError(res, "Honor of Kings profil tekshirishda xatolik", providerMessage);
+    if (status === 401 || status === 403) {
+      return response.serverError(res, "Honor of Kings tekshiruv API kaliti qabul qilinmadi");
+    }
+    return response.serverError(res, "Honor of Kings profil tekshirishda xatolik", error.message);
   }
 };
 

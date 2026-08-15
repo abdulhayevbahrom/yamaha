@@ -238,16 +238,6 @@ async function verifyMlbbPlayer(userId, zoneId, trxid) {
   return response.data;
 }
 
-async function verifyHokPlayer(playerId, trxid) {
-  const response = await createClient().post("/hokvfy", {
-    playerId,
-    userId: playerId,
-    uid: playerId,
-    trxid,
-  });
-  return response.data;
-}
-
 module.exports = {
   getPubgProducts,
   getPubgRedeemProducts,
@@ -259,7 +249,6 @@ module.exports = {
   getOrder,
   verifyPubgPlayer,
   verifyMlbbPlayer,
-  verifyHokPlayer,
   isPubgTopup,
   isPubgRedeem,
   isMlbbTopup,

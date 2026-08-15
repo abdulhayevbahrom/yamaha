@@ -17,6 +17,7 @@ const {
 const { isPlanReady: isMlbbPlanReady } = require("../services/gw-mlbb-fulfillment.service");
 const { isGwHokPlanReady } = require("../services/gw-hok-fulfillment.service");
 const { getMlbbBonusTier, isMlbbBonusPlan, isBonusTierAvailable } = require("../services/gw-mlbb-verification.service");
+const { normalizeResult: normalizeVolseverHokResult } = require("../services/volsever-hok-verification.service");
 
 test("GW catalog keeps PUBG topups and excludes redeem codes", () => {
   assert.equal(
@@ -53,6 +54,17 @@ test("GW HOK plan must be mapped, available and fresh", () => {
     if (typeof previous === "undefined") delete process.env.GW_HOK_CATALOG_MAX_AGE_MS;
     else process.env.GW_HOK_CATALOG_MAX_AGE_MS = previous;
   }
+});
+
+test("Volsever HOK response exposes the verified player", () => {
+  assert.deepEqual(normalizeVolseverHokResult({ status: true, code: 200, data: {
+    game: "Honor of Kings", username: "Test Player", user_id: "89829050619124578",
+  } }, "89829050619124578"), {
+    valid: true, playerId: "89829050619124578", playerName: "Test Player",
+    game: "Honor of Kings", payload: { status: true, code: 200, data: {
+      game: "Honor of Kings", username: "Test Player", user_id: "89829050619124578",
+    } },
+  });
 });
 
 test("GW MLBB products are assigned to their storefront region", () => {
