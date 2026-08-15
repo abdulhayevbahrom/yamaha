@@ -728,7 +728,9 @@ const createOrder = async (req, res) => {
         await autoFulfillGwPubgRedeem(order);
       }
       if (product === "mlbb" && isGwMlbbAutobuyEnabled()) {
-        await autoFulfillGwMlbb(order);
+        void autoFulfillGwMlbb(order).catch((error) => {
+          console.error("GW MLBB auto fulfillment error:", order._id, error.message);
+        });
       }
       if (product === "hok" && isGwHokAutobuyEnabled()) {
         await autoFulfillGwHok(order);

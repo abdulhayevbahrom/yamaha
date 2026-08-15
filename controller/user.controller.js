@@ -1003,9 +1003,21 @@ async function getMyOrders(req, res) {
         .limit(250)
         .select({
           nftId: 1,
+          slug: 1,
           title: 1,
+          nftNumber: 1,
+          emoji: 1,
+          model: 1,
+          modelRarity: 1,
+          symbol: 1,
+          symbolRarity: 1,
+          backdrop: 1,
+          backdropRarity: 1,
+          valueStars: 1,
           lastSoldAt: 1,
           lastSoldPriceUzs: 1,
+          lastSaleFeeAmountUzs: 1,
+          lastSellerNetUzs: 1,
           lastBuyerTgUserId: 1,
           lastSellerTgUserId: 1,
         })
@@ -1017,11 +1029,24 @@ async function getMyOrders(req, res) {
     );
     const nftDocs = nftIds.length
       ? await UserNft.find({ nftId: { $in: nftIds } })
-          .select({ nftId: 1, title: 1 })
+          .select({
+            nftId: 1,
+            slug: 1,
+            title: 1,
+            nftNumber: 1,
+            emoji: 1,
+            model: 1,
+            modelRarity: 1,
+            symbol: 1,
+            symbolRarity: 1,
+            backdrop: 1,
+            backdropRarity: 1,
+            valueStars: 1,
+          })
           .lean()
       : [];
-    const nftTitleMap = new Map(
-      nftDocs.map((item) => [normalizeString(item?.nftId), normalizeString(item?.title)]),
+    const nftDocMap = new Map(
+      nftDocs.map((item) => [normalizeString(item?.nftId), item]),
     );
 
     const orderItems = orders.map((item) => ({
@@ -1049,7 +1074,8 @@ async function getMyOrders(req, res) {
 
     const nftItems = acceptedOffers.map((offer) => {
       const isBuyer = normalizeString(offer?.buyerTgUserId) === normalizeString(tgUser.tgUserId);
-      const title = nftTitleMap.get(normalizeString(offer?.nftId)) || "NFT Gift";
+      const nftDoc = nftDocMap.get(normalizeString(offer?.nftId)) || {};
+      const title = normalizeString(nftDoc?.title) || "NFT Gift";
       const sourceType = isBuyer ? "nft_buy" : "nft_sell";
       return {
         _id: `nft_${offer._id}_${sourceType}`,
@@ -1067,6 +1093,17 @@ async function getMyOrders(req, res) {
           offer?.updatedAt || offer?.acceptedAt || offer?.respondedAt || offer?.createdAt || null,
         sourceType,
         nftId: normalizeString(offer?.nftId),
+        nftSlug: normalizeString(nftDoc?.slug),
+        nftNumber: Number(nftDoc?.nftNumber || 0),
+        nftEmoji: normalizeString(nftDoc?.emoji),
+        nftModel: normalizeString(nftDoc?.model),
+        nftModelRarity: normalizeString(nftDoc?.modelRarity),
+        nftSymbol: normalizeString(nftDoc?.symbol),
+        nftSymbolRarity: normalizeString(nftDoc?.symbolRarity),
+        nftBackdrop: normalizeString(nftDoc?.backdrop),
+        nftBackdropRarity: normalizeString(nftDoc?.backdropRarity),
+        nftValueStars: Number(nftDoc?.valueStars || 0),
+        nftRole: isBuyer ? "buyer" : "seller",
         counterpartyName: isBuyer
           ? normalizeString(offer?.sellerProfileName || offer?.sellerUsername || offer?.sellerTgUserId)
           : normalizeString(offer?.buyerProfileName || offer?.buyerUsername || offer?.buyerTgUserId),
@@ -1090,6 +1127,19 @@ async function getMyOrders(req, res) {
         updatedAt: trade?.lastSoldAt || trade?.updatedAt || null,
         sourceType,
         nftId: normalizeString(trade?.nftId),
+        nftSlug: normalizeString(trade?.slug),
+        nftNumber: Number(trade?.nftNumber || 0),
+        nftEmoji: normalizeString(trade?.emoji),
+        nftModel: normalizeString(trade?.model),
+        nftModelRarity: normalizeString(trade?.modelRarity),
+        nftSymbol: normalizeString(trade?.symbol),
+        nftSymbolRarity: normalizeString(trade?.symbolRarity),
+        nftBackdrop: normalizeString(trade?.backdrop),
+        nftBackdropRarity: normalizeString(trade?.backdropRarity),
+        nftValueStars: Number(trade?.valueStars || 0),
+        nftSaleFeeAmountUzs: Number(trade?.lastSaleFeeAmountUzs || 0),
+        nftSellerNetUzs: Number(trade?.lastSellerNetUzs || 0),
+        nftRole: isBuyer ? "buyer" : "seller",
       };
     });
 

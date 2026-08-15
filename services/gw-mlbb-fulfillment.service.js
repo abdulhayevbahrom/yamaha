@@ -254,6 +254,14 @@ async function autoFulfillGwMlbb(orderOrId) {
     { new: true },
   );
   if (!claimed) return { skipped: true, reason: "not_claimed" };
+  emitUserUpdate(claimed.tgUserId, {
+    type: "order_fulfillment_processing",
+    refreshOrders: true,
+    orderId: claimed._id,
+    status: claimed.status,
+    fulfillmentStatus: "processing",
+    product: claimed.product,
+  });
   const plan = await Plan.findOne({ category: "mlbb", code: claimed.planCode }).lean();
   if (!isPlanReady(plan)) {
     await Order.findByIdAndUpdate(claimed._id, { $set: { fulfillmentStatus: "needs_review", fulfillmentError: "GW plan mapping unavailable" } });
