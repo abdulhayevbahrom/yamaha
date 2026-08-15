@@ -2,6 +2,7 @@ const axios = require("axios");
 const https = require("node:https");
 
 const DEFAULT_BASE_URL = "https://api.sonofutred.com";
+const GW_V1_BASE_URL = "https://api.sonofutred.uk/api/v1";
 const PUBG_GROWTH_PACK_AMOUNTS = new Map([
   ["GWPSFP", 1],
   ["GWPSMP", 2],
@@ -48,8 +49,56 @@ function createClient() {
 }
 
 function unwrapProducts(payload) {
-  const rows = payload?.products || payload?.data?.products || payload?.innerData?.products;
+  const rows =
+    payload?.products ||
+    payload?.data?.products ||
+    payload?.innerData?.products ||
+    (Array.isArray(payload?.data) ? payload.data : null) ||
+    (Array.isArray(payload?.innerData) ? payload.innerData : null);
   return Array.isArray(rows) ? rows : [];
+}
+
+function createClientForBaseUrl(baseURL) {
+  const apiKey = normalize(process.env.GW_API_KEY);
+  if (!apiKey) throw new Error("GW_API_KEY topilmadi");
+  return axios.create({
+    baseURL,
+    timeout: Math.max(3_000, Number(process.env.GW_API_TIMEOUT_MS || 20_000)),
+    httpsAgent: new https.Agent({ family: 4 }),
+    headers: {
+      "X-API-Key": apiKey,
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+  });
+}
+
+async function fetchProductsFromClient(client) {
+  const response = await client.get("/products");
+  return unwrapProducts(response.data);
+}
+
+async function fetchProductsWithFallback() {
+  const config = getConfig();
+  const configuredBaseUrl = config.baseURL;
+  const baseUrls = [...new Set([configuredBaseUrl, GW_V1_BASE_URL])];
+  const errors = [];
+
+  for (const baseUrl of baseUrls) {
+    try {
+      const rows = await fetchProductsFromClient(createClientForBaseUrl(baseUrl));
+      if (rows.length) return { rows, baseUrl };
+      errors.push(`${baseUrl}: empty`);
+    } catch (error) {
+      const status = Number(error?.response?.status || 0);
+      errors.push(`${baseUrl}: ${status || error?.code || error?.message || "failed"}`);
+      if ([401, 403, 429].includes(status)) throw error;
+    }
+  }
+
+  const error = new Error(`GW products katalogi bo'sh qaytdi (${errors.join("; ")})`);
+  error.code = "GW_PRODUCTS_EMPTY";
+  throw error;
 }
 
 function isPubgTopup(item) {
@@ -107,7 +156,7 @@ function isGenshinTopup(item) {
     .map((value) => normalize(value).toLowerCase())
     .join(" ");
   return (
-    providerProductId.startsWith("GWG") ||
+    /^GWG\d/.test(providerProductId) ||
     providerProductId.startsWith("GWGI") ||
     providerProductId.startsWith("GWGEN") ||
     text.includes("genshin") ||
@@ -216,11 +265,25 @@ async function getHokProducts() {
 }
 
 async function getGenshinProducts() {
-  const response = await createClient().get("/products");
-  return unwrapProducts(response.data)
+  const { rows, baseUrl } = await fetchProductsWithFallback();
+  const products = rows
     .filter(isGenshinTopup)
     .map(normalizeProduct)
     .filter((item) => item.providerProductId && item.priceUsd > 0);
+  if (!products.length) {
+    const sample = rows
+      .slice(0, 30)
+      .map((item) => normalize(item?.id || item?.pid || item?.PID || item?.serviceName || item?.name))
+      .filter(Boolean)
+      .slice(0, 12)
+      .join(", ");
+    const error = new Error(
+      `GW Genshin Impact katalogi topilmadi (source=${baseUrl}, total=${rows.length}, sample=${sample || "-"})`,
+    );
+    error.code = "GW_GENSHIN_PRODUCTS_EMPTY";
+    throw error;
+  }
+  return products;
 }
 
 async function createOrder(body) {
@@ -295,4 +358,5 @@ module.exports = {
   extractMlbbRegion,
   extractUcAmount,
   normalizeProduct,
+  fetchProductsWithFallback,
 };

@@ -50,6 +50,7 @@ test("GW catalog recognizes Genshin Impact products", () => {
   assert.equal(isGenshinTopup({ id: "GWG980", serviceName: "980 Genesis Crystals" }), true);
   assert.equal(isGenshinTopup({ id: "GWGI60", gameName: "Genshin Impact", serviceName: "60 Genesis Crystals" }), true);
   assert.equal(isGenshinTopup({ serviceName: "HoYoverse Genshin Top Up" }), true);
+  assert.equal(isGenshinTopup({ id: "GWGP50", serviceName: "Google Play 50 Gift Card" }), false);
   assert.equal(isGenshinTopup({ category: "giftcard", serviceName: "Genshin Impact Giftcard" }), false);
 });
 
