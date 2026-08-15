@@ -2,7 +2,6 @@ const axios = require("axios");
 const https = require("node:https");
 
 const DEFAULT_BASE_URL = "https://api.sonofutred.com";
-const GW_V1_BASE_URL = "https://api.sonofutred.uk/api/v1";
 const PUBG_GROWTH_PACK_AMOUNTS = new Map([
   ["GWPSFP", 1],
   ["GWPSMP", 2],
@@ -129,73 +128,29 @@ async function fetchGwEndpointSnapshot(baseUrl, endpoint) {
 
 async function logGwGenshinDebugSnapshots() {
   const config = getConfig();
-  const baseUrls = [...new Set([config.baseURL, GW_V1_BASE_URL])];
-  for (const baseUrl of baseUrls) {
-    for (const endpoint of ["/services", "/products"]) {
-      try {
-        const { payload, rows } = await fetchGwEndpointSnapshot(baseUrl, endpoint);
-        logGwSnapshot({ source: baseUrl, endpoint, payload, rows });
-      } catch (error) {
-        const status = Number(error?.response?.status || 0);
-        console.error("[GW_Genshin_Debug]", JSON.stringify({
-          source: baseUrl,
-          endpoint,
-          error: status || error?.code || error?.message || "failed",
-          message: String(error?.response?.data?.message || error?.response?.data?.error || error?.message || "").slice(0, 500),
-        }));
-      }
+  for (const endpoint of ["/services", "/products"]) {
+    try {
+      const { payload, rows } = await fetchGwEndpointSnapshot(config.baseURL, endpoint);
+      logGwSnapshot({ source: config.baseURL, endpoint, payload, rows });
+    } catch (error) {
+      const status = Number(error?.response?.status || 0);
+      console.error("[GW_Genshin_Debug]", JSON.stringify({
+        source: config.baseURL,
+        endpoint,
+        error: status || error?.code || error?.message || "failed",
+        message: String(error?.response?.data?.message || error?.response?.data?.error || error?.message || "").slice(0, 500),
+      }));
     }
   }
 }
 
 async function fetchProductsWithFallback() {
   const config = getConfig();
-  const configuredBaseUrl = config.baseURL;
-  const baseUrls = [...new Set([configuredBaseUrl, GW_V1_BASE_URL])];
-  const errors = [];
-
-  for (const baseUrl of baseUrls) {
-    try {
-      const rows = await fetchProductsFromClient(createClientForBaseUrl(baseUrl));
-      if (rows.length) return { rows, baseUrl };
-      errors.push(`${baseUrl}: empty`);
-    } catch (error) {
-      const status = Number(error?.response?.status || 0);
-      errors.push(`${baseUrl}: ${status || error?.code || error?.message || "failed"}`);
-      if ([401, 403, 429].includes(status)) throw error;
-    }
-  }
-
-  const error = new Error(`GW products katalogi bo'sh qaytdi (${errors.join("; ")})`);
+  const rows = await fetchProductsFromClient(createClientForBaseUrl(config.baseURL));
+  if (rows.length) return { rows, baseUrl: config.baseURL };
+  const error = new Error(`GW products katalogi bo'sh qaytdi (source=${config.baseURL})`);
   error.code = "GW_PRODUCTS_EMPTY";
   throw error;
-}
-
-async function fetchProductsFromBaseUrls() {
-  const config = getConfig();
-  const configuredBaseUrl = config.baseURL;
-  const baseUrls = [...new Set([configuredBaseUrl, GW_V1_BASE_URL])];
-  const results = [];
-  const errors = [];
-
-  for (const baseUrl of baseUrls) {
-    try {
-      const rows = await fetchProductsFromClient(createClientForBaseUrl(baseUrl));
-      results.push({ rows, baseUrl });
-    } catch (error) {
-      const status = Number(error?.response?.status || 0);
-      errors.push(`${baseUrl}: ${status || error?.code || error?.message || "failed"}`);
-      if ([401, 403, 429].includes(status) && !results.length) throw error;
-    }
-  }
-
-  if (!results.length) {
-    const error = new Error(`GW products katalogini olib bo'lmadi (${errors.join("; ")})`);
-    error.code = "GW_PRODUCTS_FETCH_FAILED";
-    throw error;
-  }
-
-  return { results, errors };
 }
 
 function isPubgTopup(item) {
@@ -363,27 +318,21 @@ async function getHokProducts() {
 
 async function getGenshinProducts() {
   await logGwGenshinDebugSnapshots();
-  const { results, errors } = await fetchProductsFromBaseUrls();
-  const summaries = [];
+  const { rows, baseUrl } = await fetchProductsWithFallback();
+  const products = rows
+    .filter(isGenshinTopup)
+    .map(normalizeProduct)
+    .filter((item) => item.providerProductId && item.priceUsd > 0);
+  if (products.length) return products;
 
-  for (const { rows, baseUrl } of results) {
-    const products = rows
-      .filter(isGenshinTopup)
-      .map(normalizeProduct)
-      .filter((item) => item.providerProductId && item.priceUsd > 0);
-    if (products.length) return products;
-
-    const sample = rows
-      .slice(0, 30)
-      .map((item) => normalize(item?.id || item?.pid || item?.PID || item?.serviceName || item?.name))
-      .filter(Boolean)
-      .slice(0, 12)
-      .join(", ");
-    summaries.push(`source=${baseUrl}, total=${rows.length}, sample=${sample || "-"}`);
-  }
-
+  const sample = rows
+    .slice(0, 30)
+    .map((item) => normalize(item?.id || item?.pid || item?.PID || item?.serviceName || item?.name))
+    .filter(Boolean)
+    .slice(0, 12)
+    .join(", ");
   const error = new Error(
-    `GW Genshin Impact katalogi topilmadi (${summaries.join(" | ")}${errors.length ? ` | errors=${errors.join("; ")}` : ""})`,
+    `GW Genshin Impact katalogi topilmadi (source=${baseUrl}, total=${rows.length}, sample=${sample || "-"})`,
   );
   error.code = "GW_GENSHIN_PRODUCTS_EMPTY";
   throw error;
@@ -462,5 +411,4 @@ module.exports = {
   extractUcAmount,
   normalizeProduct,
   fetchProductsWithFallback,
-  fetchProductsFromBaseUrls,
 };
