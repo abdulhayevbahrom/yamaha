@@ -164,6 +164,10 @@ async function startServer() {
   await resumeGwMlbbPolling().catch((error) => {
     console.error("GW MLBB polling resume error:", error?.message || error);
   });
+  const { resumeGwGenshinPolling } = require("./services/gw-genshin-fulfillment.service");
+  await resumeGwGenshinPolling().catch((error) => {
+    console.error("GW Genshin polling resume error:", error?.message || error);
+  });
 
   if (
     ["1", "true", "yes", "on"].includes(

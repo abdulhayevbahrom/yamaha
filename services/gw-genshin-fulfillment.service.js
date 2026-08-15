@@ -20,6 +20,14 @@ function isGwGenshinPlanReady(plan) {
   return Boolean(plan?.provider === "gw" && plan?.providerProductId && plan?.providerAvailable && syncedAt && Date.now() - syncedAt <= maxAge());
 }
 
+function isDefinitiveSubmitFailure(error, payload) {
+  const status = Number(error?.response?.status || 0);
+  const code = String(payload?.code || payload?.error || "").trim().toUpperCase();
+  if ([400, 401, 403].includes(status)) return true;
+  if (status === 503 && ["MAINTENANCE", "API_ORDER_DISABLED"].includes(code)) return true;
+  return false;
+}
+
 function tx(order, payload, extra = {}) {
   const old = order?.fragmentTx || {};
   return {
@@ -80,6 +88,17 @@ function schedule(orderId) {
   timers.set(key, timer);
 }
 
+function scheduleSubmitRecovery(orderId) {
+  const key = String(orderId);
+  if (timers.has(key)) return;
+  const timer = setTimeout(() => {
+    timers.delete(key);
+    recoverGwGenshinSubmit(key).catch((error) => console.error("GW Genshin submit recovery error:", key, error.message));
+  }, Math.max(3000, Number(process.env.GW_GENSHIN_POLL_INTERVAL_MS || 5000)));
+  timer.unref?.();
+  timers.set(key, timer);
+}
+
 async function handle(order, payload) {
   const status = statusOf(payload);
   if (["completed", "done", "success"].includes(status)) return complete(order, payload);
@@ -97,16 +116,80 @@ async function pollGwGenshinOrder(orderId) {
   const order = await Order.findById(orderId);
   if (!order || order.fulfillmentStatus !== "processing") return { skipped: true, reason: "not_processing" };
   const id = String(order?.fragmentTx?.providerOrderId || "").trim();
-  if (!id) return { ok: false, needsReview: true };
+  if (!id) {
+    await Order.findByIdAndUpdate(order._id, { $set: { fulfillmentStatus: "needs_review", fulfillmentError: "GW Genshin order id missing" } });
+    return { ok: false, needsReview: true };
+  }
   try {
     return await handle(order, await getOrder(id));
   } catch (error) {
     if (isAmbiguousExternalError(error)) {
-      schedule(order._id);
-      return { ok: false, processing: true };
+      const attempts = Number(order?.fragmentTx?.pollAttempts || 0) + 1;
+      const limit = Math.max(1, Number(process.env.GW_GENSHIN_POLL_MAX_ATTEMPTS || 24));
+      const needsReview = attempts >= limit;
+      await Order.findByIdAndUpdate(order._id, { $set: {
+        fulfillmentStatus: needsReview ? "needs_review" : "processing",
+        fulfillmentError: needsReview ? "GW Genshin status result unknown" : "",
+        fragmentTx: tx(order, null, {
+          phase: "polling",
+          pollAttempts: attempts,
+          lastPollError: String(error.message || "network error").slice(0, 300),
+        }),
+      } });
+      if (!needsReview) schedule(order._id);
+      return { ok: false, processing: !needsReview, needsReview };
     }
     await Order.findByIdAndUpdate(order._id, { $set: { fulfillmentStatus: "needs_review", fulfillmentError: error.message } });
     return { ok: false, needsReview: true };
+  }
+}
+
+async function recoverGwGenshinSubmit(orderId) {
+  if (!isGwGenshinAutobuyEnabled()) return { skipped: true, reason: "disabled" };
+  const order = await Order.findById(orderId);
+  if (
+    !order ||
+    order.fulfillmentStatus !== "processing" ||
+    !["submit_started", "submit_unknown"].includes(order?.fragmentTx?.phase)
+  ) {
+    return { skipped: true, reason: "not_recoverable" };
+  }
+
+  const attempts = Number(order?.fragmentTx?.submitRecoveryAttempts || 0) + 1;
+  const limit = Math.max(1, Number(process.env.GW_GENSHIN_SUBMIT_RECOVERY_MAX_ATTEMPTS || 6));
+  const plan = await Plan.findOne({ category: "genshin", code: order.planCode }).lean();
+  if (!plan?.providerProductId) {
+    await Order.findByIdAndUpdate(order._id, { $set: {
+      fulfillmentStatus: "needs_review",
+      fulfillmentError: "GW Genshin submit recovery plan mapping unavailable",
+    } });
+    return { ok: false, needsReview: true };
+  }
+
+  const trxid = `YMH-GENSHIN-${order.orderId}`;
+  try {
+    return await handle(order, await createPidOrder({
+      pid: plan.providerProductId,
+      uid: String(order.playerId || order.username || "").trim(),
+      server: String(order.zoneId || "Asia").trim() || "Asia",
+      trxid,
+      idempotencyKey: trxid,
+    }));
+  } catch (error) {
+    const payload = error?.response?.data;
+    if (payload && isDefinitiveSubmitFailure(error, payload)) return cancelAndRefund(order, payload);
+    const needsReview = attempts >= limit;
+    await Order.findByIdAndUpdate(order._id, { $set: {
+      fulfillmentStatus: needsReview ? "needs_review" : "processing",
+      fulfillmentError: needsReview ? "GW Genshin submit result unknown" : "",
+      fragmentTx: tx(order, payload, {
+        phase: "submit_unknown",
+        ambiguous: true,
+        submitRecoveryAttempts: attempts,
+      }),
+    } });
+    if (!needsReview) scheduleSubmitRecovery(order._id);
+    return { ok: false, processing: !needsReview, needsReview };
   }
 }
 
@@ -118,27 +201,75 @@ async function autoFulfillGwGenshin(orderOrId) {
     { new: true },
   );
   if (!order) return { skipped: true, reason: "not_claimed" };
+  emitUserUpdate(order.tgUserId, {
+    type: "order_fulfillment_processing",
+    refreshOrders: true,
+    orderId: order._id,
+    status: order.status,
+    fulfillmentStatus: "processing",
+    product: order.product,
+  });
   const plan = await Plan.findOne({ category: "genshin", code: order.planCode }).lean();
   if (!isGwGenshinPlanReady(plan)) {
     await Order.findByIdAndUpdate(order._id, { $set: { fulfillmentStatus: "needs_review", fulfillmentError: "GW Genshin plan mapping unavailable" } });
     return { ok: false, needsReview: true };
   }
-  order.fragmentTx = tx(order, null, { phase: "submit_started", providerProductId: plan.providerProductId, providerPriceUsd: Number(plan.providerPriceUsd || 0) });
+  const trxid = `YMH-GENSHIN-${order.orderId}`;
+  order.fragmentTx = tx(order, null, {
+    phase: "submit_started",
+    providerProductId: plan.providerProductId,
+    providerPriceUsd: Number(plan.providerPriceUsd || 0),
+    customerPriceUzs: Number(order.expectedAmount || 0),
+    submitRecoveryAttempts: 0,
+  });
   await Order.findByIdAndUpdate(order._id, { $set: { fragmentTx: order.fragmentTx } });
   try {
     return await handle(order, await createPidOrder({
       pid: plan.providerProductId,
       uid: String(order.playerId || order.username || "").trim(),
       server: String(order.zoneId || "Asia").trim() || "Asia",
-      trxid: `YMH-GENSHIN-${order.orderId}`,
-      idempotencyKey: `YMH-GENSHIN-${order.orderId}`,
+      trxid,
+      idempotencyKey: trxid,
     }));
   } catch (error) {
     const payload = error?.response?.data;
-    if ([400, 401, 403].includes(Number(error?.response?.status || 0)) && payload) return cancelAndRefund(order, payload);
-    await Order.findByIdAndUpdate(order._id, { $set: { fulfillmentStatus: "needs_review", fulfillmentError: "GW Genshin submit result unknown", fragmentTx: tx(order, payload, { phase: "submit_unknown", ambiguous: true }) } });
-    return { ok: false, needsReview: true };
+    if (payload && isDefinitiveSubmitFailure(error, payload)) return cancelAndRefund(order, payload);
+    await Order.findByIdAndUpdate(order._id, { $set: {
+      fulfillmentStatus: "processing",
+      fulfillmentError: "",
+      fragmentTx: tx(order, payload, {
+        phase: "submit_unknown",
+        ambiguous: true,
+        submitRecoveryAttempts: 0,
+      }),
+    } });
+    scheduleSubmitRecovery(order._id);
+    return { ok: false, processing: true };
   }
 }
 
-module.exports = { autoFulfillGwGenshin, pollGwGenshinOrder, isGwGenshinAutobuyEnabled, isGwGenshinPlanReady };
+async function resumeGwGenshinPolling() {
+  if (!isGwGenshinAutobuyEnabled()) return 0;
+  const rows = await Order.find({
+    product: "genshin",
+    fulfillmentStatus: "processing",
+    "fragmentTx.provider": "gw",
+  }).select({ _id: 1, fragmentTx: 1 }).lean();
+  rows.forEach((row) => {
+    if (["submit_started", "submit_unknown"].includes(row?.fragmentTx?.phase)) {
+      scheduleSubmitRecovery(row._id);
+    } else {
+      schedule(row._id);
+    }
+  });
+  return rows.length;
+}
+
+module.exports = {
+  autoFulfillGwGenshin,
+  pollGwGenshinOrder,
+  recoverGwGenshinSubmit,
+  resumeGwGenshinPolling,
+  isGwGenshinAutobuyEnabled,
+  isGwGenshinPlanReady,
+};
