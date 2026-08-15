@@ -60,6 +60,14 @@ router.post(
   userWriteRateLimit,
   publicController.checkPubgPlayer,
 );
+router.post(
+  "/hok/check-player",
+  telegramAuthMiddleware,
+  freshTelegramWriteAuth,
+  requireRegisteredUser,
+  userWriteRateLimit,
+  publicController.checkHokPlayer,
+);
 router.post("/calculate-price", orderController.calculatePrice);
 router.post(
   "/orders",

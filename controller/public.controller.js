@@ -22,7 +22,7 @@ const {
 } = require("../services/telegram-premium-check.service");
 const { normalizeCardBin, lookupCardBinInfo } = require("../services/card-bin.service");
 const { getTelegramUserInfo } = require("../services/fragment-api.service");
-const { verifyPubgPlayer } = require("../services/gw-api.service");
+const { verifyPubgPlayer, verifyHokPlayer } = require("../services/gw-api.service");
 const { verifyMlbbAccount } = require("../services/gw-mlbb-verification.service");
 // const { ensureDefaultPlans } = require("../services/plan.service");
 
@@ -580,6 +580,32 @@ const checkPubgPlayer = async (req, res) => {
   }
 };
 
+const checkHokPlayer = async (req, res) => {
+  const playerId = String(req.body?.playerId || "").trim();
+  if (!/^\d{4,32}$/.test(playerId)) {
+    return response.error(res, "Honor of Kings Player ID noto‘g‘ri");
+  }
+  try {
+    const tgUserId = String(req.telegramAuth?.tgUserId || "user").trim();
+    const trxid = `CHK-HOK-${tgUserId}-${Date.now()}`.slice(0, 80);
+    const result = await verifyHokPlayer(playerId, trxid);
+    const playerName = String(
+      result?.playerName || result?.name || result?.nickname || result?.username || result?.data?.playerName || result?.data?.name || "",
+    ).trim();
+    if (result?.success === false || !playerName) {
+      return response.error(res, String(result?.error || result?.message || "Honor of Kings profil topilmadi").trim());
+    }
+    return response.success(res, "Honor of Kings profil topildi", { playerId, playerName });
+  } catch (error) {
+    const status = Number(error?.response?.status || 0);
+    const providerMessage = String(error?.response?.data?.error || error?.response?.data?.message || error?.message || "").trim();
+    if ([400, 404, 422].includes(status) || /not found|invalid player|invalid uid/i.test(providerMessage)) {
+      return response.error(res, "Honor of Kings profil topilmadi");
+    }
+    return response.serverError(res, "Honor of Kings profil tekshirishda xatolik", providerMessage);
+  }
+};
+
 module.exports = {
   health,
   getCatalog,
@@ -592,6 +618,7 @@ module.exports = {
   checkPremiumStatus,
   checkMlbbRole,
   checkPubgPlayer,
+  checkHokPlayer,
   getTopSalePurchaseAmount,
   getTopSalesOrderFilter,
 };
