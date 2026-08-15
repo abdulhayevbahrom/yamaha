@@ -101,6 +101,33 @@ async function fetchProductsWithFallback() {
   throw error;
 }
 
+async function fetchProductsFromBaseUrls() {
+  const config = getConfig();
+  const configuredBaseUrl = config.baseURL;
+  const baseUrls = [...new Set([configuredBaseUrl, GW_V1_BASE_URL])];
+  const results = [];
+  const errors = [];
+
+  for (const baseUrl of baseUrls) {
+    try {
+      const rows = await fetchProductsFromClient(createClientForBaseUrl(baseUrl));
+      results.push({ rows, baseUrl });
+    } catch (error) {
+      const status = Number(error?.response?.status || 0);
+      errors.push(`${baseUrl}: ${status || error?.code || error?.message || "failed"}`);
+      if ([401, 403, 429].includes(status) && !results.length) throw error;
+    }
+  }
+
+  if (!results.length) {
+    const error = new Error(`GW products katalogini olib bo'lmadi (${errors.join("; ")})`);
+    error.code = "GW_PRODUCTS_FETCH_FAILED";
+    throw error;
+  }
+
+  return { results, errors };
+}
+
 function isPubgTopup(item) {
   const providerProductId = normalize(item?.id || item?.pid || item?.PID).toUpperCase();
   if (PUBG_GROWTH_PACK_AMOUNTS.has(providerProductId)) return true;
@@ -265,25 +292,30 @@ async function getHokProducts() {
 }
 
 async function getGenshinProducts() {
-  const { rows, baseUrl } = await fetchProductsWithFallback();
-  const products = rows
-    .filter(isGenshinTopup)
-    .map(normalizeProduct)
-    .filter((item) => item.providerProductId && item.priceUsd > 0);
-  if (!products.length) {
+  const { results, errors } = await fetchProductsFromBaseUrls();
+  const summaries = [];
+
+  for (const { rows, baseUrl } of results) {
+    const products = rows
+      .filter(isGenshinTopup)
+      .map(normalizeProduct)
+      .filter((item) => item.providerProductId && item.priceUsd > 0);
+    if (products.length) return products;
+
     const sample = rows
       .slice(0, 30)
       .map((item) => normalize(item?.id || item?.pid || item?.PID || item?.serviceName || item?.name))
       .filter(Boolean)
       .slice(0, 12)
       .join(", ");
-    const error = new Error(
-      `GW Genshin Impact katalogi topilmadi (source=${baseUrl}, total=${rows.length}, sample=${sample || "-"})`,
-    );
-    error.code = "GW_GENSHIN_PRODUCTS_EMPTY";
-    throw error;
+    summaries.push(`source=${baseUrl}, total=${rows.length}, sample=${sample || "-"}`);
   }
-  return products;
+
+  const error = new Error(
+    `GW Genshin Impact katalogi topilmadi (${summaries.join(" | ")}${errors.length ? ` | errors=${errors.join("; ")}` : ""})`,
+  );
+  error.code = "GW_GENSHIN_PRODUCTS_EMPTY";
+  throw error;
 }
 
 async function createOrder(body) {
@@ -359,4 +391,5 @@ module.exports = {
   extractUcAmount,
   normalizeProduct,
   fetchProductsWithFallback,
+  fetchProductsFromBaseUrls,
 };
