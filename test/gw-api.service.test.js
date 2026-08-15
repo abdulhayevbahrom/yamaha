@@ -59,6 +59,9 @@ test("GW catalog recognizes Genshin Impact products", () => {
   assert.equal(isGenshinTopup({ id: "GWG980", serviceName: "980 Genesis Crystals" }), true);
   assert.equal(isGenshinTopup({ id: "GWGI60", gameName: "Genshin Impact", serviceName: "60 Genesis Crystals" }), true);
   assert.equal(isGenshinTopup({ serviceName: "HoYoverse Genshin Top Up" }), true);
+  assert.equal(isGenshinTopup({ product: { name: "Blessing of the Welkin Moon" }, service: { name: "Genshin Impact" } }), true);
+  assert.equal(isGenshinTopup({ id: "GI980", service: { name: "980 Genesis Crystals" } }), true);
+  assert.equal(isGenshinTopup({ serviceName: "300 Chronal Nexus" }), true);
   assert.equal(isGenshinTopup({ id: "GWGP50", serviceName: "Google Play 50 Gift Card" }), false);
   assert.equal(isGenshinTopup({ category: "giftcard", serviceName: "Genshin Impact Giftcard" }), false);
 });
@@ -161,6 +164,19 @@ test("GW PUBG product normalization keeps provider price separate", () => {
   assert.equal(item.available, true);
   assert.equal(item.stockQuantity, 947);
   assert.equal(Object.hasOwn(item, "basePrice"), false);
+});
+
+test("GW product normalization reads nested provider fields", () => {
+  const item = normalizeProduct({
+    id: "GI980",
+    service: { name: "980 Genesis Crystals" },
+    usdPrice: 14.99,
+    status: "active",
+  });
+  assert.equal(item.providerProductId, "GI980");
+  assert.equal(item.amount, 980);
+  assert.equal(item.label, "980 Genesis Crystals");
+  assert.equal(item.priceUsd, 14.99);
 });
 
 test("GW product without quantity does not invent a stock count", () => {

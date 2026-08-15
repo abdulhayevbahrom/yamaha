@@ -13,6 +13,19 @@ function normalize(value) {
   return String(value || "").trim();
 }
 
+function readPath(object, path) {
+  return path.split(".").reduce((current, key) => (
+    current && typeof current === "object" ? current[key] : undefined
+  ), object);
+}
+
+function compactTextFields(item, paths) {
+  return paths
+    .map((path) => normalize(readPath(item, path)).toLowerCase())
+    .filter(Boolean)
+    .join(" ");
+}
+
 function getConfig() {
   const apiKey = normalize(process.env.GW_API_KEY);
   if (!apiKey) throw new Error("GW_API_KEY topilmadi");
@@ -72,9 +85,9 @@ function compactGwRow(row) {
   return {
     id: normalize(row.id || row.pid || row.PID),
     slug: normalize(row.slug),
-    gameName: normalize(row.gameName),
-    serviceName: normalize(row.serviceName || row.name || row.label),
-    category: normalize(row.category),
+    gameName: normalize(row.gameName || row.game?.name || row.product?.gameName),
+    serviceName: normalize(row.serviceName || row.name || row.label || row.service?.name || row.product?.name),
+    category: normalize(row.category || row.categoryName || row.service?.category),
     type: normalize(row.type),
     price: row.price ?? row.priceUsd ?? null,
     status: normalize(row.status),
@@ -204,17 +217,45 @@ function isHokTopup(item) {
 
 function isGenshinTopup(item) {
   const providerProductId = normalize(item?.id || item?.pid || item?.PID).toUpperCase();
-  const text = [item?.slug, item?.gameName, item?.serviceName, item?.name, item?.category]
-    .map((value) => normalize(value).toLowerCase())
-    .join(" ");
+  const text = compactTextFields(item, [
+    "slug",
+    "gameName",
+    "game.name",
+    "game.title",
+    "product.gameName",
+    "product.name",
+    "product.title",
+    "serviceName",
+    "service.name",
+    "service.title",
+    "name",
+    "label",
+    "title",
+    "category",
+    "categoryName",
+    "type",
+  ]);
+  const isExcluded = (
+    text.includes("giftcard") ||
+    text.includes("gift card") ||
+    text.includes("gamekey") ||
+    text.includes("game key") ||
+    text.includes("redeem") ||
+    text.includes("code")
+  );
   return (
     /^GWG\d/.test(providerProductId) ||
     providerProductId.startsWith("GWGI") ||
     providerProductId.startsWith("GWGEN") ||
+    providerProductId.startsWith("GIGC") ||
+    providerProductId.startsWith("GI") ||
     text.includes("genshin") ||
     text.includes("hoyoverse") ||
-    text.includes("mihoyo")
-  ) && !text.includes("giftcard") && !text.includes("gamekey") && !text.includes("code");
+    text.includes("mihoyo") ||
+    text.includes("genesis crystal") ||
+    text.includes("welkin") ||
+    text.includes("chronal nexus")
+  ) && !isExcluded;
 }
 
 function extractMlbbRegion(item) {
@@ -258,7 +299,15 @@ function extractHokRegion(item) {
 }
 
 function extractUcAmount(item) {
-  const candidates = [item?.serviceName, item?.name, item?.label, item?.amount];
+  const candidates = [
+    item?.serviceName,
+    item?.service?.name,
+    item?.product?.name,
+    item?.name,
+    item?.label,
+    item?.title,
+    item?.amount,
+  ];
   for (const value of candidates) {
     const match = normalize(value).match(/\d[\d,]*/);
     if (match) return Number(match[0].replace(/,/g, ""));
@@ -272,7 +321,7 @@ function normalizeProduct(item) {
     extractUcAmount(item) ||
     PUBG_GROWTH_PACK_AMOUNTS.get(providerProductId.toUpperCase()) ||
     0;
-  const priceUsd = Number(item?.price || item?.priceUsd || 0);
+  const priceUsd = Number(item?.price || item?.priceUsd || item?.usdPrice || item?.cost || 0);
   const rawQuantity = item?.quantity ?? item?.stock ?? item?.availableQuantity;
   const parsedQuantity = rawQuantity === undefined || rawQuantity === null || rawQuantity === ""
     ? null
@@ -284,7 +333,7 @@ function normalizeProduct(item) {
     providerProductId,
     amount,
     code: amount > 0 ? String(amount) : providerProductId,
-    label: normalize(item?.serviceName || item?.name || `${amount} UC`),
+    label: normalize(item?.serviceName || item?.service?.name || item?.product?.name || item?.name || item?.label || item?.title || `${amount} UC`),
     priceUsd: Number.isFinite(priceUsd) ? priceUsd : 0,
     stockQuantity,
     available:
