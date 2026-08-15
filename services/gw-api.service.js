@@ -25,7 +25,7 @@ function getConfig() {
 
   return {
     apiKey,
-    baseURL: parsed.origin,
+    baseURL: parsed.href.replace(/\/+$/, ""),
     timeout: Math.max(3_000, Number(process.env.GW_API_TIMEOUT_MS || 20_000)),
   };
 }
@@ -107,6 +107,7 @@ function isGenshinTopup(item) {
     .map((value) => normalize(value).toLowerCase())
     .join(" ");
   return (
+    providerProductId.startsWith("GWG") ||
     providerProductId.startsWith("GWGI") ||
     providerProductId.startsWith("GWGEN") ||
     text.includes("genshin") ||
@@ -245,6 +246,19 @@ async function createRedeemOrder(body) {
   }
 }
 
+async function createPidOrder(body) {
+  const client = createClient();
+  try {
+    const response = await client.post("/orders/pid", body);
+    return response.data;
+  } catch (error) {
+    // Keep compatibility with the legacy GW deployment already used by this app.
+    if (Number(error?.response?.status || 0) !== 404) throw error;
+    const response = await client.post("/orders", body);
+    return response.data;
+  }
+}
+
 async function getOrder(orderId) {
   const response = await createClient().get(`/orders/${encodeURIComponent(orderId)}`);
   return response.data;
@@ -269,6 +283,7 @@ module.exports = {
   createOrder,
   createGameKeyOrder,
   createRedeemOrder,
+  createPidOrder,
   getOrder,
   verifyPubgPlayer,
   verifyMlbbPlayer,

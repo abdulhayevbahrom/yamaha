@@ -88,6 +88,7 @@ let sequence = 1;
 const PENDING_TTL_MS = 10 * 60 * 1000;
 const ORDER_PAYMENT_METHODS = ["card", "bankomat", "uzumbank", "paynet", "click", "balance", "stars"];
 const STARS_INVOICE_PRODUCTS = new Set(["uc", "freefire", "mlbb", "hok", "genshin", "star_sell"]);
+const GENSHIN_SERVERS = new Set(["Asia", "America", "Europe", "TW/HK/MO"]);
 
 function normalizeCardNumber(value) {
   return String(value || "").replace(/\D/g, "").slice(0, 16);
@@ -479,6 +480,9 @@ const createOrder = async (req, res) => {
       if (!/^\d{6,12}$/.test(normalizedPlayerId)) {
         return response.error(res, "Genshin Impact UID noto‘g‘ri");
       }
+      if (!GENSHIN_SERVERS.has(normalizedZoneId)) {
+        return response.error(res, "Genshin Impact serverini tanlang");
+      }
       try {
         await verifyVolseverGenshinPlayer(normalizedPlayerId);
       } catch (error) {
@@ -671,7 +675,7 @@ const createOrder = async (req, res) => {
         : product === "hok"
         ? `Player ID: ${normalizedPlayerId}`
         : product === "genshin"
-        ? `UID: ${normalizedPlayerId}`
+        ? `UID: ${normalizedPlayerId} | Server: ${normalizedZoneId}`
         : normalizedIncomingProfileName || fallbackProfileName;
 
     const order = await Order.create({

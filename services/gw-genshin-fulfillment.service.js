@@ -1,6 +1,6 @@
 const Order = require("../model/order.model");
 const Plan = require("../model/plan.model");
-const { createOrder, getOrder } = require("./gw-api.service");
+const { createPidOrder, getOrder } = require("./gw-api.service");
 const { refundToBalance } = require("./order-cancel.service");
 const { isAmbiguousExternalError } = require("./external-operation.service");
 const { sendOrderArchive } = require("./order-archive.service");
@@ -126,9 +126,10 @@ async function autoFulfillGwGenshin(orderOrId) {
   order.fragmentTx = tx(order, null, { phase: "submit_started", providerProductId: plan.providerProductId, providerPriceUsd: Number(plan.providerPriceUsd || 0) });
   await Order.findByIdAndUpdate(order._id, { $set: { fragmentTx: order.fragmentTx } });
   try {
-    return await handle(order, await createOrder({
+    return await handle(order, await createPidOrder({
       pid: plan.providerProductId,
-      userId: String(order.playerId || order.username || "").trim(),
+      uid: String(order.playerId || order.username || "").trim(),
+      server: String(order.zoneId || "Asia").trim() || "Asia",
       trxid: `YMH-GENSHIN-${order.orderId}`,
       idempotencyKey: `YMH-GENSHIN-${order.orderId}`,
     }));
