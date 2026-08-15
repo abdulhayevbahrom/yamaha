@@ -277,7 +277,7 @@ async function performHokSync() {
       { category: "hok", provider: "gw", providerProductId: item.providerProductId },
       {
         $set: {
-          label: item.label, amount: item.amount || 1, providerPriceUsd: item.priceUsd,
+          label: item.label, amount: item.amount || 1, providerRegion: item.region || "global", providerPriceUsd: item.priceUsd,
           providerAvailable: item.available, providerQuantity: item.stockQuantity,
           providerSyncedAt: syncedAt, providerUpdatedAt: syncedAt,
         },

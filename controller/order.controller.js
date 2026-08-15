@@ -673,7 +673,7 @@ const createOrder = async (req, res) => {
       product === "mlbb"
         ? `Player ID: ${normalizedPlayerId} | Zone ID: ${normalizedZoneId}`
         : product === "hok"
-        ? `Player ID: ${normalizedPlayerId}`
+        ? `Player ID: ${normalizedPlayerId}${normalizedZoneId ? ` | Server: ${normalizedZoneId}` : ""}`
         : product === "genshin"
         ? `UID: ${normalizedPlayerId} | Server: ${normalizedZoneId}`
         : normalizedIncomingProfileName || fallbackProfileName;

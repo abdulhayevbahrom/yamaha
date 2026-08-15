@@ -245,6 +245,18 @@ function extractMlbbRegion(item) {
   return checks.find(([, pattern]) => pattern.test(text))?.[0] || "global";
 }
 
+function extractHokRegion(item) {
+  const explicit = normalize(item?.region || item?.country || item?.server).toLowerCase();
+  const text = [item?.slug, item?.gameName, item?.serviceName, item?.name, item?.category, explicit]
+    .map((value) => normalize(value).toLowerCase())
+    .join(" ");
+  if (/tw\/?hk\/?mo|hong\s*kong|macau|macao|taiwan/.test(text)) return "tw_hk_mo";
+  if (/(^|[^a-z])america(s)?([^a-z]|$)|\bna\b|north\s*america|latin\s*america/.test(text)) return "america";
+  if (/(^|[^a-z])europe([^a-z]|$)|\beu\b/.test(text)) return "europe";
+  if (/(^|[^a-z])asia([^a-z]|$)|sea|global/.test(text)) return "asia";
+  return "global";
+}
+
 function extractUcAmount(item) {
   const candidates = [item?.serviceName, item?.name, item?.label, item?.amount];
   for (const value of candidates) {
@@ -312,7 +324,7 @@ async function getHokProducts() {
   const response = await createClient().get("/products");
   return unwrapProducts(response.data)
     .filter(isHokTopup)
-    .map(normalizeProduct)
+    .map((item) => ({ ...normalizeProduct(item), region: extractHokRegion(item) }))
     .filter((item) => item.providerProductId && item.priceUsd > 0);
 }
 
@@ -408,6 +420,7 @@ module.exports = {
   isHokTopup,
   isGenshinTopup,
   extractMlbbRegion,
+  extractHokRegion,
   extractUcAmount,
   normalizeProduct,
   fetchProductsWithFallback,

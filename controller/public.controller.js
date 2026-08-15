@@ -201,7 +201,9 @@ function mapCatalog(plans) {
       amount: plan.amount,
       basePrice: plan.basePrice,
       currency: plan.currency,
-      region: plan.category === "mlbb" ? String(plan.providerRegion || "global") : undefined,
+      region: ["mlbb", "hok"].includes(plan.category)
+        ? String(plan.providerRegion || "global")
+        : undefined,
       isActive: plan.isActive,
       stockQuantity:
         ["uc", "redeem"].includes(plan.category) &&

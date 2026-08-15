@@ -8,6 +8,7 @@ const {
   isHokTopup,
   isGenshinTopup,
   extractMlbbRegion,
+  extractHokRegion,
   extractUcAmount,
   normalizeProduct,
 } = require("../services/gw-api.service");
@@ -44,6 +45,14 @@ test("GW catalog recognizes Mobile Legends products", () => {
 test("GW catalog recognizes Honor of Kings products", () => {
   assert.equal(isHokTopup({ id: "GWHKWC", gameName: "Honor of Kings", serviceName: "Weekly Card" }), true);
   assert.equal(isHokTopup({ id: "GWPSN50", category: "giftcard", serviceName: "PlayStation" }), false);
+});
+
+test("GW HOK products are assigned to their storefront region", () => {
+  assert.equal(extractHokRegion({ serviceName: "Honor of Kings Asia 80 Tokens" }), "asia");
+  assert.equal(extractHokRegion({ serviceName: "Honor of Kings Europe Weekly Card" }), "europe");
+  assert.equal(extractHokRegion({ serviceName: "Honor of Kings America Tokens" }), "america");
+  assert.equal(extractHokRegion({ serviceName: "Honor of Kings TW/HK/MO Tokens" }), "tw_hk_mo");
+  assert.equal(extractHokRegion({ serviceName: "Honor of Kings 80 Tokens" }), "global");
 });
 
 test("GW catalog recognizes Genshin Impact products", () => {
