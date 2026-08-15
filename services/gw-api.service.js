@@ -101,6 +101,20 @@ function isHokTopup(item) {
   ) && !text.includes("giftcard") && !text.includes("gamekey");
 }
 
+function isGenshinTopup(item) {
+  const providerProductId = normalize(item?.id || item?.pid || item?.PID).toUpperCase();
+  const text = [item?.slug, item?.gameName, item?.serviceName, item?.name, item?.category]
+    .map((value) => normalize(value).toLowerCase())
+    .join(" ");
+  return (
+    providerProductId.startsWith("GWGI") ||
+    providerProductId.startsWith("GWGEN") ||
+    text.includes("genshin") ||
+    text.includes("hoyoverse") ||
+    text.includes("mihoyo")
+  ) && !text.includes("giftcard") && !text.includes("gamekey") && !text.includes("code");
+}
+
 function extractMlbbRegion(item) {
   const explicit = normalize(item?.region || item?.country || item?.server).toLowerCase();
   const pid = normalize(item?.id || item?.pid || item?.PID).toUpperCase();
@@ -200,6 +214,14 @@ async function getHokProducts() {
     .filter((item) => item.providerProductId && item.priceUsd > 0);
 }
 
+async function getGenshinProducts() {
+  const response = await createClient().get("/products");
+  return unwrapProducts(response.data)
+    .filter(isGenshinTopup)
+    .map(normalizeProduct)
+    .filter((item) => item.providerProductId && item.priceUsd > 0);
+}
+
 async function createOrder(body) {
   const response = await createClient().post("/orders", body);
   return response.data;
@@ -243,6 +265,7 @@ module.exports = {
   getPubgRedeemProducts,
   getMlbbProducts,
   getHokProducts,
+  getGenshinProducts,
   createOrder,
   createGameKeyOrder,
   createRedeemOrder,
@@ -253,6 +276,7 @@ module.exports = {
   isPubgRedeem,
   isMlbbTopup,
   isHokTopup,
+  isGenshinTopup,
   extractMlbbRegion,
   extractUcAmount,
   normalizeProduct,

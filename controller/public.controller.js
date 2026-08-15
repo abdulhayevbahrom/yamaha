@@ -23,7 +23,10 @@ const {
 const { normalizeCardBin, lookupCardBinInfo } = require("../services/card-bin.service");
 const { getTelegramUserInfo } = require("../services/fragment-api.service");
 const { verifyPubgPlayer } = require("../services/gw-api.service");
-const { verifyVolseverHokPlayer } = require("../services/volsever-hok-verification.service");
+const {
+  verifyVolseverHokPlayer,
+  verifyVolseverGenshinPlayer,
+} = require("../services/volsever-hok-verification.service");
 const { verifyMlbbAccount } = require("../services/gw-mlbb-verification.service");
 // const { ensureDefaultPlans } = require("../services/plan.service");
 
@@ -35,13 +38,14 @@ const categoryNames = {
   freefire: "Free Fire Diamond",
   mlbb: "MLBB Diamond",
   hok: "Honor of Kings Tokens",
+  genshin: "Genshin Impact",
 };
 
 const LOOKUP_CACHE_TTL_MS = 5 * 60 * 1000;
 const LOOKUP_CACHE_LIMIT = 500;
 const profileLookupCache = new Map();
 const profileLookupInFlight = new Map();
-const TOP_SALES_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb", "hok"];
+const TOP_SALES_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb", "hok", "genshin"];
 const TOP_SALES_PERIODS = new Set(["today", "week", "month"]);
 
 function isGwPubgAutobuyEnabled() {
@@ -70,6 +74,8 @@ function isGwPlanFresh(plan) {
         ? process.env.GW_MLBB_CATALOG_MAX_AGE_MS
         : plan?.category === "hok"
           ? process.env.GW_HOK_CATALOG_MAX_AGE_MS
+        : plan?.category === "genshin"
+          ? process.env.GW_GENSHIN_CATALOG_MAX_AGE_MS
         : process.env.GW_PUBG_CATALOG_MAX_AGE_MS) || 30 * 60_000,
     ),
   );
@@ -169,6 +175,7 @@ function mapCatalog(plans) {
     freefire: { name: categoryNames.freefire, plans: [] },
     mlbb: { name: categoryNames.mlbb, plans: [] },
     hok: { name: categoryNames.hok, plans: [] },
+    genshin: { name: categoryNames.genshin, plans: [] },
   };
 
   plans.forEach((plan) => {
@@ -196,6 +203,8 @@ function mapCatalog(plans) {
           : plan.category === "mlbb" && isGwMlbbAutobuyEnabled()
             ? plan.provider === "gw" && Boolean(plan.providerAvailable) && isGwPlanFresh(plan)
           : plan.category === "hok" && isGwHokAutobuyEnabled()
+            ? plan.provider === "gw" && Boolean(plan.providerAvailable) && isGwPlanFresh(plan)
+          : plan.category === "genshin" && ["1", "true", "yes", "on"].includes(String(process.env.GW_GENSHIN_AUTOBUY_ENABLED || "").trim().toLowerCase())
             ? plan.provider === "gw" && Boolean(plan.providerAvailable) && isGwPlanFresh(plan)
           : plan.provider === "gw"
             ? Boolean(plan.providerAvailable)
@@ -603,6 +612,28 @@ const checkHokPlayer = async (req, res) => {
   }
 };
 
+const checkGenshinPlayer = async (req, res) => {
+  const playerId = String(req.body?.playerId || "").trim();
+  if (!/^\d{6,12}$/.test(playerId)) return response.error(res, "Genshin Impact UID noto‘g‘ri");
+  try {
+    const result = await verifyVolseverGenshinPlayer(playerId);
+    return response.success(res, "Genshin Impact profil topildi", {
+      playerId: result.playerId,
+      playerName: result.playerName,
+      game: result.game,
+    });
+  } catch (error) {
+    const status = Number(error?.response?.status || 0);
+    if ([400, 404, 422].includes(status) || error?.code === "PLAYER_NOT_FOUND") {
+      return response.error(res, "Genshin Impact profil topilmadi");
+    }
+    if (status === 401 || status === 403) {
+      return response.serverError(res, "Genshin Impact tekshiruv API kaliti qabul qilinmadi");
+    }
+    return response.serverError(res, "Genshin Impact profil tekshirishda xatolik", error.message);
+  }
+};
+
 module.exports = {
   health,
   getCatalog,
@@ -616,6 +647,7 @@ module.exports = {
   checkMlbbRole,
   checkPubgPlayer,
   checkHokPlayer,
+  checkGenshinPlayer,
   getTopSalePurchaseAmount,
   getTopSalesOrderFilter,
 };

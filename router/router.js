@@ -68,6 +68,14 @@ router.post(
   userWriteRateLimit,
   publicController.checkHokPlayer,
 );
+router.post(
+  "/genshin/check-player",
+  telegramAuthMiddleware,
+  freshTelegramWriteAuth,
+  requireRegisteredUser,
+  userWriteRateLimit,
+  publicController.checkGenshinPlayer,
+);
 router.post("/calculate-price", orderController.calculatePrice);
 router.post(
   "/orders",
@@ -267,6 +275,11 @@ router.post(
   "/admin/providers/gw/hok/sync",
   authMiddleware,
   adminController.syncGwHokPlans,
+);
+router.post(
+  "/admin/providers/gw/genshin/sync",
+  authMiddleware,
+  adminController.syncGwGenshinPlans,
 );
 router.get(
   "/admin/payment-cards",

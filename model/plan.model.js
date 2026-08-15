@@ -4,7 +4,7 @@ const planSchema = new mongoose.Schema(
   {
     category: {
       type: String,
-      enum: ["star", "premium", "uc", "redeem", "freefire", "mlbb", "hok"],
+      enum: ["star", "premium", "uc", "redeem", "freefire", "mlbb", "hok", "genshin"],
       required: true
     },
     code: {

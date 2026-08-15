@@ -5,7 +5,7 @@ const { sendOrderArchive } = require("./order-archive.service");
 const { emitUserUpdate } = require("../socket");
 const { awardReferralCommissionForOrder } = require("./referral.service");
 
-const MANUAL_GAME_PRODUCTS = ["uc", "freefire", "mlbb", "hok"];
+const MANUAL_GAME_PRODUCTS = ["uc", "freefire", "mlbb", "hok", "genshin"];
 
 function isManualGameProduct(product) {
   return MANUAL_GAME_PRODUCTS.includes(product);
@@ -52,6 +52,8 @@ async function syncGameAdminMessages(order, statusText) {
       ? "MLBB"
       : String(order?.product || "").toLowerCase() === "freefire"
       ? "Free Fire"
+      : String(order?.product || "").toLowerCase() === "genshin"
+      ? "Genshin Impact"
       : "O'yin";
 
   const text = [

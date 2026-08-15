@@ -1,10 +1,11 @@
 const Plan = require("../model/plan.model");
 const crypto = require("node:crypto");
-const { getPubgProducts, getPubgRedeemProducts, getMlbbProducts, getHokProducts } = require("./gw-api.service");
+const { getPubgProducts, getPubgRedeemProducts, getMlbbProducts, getHokProducts, getGenshinProducts } = require("./gw-api.service");
 
 let syncPromise = null;
 let mlbbSyncPromise = null;
 let hokSyncPromise = null;
+let genshinSyncPromise = null;
 
 async function syncGwPubgCatalog() {
   if (syncPromise) return syncPromise;
@@ -291,4 +292,60 @@ async function performHokSync() {
   return Plan.find({ category: "hok" }).sort({ amount: 1 }).lean();
 }
 
-module.exports = { syncGwPubgCatalog, syncGwMlbbCatalog, syncGwHokCatalog };
+async function syncGwGenshinCatalog() {
+  if (genshinSyncPromise) return genshinSyncPromise;
+  genshinSyncPromise = performSimpleGameSync({
+    category: "genshin",
+    labelFallback: "Genesis Crystals",
+    emptyMessage: "GW Genshin Impact katalogi bo'sh qaytdi",
+    fetchProducts: getGenshinProducts,
+  });
+  try {
+    return await genshinSyncPromise;
+  } finally {
+    genshinSyncPromise = null;
+  }
+}
+
+async function performSimpleGameSync({ category, labelFallback, emptyMessage, fetchProducts }) {
+  const products = await fetchProducts();
+  if (!products.length) throw new Error(emptyMessage);
+  const syncedAt = new Date();
+  const seenIds = products.map((item) => item.providerProductId);
+
+  await Plan.updateMany(
+    { category, provider: "gw", providerProductId: { $nin: seenIds } },
+    { $set: { providerAvailable: false, providerQuantity: 0, providerSyncedAt: syncedAt } },
+  );
+
+  for (const item of products) {
+    const safeCode = `gw_${item.providerProductId}`.toLowerCase().replace(/[^a-z0-9_-]/g, "_").slice(0, 80);
+    await Plan.findOneAndUpdate(
+      { category, provider: "gw", providerProductId: item.providerProductId },
+      {
+        $set: {
+          label: item.label || `${item.amount || ""} ${labelFallback}`.trim(),
+          amount: item.amount,
+          providerPriceUsd: item.priceUsd,
+          providerAvailable: item.available,
+          providerQuantity: item.stockQuantity,
+          providerSyncedAt: syncedAt,
+          providerUpdatedAt: syncedAt,
+        },
+        $setOnInsert: {
+          category,
+          code: safeCode,
+          basePrice: 0,
+          currency: "UZS",
+          isActive: false,
+          provider: "gw",
+        },
+      },
+      { upsert: true },
+    );
+  }
+
+  return Plan.find({ category }).sort({ amount: 1, label: 1 }).lean();
+}
+
+module.exports = { syncGwPubgCatalog, syncGwMlbbCatalog, syncGwHokCatalog, syncGwGenshinCatalog };

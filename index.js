@@ -196,6 +196,19 @@ async function startServer() {
     mlbbSyncInterval.unref();
   }
 
+  if (["1", "true", "yes", "on"].includes(String(process.env.GW_GENSHIN_AUTOBUY_ENABLED || "").trim().toLowerCase())) {
+    const { syncGwGenshinCatalog } = require("./services/gw-catalog.service");
+    const syncGenshinCatalog = () => syncGwGenshinCatalog().catch((error) => {
+      console.error("GW Genshin catalog sync error:", error?.message || error);
+    });
+    void syncGenshinCatalog();
+    const genshinSyncInterval = setInterval(
+      syncGenshinCatalog,
+      Math.max(60_000, Number(process.env.GW_GENSHIN_CATALOG_SYNC_INTERVAL_MS || 5 * 60_000)),
+    );
+    genshinSyncInterval.unref();
+  }
+
   server.listen(PORT, () => {
     console.log(`Server: http://localhost:${PORT}`);
     if (shouldStartTelegramWorkers()) {

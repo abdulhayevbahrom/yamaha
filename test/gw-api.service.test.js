@@ -6,6 +6,7 @@ const {
   isPubgRedeem,
   isMlbbTopup,
   isHokTopup,
+  isGenshinTopup,
   extractMlbbRegion,
   extractUcAmount,
   normalizeProduct,
@@ -43,6 +44,12 @@ test("GW catalog recognizes Mobile Legends products", () => {
 test("GW catalog recognizes Honor of Kings products", () => {
   assert.equal(isHokTopup({ id: "GWHKWC", gameName: "Honor of Kings", serviceName: "Weekly Card" }), true);
   assert.equal(isHokTopup({ id: "GWPSN50", category: "giftcard", serviceName: "PlayStation" }), false);
+});
+
+test("GW catalog recognizes Genshin Impact products", () => {
+  assert.equal(isGenshinTopup({ id: "GWGI60", gameName: "Genshin Impact", serviceName: "60 Genesis Crystals" }), true);
+  assert.equal(isGenshinTopup({ serviceName: "HoYoverse Genshin Top Up" }), true);
+  assert.equal(isGenshinTopup({ category: "giftcard", serviceName: "Genshin Impact Giftcard" }), false);
 });
 
 test("GW HOK plan must be mapped, available and fresh", () => {
