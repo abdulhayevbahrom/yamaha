@@ -475,8 +475,15 @@ async function createOrder(body) {
 }
 
 async function createGameKeyOrder(body) {
-  const response = await createClient().post("/orders/gamekey", body);
-  return response.data;
+  const client = createClient();
+  try {
+    const response = await client.post("/orders/gamekey", body);
+    return response.data;
+  } catch (error) {
+    if (Number(error?.response?.status || 0) !== 404) throw error;
+    const response = await client.post("/orders/pid", body);
+    return response.data;
+  }
 }
 
 async function createRedeemOrder(body) {

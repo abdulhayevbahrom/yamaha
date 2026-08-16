@@ -1,6 +1,6 @@
 const Order = require("../model/order.model");
 const Plan = require("../model/plan.model");
-const { createPidOrder, getOrder } = require("./gw-api.service");
+const { createGameKeyOrder, getOrder } = require("./gw-api.service");
 const { extractRedeemCodes } = require("./gw-pubg-redeem.service");
 const { refundToBalance } = require("./order-cancel.service");
 const { isAmbiguousExternalError } = require("./external-operation.service");
@@ -101,6 +101,7 @@ function scheduleSubmitRecovery(orderId) {
 }
 
 async function handle(order, payload) {
+  if (extractRedeemCodes(payload).length) return complete(order, payload);
   const status = statusOf(payload);
   if (["completed", "done", "success"].includes(status)) return complete(order, payload);
   if (["cancelled", "failed"].includes(status) || payload?.orderCreated === false) return cancelAndRefund(order, payload);
@@ -162,10 +163,8 @@ async function recoverGwRobloxSubmit(orderId) {
 
   const trxid = `YMH-ROBLOX-${order.orderId}`;
   try {
-    return await handle(order, await createPidOrder({
+    return await handle(order, await createGameKeyOrder({
       pid: plan.providerProductId,
-      uid: String(order.playerId || order.username || "").trim(),
-      userId: String(order.playerId || order.username || "").trim(),
       trxid,
       idempotencyKey: trxid,
     }));
@@ -207,10 +206,8 @@ async function autoFulfillGwRoblox(orderOrId) {
   });
   await Order.findByIdAndUpdate(order._id, { $set: { fragmentTx: order.fragmentTx } });
   try {
-    return await handle(order, await createPidOrder({
+    return await handle(order, await createGameKeyOrder({
       pid: plan.providerProductId,
-      uid: String(order.playerId || order.username || "").trim(),
-      userId: String(order.playerId || order.username || "").trim(),
       trxid,
       idempotencyKey: trxid,
     }));

@@ -500,13 +500,6 @@ const createOrder = async (req, res) => {
         return response.error(res, "Genshin Impact profilini tekshirib bo‘lmadi");
       }
     }
-    if (product === "roblox" && !normalizedPlayerId) {
-      return response.error(res, "Roblox User ID kiriting");
-    }
-    if (product === "roblox" && !/^\d{4,20}$/.test(normalizedPlayerId)) {
-      return response.error(res, "Roblox User ID noto'g'ri");
-    }
-
     await expirePendingOrders();
     await syncSequence();
 
@@ -693,7 +686,7 @@ const createOrder = async (req, res) => {
         : product === "genshin"
         ? `UID: ${normalizedPlayerId} | Server: ${normalizedZoneId}`
         : product === "roblox"
-        ? `User ID: ${normalizedPlayerId}`
+        ? "Roblox giftcard"
         : normalizedIncomingProfileName || fallbackProfileName;
 
     const order = await Order.create({
@@ -711,11 +704,11 @@ const createOrder = async (req, res) => {
           : product === "genshin"
           ? normalizedPlayerId
           : product === "roblox"
-          ? normalizedPlayerId
+          ? "ROBLOX_GIFTCARD"
           : product === "redeem"
           ? "PUBG_REDEEM_CODE"
           : normalizedUsername,
-      playerId: normalizedPlayerId,
+      playerId: product === "roblox" ? "" : normalizedPlayerId,
       zoneId: normalizedZoneId,
       profileName: resolvedProfileName,
       paymentCardId,
