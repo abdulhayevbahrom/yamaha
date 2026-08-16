@@ -1,6 +1,7 @@
 const Order = require("../model/order.model");
 const Plan = require("../model/plan.model");
 const { createPidOrder, getOrder } = require("./gw-api.service");
+const { extractRedeemCodes } = require("./gw-pubg-redeem.service");
 const { refundToBalance } = require("./order-cancel.service");
 const { isAmbiguousExternalError } = require("./external-operation.service");
 const { sendOrderArchive } = require("./order-archive.service");
@@ -50,7 +51,7 @@ function tx(order, payload, extra = {}) {
 async function complete(order, payload) {
   const updated = await Order.findOneAndUpdate(
     { _id: order._id, fulfillmentStatus: "processing" },
-    { $set: { status: "completed", fulfillmentStatus: "success", completionMode: "auto", fulfillmentError: "", fulfilledAt: new Date(), fragmentTx: tx(order, payload, { completedAt: new Date() }) } },
+    { $set: { status: "completed", fulfillmentStatus: "success", completionMode: "auto", fulfillmentError: "", fulfilledAt: new Date(), fragmentTx: tx(order, payload, { completedAt: new Date(), redeemCodes: extractRedeemCodes(payload) }) } },
     { new: true },
   );
   if (!updated) return { ok: false, reason: "state_changed" };

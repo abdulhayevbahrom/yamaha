@@ -278,7 +278,19 @@ function isRobloxTopup(item) {
     "categoryName",
     "type",
   ]);
-  const isExcluded = (
+  const isRobloxGiftCard = (
+    text.includes("giftcardroblox") ||
+    text.includes("giftcardrobux") ||
+    text.includes("giftcard roblox") ||
+    text.includes("giftcard robux") ||
+    text.includes("gift card roblox") ||
+    text.includes("gift card robux") ||
+    text.includes("roblox giftcard") ||
+    text.includes("robux giftcard") ||
+    text.includes("roblox gift card") ||
+    text.includes("robux gift card")
+  );
+  const isExcluded = !isRobloxGiftCard && (
     text.includes("giftcard") ||
     text.includes("gift card") ||
     text.includes("gamekey") ||

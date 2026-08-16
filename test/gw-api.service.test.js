@@ -7,6 +7,7 @@ const {
   isMlbbTopup,
   isHokTopup,
   isGenshinTopup,
+  isRobloxTopup,
   extractMlbbRegion,
   extractHokRegion,
   extractUcAmount,
@@ -64,6 +65,13 @@ test("GW catalog recognizes Genshin Impact products", () => {
   assert.equal(isGenshinTopup({ serviceName: "300 Chronal Nexus" }), true);
   assert.equal(isGenshinTopup({ id: "GWGP50", serviceName: "Google Play 50 Gift Card" }), false);
   assert.equal(isGenshinTopup({ category: "giftcard", serviceName: "Genshin Impact Giftcard" }), false);
+});
+
+test("GW catalog recognizes Roblox and Robux giftcard products", () => {
+  assert.equal(isRobloxTopup({ slug: "giftcardroblox", gameName: "Giftcard — Roblox USD", serviceName: "Roblox 10 USD" }), true);
+  assert.equal(isRobloxTopup({ slug: "giftcardrobux", gameName: "Giftcard — Robux", serviceName: "Robux 800" }), true);
+  assert.equal(isRobloxTopup({ gameName: "Roblox", serviceName: "400 Robux" }), true);
+  assert.equal(isRobloxTopup({ slug: "giftcardpsn", gameName: "Giftcard — PlayStation USD", serviceName: "PSN 10 USD" }), false);
 });
 
 test("GW HOK plan must be mapped, available and fresh", () => {
