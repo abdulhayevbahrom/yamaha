@@ -168,6 +168,10 @@ async function startServer() {
   await resumeGwGenshinPolling().catch((error) => {
     console.error("GW Genshin polling resume error:", error?.message || error);
   });
+  const { resumeGwRobloxPolling } = require("./services/gw-roblox-fulfillment.service");
+  await resumeGwRobloxPolling().catch((error) => {
+    console.error("GW Roblox polling resume error:", error?.message || error);
+  });
 
   if (
     ["1", "true", "yes", "on"].includes(
@@ -224,6 +228,19 @@ async function startServer() {
       Math.max(60_000, Number(process.env.GW_GENSHIN_CATALOG_SYNC_INTERVAL_MS || 5 * 60_000)),
     );
     genshinSyncInterval.unref();
+  }
+
+  if (["1", "true", "yes", "on"].includes(String(process.env.GW_ROBLOX_AUTOBUY_ENABLED || "").trim().toLowerCase())) {
+    const { syncGwRobloxCatalog } = require("./services/gw-catalog.service");
+    const syncRobloxCatalog = () => syncGwRobloxCatalog().catch((error) => {
+      console.error("GW Roblox catalog sync error:", error?.message || error);
+    });
+    void syncRobloxCatalog();
+    const robloxSyncInterval = setInterval(
+      syncRobloxCatalog,
+      Math.max(60_000, Number(process.env.GW_ROBLOX_CATALOG_SYNC_INTERVAL_MS || 5 * 60_000)),
+    );
+    robloxSyncInterval.unref();
   }
 
   server.listen(PORT, () => {

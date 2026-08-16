@@ -35,6 +35,11 @@ const {
   isGwGenshinPlanReady,
 } = require("../services/gw-genshin-fulfillment.service");
 const {
+  isGwRobloxAutobuyEnabled,
+  autoFulfillGwRoblox,
+  isGwRobloxPlanReady,
+} = require("../services/gw-roblox-fulfillment.service");
+const {
   isGwPubgRedeemEnabled,
   autoFulfillGwPubgRedeem,
   isPlanReady: isGwPubgRedeemPlanReady,
@@ -87,7 +92,7 @@ const {
 let sequence = 1;
 const PENDING_TTL_MS = 10 * 60 * 1000;
 const ORDER_PAYMENT_METHODS = ["card", "bankomat", "uzumbank", "paynet", "click", "balance", "stars"];
-const STARS_INVOICE_PRODUCTS = new Set(["uc", "freefire", "mlbb", "hok", "genshin", "star_sell"]);
+const STARS_INVOICE_PRODUCTS = new Set(["uc", "freefire", "mlbb", "hok", "genshin", "roblox", "star_sell"]);
 const GENSHIN_SERVERS = new Set(["Asia", "America", "Europe", "TW/HK/MO"]);
 
 function normalizeCardNumber(value) {
@@ -105,6 +110,7 @@ function getOrderProductLabel(product) {
   if (key === "mlbb") return "MLBB Diamond";
   if (key === "hok") return "Honor of Kings Tokens";
   if (key === "genshin") return "Genshin Impact";
+  if (key === "roblox") return "Roblox";
   if (key === "freefire") return "Free Fire Diamond";
   return "Buyurtma";
 }
@@ -121,6 +127,7 @@ function getGameProductLabel(product) {
   if (key === "mlbb") return "MLBB";
   if (key === "hok") return "Honor of Kings";
   if (key === "genshin") return "Genshin Impact";
+  if (key === "roblox") return "Roblox";
   if (key === "freefire") return "Free Fire";
   if (key === "uc") return "PUBG UC";
   return "O'yin";
@@ -421,7 +428,7 @@ const createOrder = async (req, res) => {
     if (currentUser?.isBlocked) {
       return response.error(res, "Foydalanuvchi bloklangan");
     }
-    if (!["star", "premium", "uc", "redeem", "freefire", "mlbb", "hok", "genshin", "star_sell"].includes(product)) {
+    if (!["star", "premium", "uc", "redeem", "freefire", "mlbb", "hok", "genshin", "roblox", "star_sell"].includes(product)) {
       return response.error(res, "Tanlangan mahsulot noto'g'ri");
     }
     if (!ORDER_PAYMENT_METHODS.includes(normalizedPaymentMethod)) {
@@ -456,7 +463,7 @@ const createOrder = async (req, res) => {
       if (!normalizedPlayerId || !normalizedZoneId) {
         return response.error(res, "Player ID va Zone ID kiriting");
       }
-    } else if (!['star_sell', 'redeem'].includes(product) && !normalizedUsername && !["hok", "genshin"].includes(product)) {
+    } else if (!['star_sell', 'redeem'].includes(product) && !normalizedUsername && !["hok", "genshin", "roblox"].includes(product)) {
       return response.error(res, "Username kiriting");
     }
     if (product === "hok" && !normalizedPlayerId) {
@@ -492,6 +499,12 @@ const createOrder = async (req, res) => {
         }
         return response.error(res, "Genshin Impact profilini tekshirib bo‘lmadi");
       }
+    }
+    if (product === "roblox" && !normalizedPlayerId) {
+      return response.error(res, "Roblox User ID kiriting");
+    }
+    if (product === "roblox" && !/^\d{4,20}$/.test(normalizedPlayerId)) {
+      return response.error(res, "Roblox User ID noto'g'ri");
     }
 
     await expirePendingOrders();
@@ -557,6 +570,9 @@ const createOrder = async (req, res) => {
       }
       if (product === "genshin" && isGwGenshinAutobuyEnabled() && !isGwGenshinPlanReady(plan)) {
         return response.error(res, "Tanlangan Genshin Impact paketi hozir mavjud emas");
+      }
+      if (product === "roblox" && isGwRobloxAutobuyEnabled() && !isGwRobloxPlanReady(plan)) {
+        return response.error(res, "Tanlangan Roblox paketi hozir mavjud emas");
       }
       if (product === "mlbb" && isMlbbBonusPlan(plan)) {
         let verification;
@@ -676,6 +692,8 @@ const createOrder = async (req, res) => {
         ? `Player ID: ${normalizedPlayerId}`
         : product === "genshin"
         ? `UID: ${normalizedPlayerId} | Server: ${normalizedZoneId}`
+        : product === "roblox"
+        ? `User ID: ${normalizedPlayerId}`
         : normalizedIncomingProfileName || fallbackProfileName;
 
     const order = await Order.create({
@@ -691,6 +709,8 @@ const createOrder = async (req, res) => {
           : product === "hok"
           ? normalizedPlayerId
           : product === "genshin"
+          ? normalizedPlayerId
+          : product === "roblox"
           ? normalizedPlayerId
           : product === "redeem"
           ? "PUBG_REDEEM_CODE"
@@ -742,6 +762,7 @@ const createOrder = async (req, res) => {
         !(product === "mlbb" && isGwMlbbAutobuyEnabled())
         && !(product === "hok" && isGwHokAutobuyEnabled())
         && !(product === "genshin" && isGwGenshinAutobuyEnabled())
+        && !(product === "roblox" && isGwRobloxAutobuyEnabled())
       ) {
         emitAdminUpdate({
           type: "game_paid",
@@ -788,6 +809,9 @@ const createOrder = async (req, res) => {
       }
       if (product === "genshin" && isGwGenshinAutobuyEnabled()) {
         await autoFulfillGwGenshin(order);
+      }
+      if (product === "roblox" && isGwRobloxAutobuyEnabled()) {
+        await autoFulfillGwRoblox(order);
       }
     }
 
@@ -897,7 +921,7 @@ function buildSearchFilter(rawSearch) {
   return { $or: conditions };
 }
 
-const SALES_HISTORY_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb", "hok", "genshin", "balance"];
+const SALES_HISTORY_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb", "hok", "genshin", "roblox", "balance"];
 
 function buildHistoryFilter(scope, product = "") {
   if (scope === "sales") {
@@ -922,7 +946,7 @@ function buildHistoryFilter(scope, product = "") {
 
   if (scope === "uc_paid") {
     return {
-      product: { $in: ["uc", "freefire", "mlbb", "hok", "genshin"] },
+      product: { $in: ["uc", "freefire", "mlbb", "hok", "genshin", "roblox"] },
       status: "paid_auto_processed",
     };
   }

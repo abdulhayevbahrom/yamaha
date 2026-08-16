@@ -39,13 +39,14 @@ const categoryNames = {
   mlbb: "MLBB Diamond",
   hok: "Honor of Kings Tokens",
   genshin: "Genshin Impact",
+  roblox: "Roblox",
 };
 
 const LOOKUP_CACHE_TTL_MS = 5 * 60 * 1000;
 const LOOKUP_CACHE_LIMIT = 500;
 const profileLookupCache = new Map();
 const profileLookupInFlight = new Map();
-const TOP_SALES_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb", "hok", "genshin"];
+const TOP_SALES_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb", "hok", "genshin", "roblox"];
 const TOP_SALES_PERIODS = new Set(["today", "week", "month"]);
 
 function isGwPubgAutobuyEnabled() {
@@ -71,12 +72,14 @@ function getGwCatalogFreshnessMs(category) {
     mlbb: process.env.GW_MLBB_CATALOG_MAX_AGE_MS,
     hok: process.env.GW_HOK_CATALOG_MAX_AGE_MS,
     genshin: process.env.GW_GENSHIN_CATALOG_MAX_AGE_MS,
+    roblox: process.env.GW_ROBLOX_CATALOG_MAX_AGE_MS,
     pubg: process.env.GW_PUBG_CATALOG_MAX_AGE_MS,
   };
   const intervalByCategory = {
     mlbb: process.env.GW_MLBB_CATALOG_SYNC_INTERVAL_MS,
     hok: process.env.GW_HOK_CATALOG_SYNC_INTERVAL_MS,
     genshin: process.env.GW_GENSHIN_CATALOG_SYNC_INTERVAL_MS,
+    roblox: process.env.GW_ROBLOX_CATALOG_SYNC_INTERVAL_MS,
     pubg: process.env.GW_PUBG_CATALOG_SYNC_INTERVAL_MS,
   };
   const configuredMaxAge = Number(maxAgeByCategory[category] || 30 * 60_000);
@@ -92,6 +95,8 @@ function isGwPlanFresh(plan) {
         ? "hok"
         : plan?.category === "genshin"
           ? "genshin"
+          : plan?.category === "roblox"
+            ? "roblox"
           : "pubg";
   const maxAge = getGwCatalogFreshnessMs(category);
   const syncedAt = new Date(plan?.providerSyncedAt || 0).getTime();
@@ -191,6 +196,7 @@ function mapCatalog(plans) {
     mlbb: { name: categoryNames.mlbb, plans: [] },
     hok: { name: categoryNames.hok, plans: [] },
     genshin: { name: categoryNames.genshin, plans: [] },
+    roblox: { name: categoryNames.roblox, plans: [] },
   };
 
   plans.forEach((plan) => {
@@ -222,6 +228,8 @@ function mapCatalog(plans) {
           : plan.category === "hok" && isGwHokAutobuyEnabled()
             ? plan.provider === "gw" && Boolean(plan.providerAvailable) && isGwPlanFresh(plan)
           : plan.category === "genshin" && ["1", "true", "yes", "on"].includes(String(process.env.GW_GENSHIN_AUTOBUY_ENABLED || "").trim().toLowerCase())
+            ? plan.provider === "gw" && Boolean(plan.providerAvailable) && isGwPlanFresh(plan)
+          : plan.category === "roblox" && ["1", "true", "yes", "on"].includes(String(process.env.GW_ROBLOX_AUTOBUY_ENABLED || "").trim().toLowerCase())
             ? plan.provider === "gw" && Boolean(plan.providerAvailable) && isGwPlanFresh(plan)
           : plan.provider === "gw"
             ? Boolean(plan.providerAvailable)

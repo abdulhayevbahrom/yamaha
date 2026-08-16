@@ -17,6 +17,9 @@ const ELIGIBLE_REFERRAL_PRODUCTS = new Set([
   "uc",
   "freefire",
   "mlbb",
+  "hok",
+  "genshin",
+  "roblox",
 ]);
 
 function normalizeString(value) {

@@ -281,6 +281,11 @@ router.post(
   authMiddleware,
   adminController.syncGwGenshinPlans,
 );
+router.post(
+  "/admin/providers/gw/roblox/sync",
+  authMiddleware,
+  adminController.syncGwRobloxPlans,
+);
 router.get(
   "/admin/payment-cards",
   authMiddleware,

@@ -1,11 +1,12 @@
 const Plan = require("../model/plan.model");
 const crypto = require("node:crypto");
-const { getPubgProducts, getPubgRedeemProducts, getMlbbProducts, getHokProducts, getGenshinProducts } = require("./gw-api.service");
+const { getPubgProducts, getPubgRedeemProducts, getMlbbProducts, getHokProducts, getGenshinProducts, getRobloxProducts } = require("./gw-api.service");
 
 let syncPromise = null;
 let mlbbSyncPromise = null;
 let hokSyncPromise = null;
 let genshinSyncPromise = null;
+let robloxSyncPromise = null;
 
 async function syncGwPubgCatalog() {
   if (syncPromise) return syncPromise;
@@ -307,6 +308,21 @@ async function syncGwGenshinCatalog() {
   }
 }
 
+async function syncGwRobloxCatalog() {
+  if (robloxSyncPromise) return robloxSyncPromise;
+  robloxSyncPromise = performSimpleGameSync({
+    category: "roblox",
+    labelFallback: "Robux",
+    emptyMessage: "GW Roblox katalogi bo'sh qaytdi",
+    fetchProducts: getRobloxProducts,
+  });
+  try {
+    return await robloxSyncPromise;
+  } finally {
+    robloxSyncPromise = null;
+  }
+}
+
 async function performSimpleGameSync({ category, labelFallback, emptyMessage, fetchProducts }) {
   const products = await fetchProducts();
   if (!products.length) throw new Error(emptyMessage);
@@ -348,4 +364,4 @@ async function performSimpleGameSync({ category, labelFallback, emptyMessage, fe
   return Plan.find({ category }).sort({ amount: 1, label: 1 }).lean();
 }
 
-module.exports = { syncGwPubgCatalog, syncGwMlbbCatalog, syncGwHokCatalog, syncGwGenshinCatalog };
+module.exports = { syncGwPubgCatalog, syncGwMlbbCatalog, syncGwHokCatalog, syncGwGenshinCatalog, syncGwRobloxCatalog };
