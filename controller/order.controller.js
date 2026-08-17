@@ -30,10 +30,10 @@ const {
   isGwHokPlanReady,
 } = require("../services/gw-hok-fulfillment.service");
 const {
-  isGwGenshinAutobuyEnabled,
-  autoFulfillGwGenshin,
-  isGwGenshinPlanReady,
-} = require("../services/gw-genshin-fulfillment.service");
+  isGwFreeFireAutobuyEnabled,
+  autoFulfillGwFreeFire,
+  isGwFreeFirePlanReady,
+} = require("../services/gw-freefire-fulfillment.service");
 const {
   isGwRobloxAutobuyEnabled,
   autoFulfillGwRoblox,
@@ -96,7 +96,6 @@ const {
 const { sanitizePublicOrder } = require("../utils/public-payload");
 const {
   verifyVolseverHokPlayer,
-  verifyVolseverGenshinPlayer,
   verifyVolseverBloodStrikePlayer,
   verifyVolseverDeltaForcePlayer,
 } = require("../services/volsever-hok-verification.service");
@@ -104,8 +103,7 @@ const {
 let sequence = 1;
 const PENDING_TTL_MS = 10 * 60 * 1000;
 const ORDER_PAYMENT_METHODS = ["card", "bankomat", "uzumbank", "paynet", "click", "balance", "stars"];
-const STARS_INVOICE_PRODUCTS = new Set(["uc", "freefire", "mlbb", "hok", "genshin", "roblox", "bloodstrike", "deltaforce", "star_sell"]);
-const GENSHIN_SERVERS = new Set(["Asia", "America", "Europe", "TW/HK/MO"]);
+const STARS_INVOICE_PRODUCTS = new Set(["uc", "freefire", "mlbb", "hok", "roblox", "bloodstrike", "deltaforce", "star_sell"]);
 
 function normalizeCardNumber(value) {
   return String(value || "").replace(/\D/g, "").slice(0, 16);
@@ -121,7 +119,6 @@ function getOrderProductLabel(product) {
   if (key === "redeem") return "PUBG Redeem";
   if (key === "mlbb") return "MLBB Diamond";
   if (key === "hok") return "Honor of Kings Tokens";
-  if (key === "genshin") return "Genshin Impact";
   if (key === "roblox") return "Roblox";
   if (key === "bloodstrike") return "Blood Strike";
   if (key === "deltaforce") return "Delta Force";
@@ -140,7 +137,6 @@ function getGameProductLabel(product) {
   const key = String(product || "").trim().toLowerCase();
   if (key === "mlbb") return "MLBB";
   if (key === "hok") return "Honor of Kings";
-  if (key === "genshin") return "Genshin Impact";
   if (key === "roblox") return "Roblox";
   if (key === "bloodstrike") return "Blood Strike";
   if (key === "deltaforce") return "Delta Force";
@@ -444,7 +440,7 @@ const createOrder = async (req, res) => {
     if (currentUser?.isBlocked) {
       return response.error(res, "Foydalanuvchi bloklangan");
     }
-    if (!["star", "premium", "uc", "redeem", "freefire", "mlbb", "hok", "genshin", "roblox", "bloodstrike", "deltaforce", "star_sell"].includes(product)) {
+    if (!["star", "premium", "uc", "redeem", "freefire", "mlbb", "hok", "roblox", "bloodstrike", "deltaforce", "star_sell"].includes(product)) {
       return response.error(res, "Tanlangan mahsulot noto'g'ri");
     }
     if (!ORDER_PAYMENT_METHODS.includes(normalizedPaymentMethod)) {
@@ -479,8 +475,14 @@ const createOrder = async (req, res) => {
       if (!normalizedPlayerId || !normalizedZoneId) {
         return response.error(res, "Player ID va Zone ID kiriting");
       }
-    } else if (!['star_sell', 'redeem'].includes(product) && !normalizedUsername && !["hok", "genshin", "roblox", "bloodstrike", "deltaforce"].includes(product)) {
+    } else if (!['star_sell', 'redeem'].includes(product) && !normalizedUsername && !["freefire", "hok", "roblox", "bloodstrike", "deltaforce"].includes(product)) {
       return response.error(res, "Username kiriting");
+    }
+    if (product === "freefire" && !normalizedPlayerId) {
+      return response.error(res, "Free Fire Player ID kiriting");
+    }
+    if (product === "freefire" && !/^\d{5,15}$/.test(normalizedPlayerId)) {
+      return response.error(res, "Free Fire Player ID noto'g'ri");
     }
     if (product === "hok" && !normalizedPlayerId) {
       return response.error(res, "Honor of Kings Player ID kiriting");
@@ -494,26 +496,6 @@ const createOrder = async (req, res) => {
           return response.error(res, "Honor of Kings profil topilmadi");
         }
         return response.error(res, "Honor of Kings profilini tekshirib bo‘lmadi");
-      }
-    }
-    if (product === "genshin" && !normalizedPlayerId) {
-      return response.error(res, "Genshin Impact UID kiriting");
-    }
-    if (product === "genshin") {
-      if (!/^\d{6,12}$/.test(normalizedPlayerId)) {
-        return response.error(res, "Genshin Impact UID noto‘g‘ri");
-      }
-      if (!GENSHIN_SERVERS.has(normalizedZoneId)) {
-        return response.error(res, "Genshin Impact serverini tanlang");
-      }
-      try {
-        await verifyVolseverGenshinPlayer(normalizedPlayerId);
-      } catch (error) {
-        const status = Number(error?.response?.status || 0);
-        if ([400, 404, 422].includes(status) || error?.code === "PLAYER_NOT_FOUND") {
-          return response.error(res, "Genshin Impact profil topilmadi");
-        }
-        return response.error(res, "Genshin Impact profilini tekshirib bo‘lmadi");
       }
     }
     if (product === "bloodstrike" && !normalizedPlayerId) {
@@ -611,8 +593,8 @@ const createOrder = async (req, res) => {
       if (product === "hok" && isGwHokAutobuyEnabled() && !isGwHokPlanReady(plan)) {
         return response.error(res, "Tanlangan Honor of Kings paketi hozir mavjud emas");
       }
-      if (product === "genshin" && isGwGenshinAutobuyEnabled() && !isGwGenshinPlanReady(plan)) {
-        return response.error(res, "Tanlangan Genshin Impact paketi hozir mavjud emas");
+      if (product === "freefire" && isGwFreeFireAutobuyEnabled() && !isGwFreeFirePlanReady(plan)) {
+        return response.error(res, "Tanlangan Free Fire paketi hozir mavjud emas");
       }
       if (product === "roblox" && isGwRobloxAutobuyEnabled() && !isGwRobloxPlanReady(plan)) {
         return response.error(res, "Tanlangan Roblox paketi hozir mavjud emas");
@@ -739,8 +721,8 @@ const createOrder = async (req, res) => {
         ? `Player ID: ${normalizedPlayerId} | Zone ID: ${normalizedZoneId}`
         : product === "hok"
         ? `Player ID: ${normalizedPlayerId}`
-        : product === "genshin"
-        ? `UID: ${normalizedPlayerId} | Server: ${normalizedZoneId}`
+        : product === "freefire"
+        ? `Player ID: ${normalizedPlayerId}`
         : product === "roblox"
         ? "Roblox giftcard"
         : product === "bloodstrike"
@@ -761,7 +743,7 @@ const createOrder = async (req, res) => {
           ? `${normalizedPlayerId}:${normalizedZoneId}`
           : product === "hok"
           ? normalizedPlayerId
-          : product === "genshin"
+          : product === "freefire"
           ? normalizedPlayerId
           : product === "roblox"
           ? "ROBLOX_GIFTCARD"
@@ -818,7 +800,7 @@ const createOrder = async (req, res) => {
         !(product === "uc" && isGwPubgAutobuyEnabled()) &&
         !(product === "mlbb" && isGwMlbbAutobuyEnabled())
         && !(product === "hok" && isGwHokAutobuyEnabled())
-        && !(product === "genshin" && isGwGenshinAutobuyEnabled())
+        && !(product === "freefire" && isGwFreeFireAutobuyEnabled())
         && !(product === "roblox" && isGwRobloxAutobuyEnabled())
         && !(product === "bloodstrike" && isGwBloodStrikeAutobuyEnabled())
         && !(product === "deltaforce" && isGwDeltaForceAutobuyEnabled())
@@ -866,8 +848,8 @@ const createOrder = async (req, res) => {
       if (product === "hok" && isGwHokAutobuyEnabled()) {
         await autoFulfillGwHok(order);
       }
-      if (product === "genshin" && isGwGenshinAutobuyEnabled()) {
-        await autoFulfillGwGenshin(order);
+      if (product === "freefire" && isGwFreeFireAutobuyEnabled()) {
+        await autoFulfillGwFreeFire(order);
       }
       if (product === "roblox" && isGwRobloxAutobuyEnabled()) {
         await autoFulfillGwRoblox(order);
@@ -986,7 +968,7 @@ function buildSearchFilter(rawSearch) {
   return { $or: conditions };
 }
 
-const SALES_HISTORY_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb", "hok", "genshin", "roblox", "bloodstrike", "deltaforce", "balance"];
+const SALES_HISTORY_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb", "hok", "roblox", "bloodstrike", "deltaforce", "balance"];
 
 function buildHistoryFilter(scope, product = "") {
   if (scope === "sales") {
@@ -1011,7 +993,7 @@ function buildHistoryFilter(scope, product = "") {
 
   if (scope === "uc_paid") {
     return {
-      product: { $in: ["uc", "freefire", "mlbb", "hok", "genshin", "roblox", "bloodstrike", "deltaforce"] },
+      product: { $in: ["uc", "freefire", "mlbb", "hok", "roblox", "bloodstrike", "deltaforce"] },
       status: "paid_auto_processed",
     };
   }

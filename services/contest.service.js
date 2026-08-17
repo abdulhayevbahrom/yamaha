@@ -5,7 +5,7 @@ const UserGift = require("../model/user-gift.model");
 const UserNft = require("../model/user-nft.model");
 const User = require("../model/user.model");
 
-const CONTEST_ORDER_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb", "hok", "genshin", "roblox", "bloodstrike", "deltaforce"];
+const CONTEST_ORDER_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb", "hok", "roblox", "bloodstrike", "deltaforce"];
 const CONTEST_EXTRA_PRODUCTS = ["gift", "nft"];
 const CONTEST_ELIGIBLE_PRODUCTS = [...CONTEST_ORDER_PRODUCTS, ...CONTEST_EXTRA_PRODUCTS];
 const SUCCESS_STATUSES = ["paid_auto_processed", "completed"];

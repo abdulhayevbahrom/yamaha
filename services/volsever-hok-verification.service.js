@@ -3,7 +3,6 @@ const https = require("node:https");
 
 const ENDPOINTS = {
   hok: "https://gate.volsever.com/proxy/api/game/honor-of-kings",
-  genshin: "https://gate.volsever.com/proxy/api/game/genshin-impact",
   bloodstrike: "https://gate.volsever.com/proxy/api/game/blood-strike",
   deltaforce: "https://gate.volsever.com/proxy/api/game/delta-force",
 };
@@ -64,15 +63,6 @@ async function verifyVolseverHokPlayer(playerId) {
   });
 }
 
-async function verifyVolseverGenshinPlayer(playerId) {
-  return verifyVolseverGamePlayer({
-    gameKey: "genshin",
-    playerId,
-    label: "Genshin Impact",
-    idPattern: /^\d{6,12}$/,
-  });
-}
-
 async function verifyVolseverBloodStrikePlayer(playerId) {
   return verifyVolseverGamePlayer({
     gameKey: "bloodstrike",
@@ -93,7 +83,6 @@ async function verifyVolseverDeltaForcePlayer(playerId) {
 
 module.exports = {
   verifyVolseverHokPlayer,
-  verifyVolseverGenshinPlayer,
   verifyVolseverBloodStrikePlayer,
   verifyVolseverDeltaForcePlayer,
   normalizeResult,

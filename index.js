@@ -164,9 +164,9 @@ async function startServer() {
   await resumeGwMlbbPolling().catch((error) => {
     console.error("GW MLBB polling resume error:", error?.message || error);
   });
-  const { resumeGwGenshinPolling } = require("./services/gw-genshin-fulfillment.service");
-  await resumeGwGenshinPolling().catch((error) => {
-    console.error("GW Genshin polling resume error:", error?.message || error);
+  const { resumeGwFreeFirePolling } = require("./services/gw-freefire-fulfillment.service");
+  await resumeGwFreeFirePolling().catch((error) => {
+    console.error("GW Free Fire polling resume error:", error?.message || error);
   });
   const { resumeGwRobloxPolling } = require("./services/gw-roblox-fulfillment.service");
   await resumeGwRobloxPolling().catch((error) => {
@@ -225,17 +225,17 @@ async function startServer() {
     hokSyncInterval.unref();
   }
 
-  if (["1", "true", "yes", "on"].includes(String(process.env.GW_GENSHIN_AUTOBUY_ENABLED || "").trim().toLowerCase())) {
-    const { syncGwGenshinCatalog } = require("./services/gw-catalog.service");
-    const syncGenshinCatalog = () => syncGwGenshinCatalog().catch((error) => {
-      console.error("GW Genshin catalog sync error:", error?.message || error);
+  if (["1", "true", "yes", "on"].includes(String(process.env.GW_FREEFIRE_AUTOBUY_ENABLED || "").trim().toLowerCase())) {
+    const { syncGwFreeFireCatalog } = require("./services/gw-catalog.service");
+    const syncFreeFireCatalog = () => syncGwFreeFireCatalog().catch((error) => {
+      console.error("GW Free Fire catalog sync error:", error?.message || error);
     });
-    void syncGenshinCatalog();
-    const genshinSyncInterval = setInterval(
-      syncGenshinCatalog,
-      Math.max(60_000, Number(process.env.GW_GENSHIN_CATALOG_SYNC_INTERVAL_MS || 5 * 60_000)),
+    void syncFreeFireCatalog();
+    const freeFireSyncInterval = setInterval(
+      syncFreeFireCatalog,
+      Math.max(60_000, Number(process.env.GW_FREEFIRE_CATALOG_SYNC_INTERVAL_MS || 5 * 60_000)),
     );
-    genshinSyncInterval.unref();
+    freeFireSyncInterval.unref();
   }
 
   if (["1", "true", "yes", "on"].includes(String(process.env.GW_ROBLOX_AUTOBUY_ENABLED || "").trim().toLowerCase())) {

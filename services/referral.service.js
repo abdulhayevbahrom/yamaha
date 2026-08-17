@@ -18,7 +18,6 @@ const ELIGIBLE_REFERRAL_PRODUCTS = new Set([
   "freefire",
   "mlbb",
   "hok",
-  "genshin",
   "roblox",
   "bloodstrike",
   "deltaforce",

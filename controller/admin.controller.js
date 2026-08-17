@@ -58,9 +58,9 @@ const {
   listReferralPromoCodes: listReferralPromoCodesService,
   markReferralPromoCodeUsed: markReferralPromoCodeUsedService,
 } = require("../services/referral-promo-code.service");
-const { syncGwPubgCatalog, syncGwMlbbCatalog, syncGwHokCatalog, syncGwGenshinCatalog, syncGwRobloxCatalog, syncGwBloodStrikeCatalog, syncGwDeltaForceCatalog } = require("../services/gw-catalog.service");
+const { syncGwPubgCatalog, syncGwMlbbCatalog, syncGwHokCatalog, syncGwFreeFireCatalog, syncGwRobloxCatalog, syncGwBloodStrikeCatalog, syncGwDeltaForceCatalog } = require("../services/gw-catalog.service");
 
-const PURCHASE_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb", "hok", "genshin", "roblox", "bloodstrike", "deltaforce"];
+const PURCHASE_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb", "hok", "roblox", "bloodstrike", "deltaforce"];
 const PAID_STATUSES = ["paid_auto_processed", "completed"];
 
 function normalizeString(value) {
@@ -780,10 +780,10 @@ const syncGwHokPlans = async (_, res) => {
   }
 };
 
-const syncGwGenshinPlans = async (_, res) => {
+const syncGwFreeFirePlans = async (_, res) => {
   try {
-    const plans = await syncGwGenshinCatalog();
-    return response.success(res, "GW Genshin Impact katalogi yangilandi", plans);
+    const plans = await syncGwFreeFireCatalog();
+    return response.success(res, "GW Free Fire katalogi yangilandi", plans);
   } catch (error) {
     const status = Number(error?.response?.status || 0);
     const payload = error?.response?.data;
@@ -795,7 +795,7 @@ const syncGwGenshinPlans = async (_, res) => {
       IP_NOT_ALLOWED: "Serverning chiqish IPv4 manzili GW allowlistda yo'q",
       RATE_LIMIT: "GW API so'rov limiti oshdi; birozdan keyin qayta urinib ko'ring",
     };
-    return response.error(res, knownMessages[code] || String(error?.message || "GW Genshin katalogini olib bo'lmadi").slice(0, 300), {
+    return response.error(res, knownMessages[code] || String(error?.message || "GW Free Fire katalogini olib bo'lmadi").slice(0, 300), {
       code: code || "GW_CATALOG_SYNC_FAILED",
       providerStatus: status || null,
     });
@@ -2448,7 +2448,7 @@ const getActiveUsers = async (req, res) => {
     }
 
     const rows = await Order.find({
-      product: { $in: ["star", "premium", "uc", "freefire", "mlbb", "hok", "genshin", "roblox", "bloodstrike", "deltaforce"] },
+      product: { $in: ["star", "premium", "uc", "freefire", "mlbb", "hok", "roblox", "bloodstrike", "deltaforce"] },
       status: { $in: ["paid_auto_processed", "completed"] },
       $or: [{ paidAt: { $gte: start } }, { createdAt: { $gte: start } }],
       tgUserId: { $exists: true, $ne: "" },
@@ -2566,7 +2566,7 @@ module.exports = {
   syncGwPubgPlans,
   syncGwMlbbPlans,
   syncGwHokPlans,
-  syncGwGenshinPlans,
+  syncGwFreeFirePlans,
   syncGwRobloxPlans,
   syncGwBloodStrikePlans,
   syncGwDeltaForcePlans,

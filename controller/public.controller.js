@@ -25,7 +25,6 @@ const { getTelegramUserInfo } = require("../services/fragment-api.service");
 const { verifyPubgPlayer } = require("../services/gw-api.service");
 const {
   verifyVolseverHokPlayer,
-  verifyVolseverGenshinPlayer,
   verifyVolseverBloodStrikePlayer,
   verifyVolseverDeltaForcePlayer,
 } = require("../services/volsever-hok-verification.service");
@@ -40,7 +39,6 @@ const categoryNames = {
   freefire: "Free Fire Diamond",
   mlbb: "MLBB Diamond",
   hok: "Honor of Kings Tokens",
-  genshin: "Genshin Impact",
   roblox: "Roblox",
   bloodstrike: "Blood Strike",
   deltaforce: "Delta Force",
@@ -50,7 +48,7 @@ const LOOKUP_CACHE_TTL_MS = 5 * 60 * 1000;
 const LOOKUP_CACHE_LIMIT = 500;
 const profileLookupCache = new Map();
 const profileLookupInFlight = new Map();
-const TOP_SALES_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb", "hok", "genshin", "roblox", "bloodstrike", "deltaforce"];
+const TOP_SALES_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb", "hok", "roblox", "bloodstrike", "deltaforce"];
 const TOP_SALES_PERIODS = new Set(["today", "week", "month"]);
 
 function isGwPubgAutobuyEnabled() {
@@ -71,11 +69,17 @@ function isGwHokAutobuyEnabled() {
   );
 }
 
+function isGwFreeFireAutobuyEnabled() {
+  return ["1", "true", "yes", "on"].includes(
+    String(process.env.GW_FREEFIRE_AUTOBUY_ENABLED || "").trim().toLowerCase(),
+  );
+}
+
 function getGwCatalogFreshnessMs(category) {
   const maxAgeByCategory = {
     mlbb: process.env.GW_MLBB_CATALOG_MAX_AGE_MS,
     hok: process.env.GW_HOK_CATALOG_MAX_AGE_MS,
-    genshin: process.env.GW_GENSHIN_CATALOG_MAX_AGE_MS,
+    freefire: process.env.GW_FREEFIRE_CATALOG_MAX_AGE_MS,
     roblox: process.env.GW_ROBLOX_CATALOG_MAX_AGE_MS,
     bloodstrike: process.env.GW_BLOODSTRIKE_CATALOG_MAX_AGE_MS,
     deltaforce: process.env.GW_DELTAFORCE_CATALOG_MAX_AGE_MS,
@@ -84,7 +88,7 @@ function getGwCatalogFreshnessMs(category) {
   const intervalByCategory = {
     mlbb: process.env.GW_MLBB_CATALOG_SYNC_INTERVAL_MS,
     hok: process.env.GW_HOK_CATALOG_SYNC_INTERVAL_MS,
-    genshin: process.env.GW_GENSHIN_CATALOG_SYNC_INTERVAL_MS,
+    freefire: process.env.GW_FREEFIRE_CATALOG_SYNC_INTERVAL_MS,
     roblox: process.env.GW_ROBLOX_CATALOG_SYNC_INTERVAL_MS,
     bloodstrike: process.env.GW_BLOODSTRIKE_CATALOG_SYNC_INTERVAL_MS,
     deltaforce: process.env.GW_DELTAFORCE_CATALOG_SYNC_INTERVAL_MS,
@@ -101,15 +105,15 @@ function isGwPlanFresh(plan) {
       ? "mlbb"
       : plan?.category === "hok"
         ? "hok"
-        : plan?.category === "genshin"
-          ? "genshin"
+        : plan?.category === "freefire"
+          ? "freefire"
           : plan?.category === "roblox"
             ? "roblox"
             : plan?.category === "bloodstrike"
               ? "bloodstrike"
               : plan?.category === "deltaforce"
                 ? "deltaforce"
-          : "pubg";
+                : "pubg";
   const maxAge = getGwCatalogFreshnessMs(category);
   const syncedAt = new Date(plan?.providerSyncedAt || 0).getTime();
   return syncedAt > 0 && Date.now() - syncedAt <= maxAge;
@@ -207,7 +211,6 @@ function mapCatalog(plans) {
     freefire: { name: categoryNames.freefire, plans: [] },
     mlbb: { name: categoryNames.mlbb, plans: [] },
     hok: { name: categoryNames.hok, plans: [] },
-    genshin: { name: categoryNames.genshin, plans: [] },
     roblox: { name: categoryNames.roblox, plans: [] },
     bloodstrike: { name: categoryNames.bloodstrike, plans: [] },
     deltaforce: { name: categoryNames.deltaforce, plans: [] },
@@ -241,7 +244,7 @@ function mapCatalog(plans) {
             ? plan.provider === "gw" && Boolean(plan.providerAvailable) && isGwPlanFresh(plan)
           : plan.category === "hok" && isGwHokAutobuyEnabled()
             ? plan.provider === "gw" && Boolean(plan.providerAvailable) && isGwPlanFresh(plan)
-          : plan.category === "genshin" && ["1", "true", "yes", "on"].includes(String(process.env.GW_GENSHIN_AUTOBUY_ENABLED || "").trim().toLowerCase())
+          : plan.category === "freefire" && isGwFreeFireAutobuyEnabled()
             ? plan.provider === "gw" && Boolean(plan.providerAvailable) && isGwPlanFresh(plan)
           : plan.category === "roblox" && ["1", "true", "yes", "on"].includes(String(process.env.GW_ROBLOX_AUTOBUY_ENABLED || "").trim().toLowerCase())
             ? plan.provider === "gw" && Boolean(plan.providerAvailable) && isGwPlanFresh(plan)
@@ -655,28 +658,6 @@ const checkHokPlayer = async (req, res) => {
   }
 };
 
-const checkGenshinPlayer = async (req, res) => {
-  const playerId = String(req.body?.playerId || "").trim();
-  if (!/^\d{6,12}$/.test(playerId)) return response.error(res, "Genshin Impact UID noto‘g‘ri");
-  try {
-    const result = await verifyVolseverGenshinPlayer(playerId);
-    return response.success(res, "Genshin Impact profil topildi", {
-      playerId: result.playerId,
-      playerName: result.playerName,
-      game: result.game,
-    });
-  } catch (error) {
-    const status = Number(error?.response?.status || 0);
-    if ([400, 404, 422].includes(status) || error?.code === "PLAYER_NOT_FOUND") {
-      return response.error(res, "Genshin Impact profil topilmadi");
-    }
-    if (status === 401 || status === 403) {
-      return response.serverError(res, "Genshin Impact tekshiruv API kaliti qabul qilinmadi");
-    }
-    return response.serverError(res, "Genshin Impact profil tekshirishda xatolik", error.message);
-  }
-};
-
 const checkBloodStrikePlayer = async (req, res) => {
   const playerId = String(req.body?.playerId || "").trim();
   if (!/^\d{4,32}$/.test(playerId)) return response.error(res, "Blood Strike Player ID noto'g'ri");
@@ -734,7 +715,6 @@ module.exports = {
   checkMlbbRole,
   checkPubgPlayer,
   checkHokPlayer,
-  checkGenshinPlayer,
   checkBloodStrikePlayer,
   checkDeltaForcePlayer,
   getTopSalePurchaseAmount,

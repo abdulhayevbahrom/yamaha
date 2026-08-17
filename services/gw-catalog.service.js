@@ -1,11 +1,11 @@
 const Plan = require("../model/plan.model");
 const crypto = require("node:crypto");
-const { getPubgProducts, getPubgRedeemProducts, getMlbbProducts, getHokProducts, getGenshinProducts, getRobloxProducts, getBloodStrikeProducts, getDeltaForceProducts } = require("./gw-api.service");
+const { getPubgProducts, getPubgRedeemProducts, getMlbbProducts, getHokProducts, getFreeFireProducts, getRobloxProducts, getBloodStrikeProducts, getDeltaForceProducts } = require("./gw-api.service");
 
 let syncPromise = null;
 let mlbbSyncPromise = null;
 let hokSyncPromise = null;
-let genshinSyncPromise = null;
+let freeFireSyncPromise = null;
 let robloxSyncPromise = null;
 let bloodStrikeSyncPromise = null;
 let deltaForceSyncPromise = null;
@@ -295,18 +295,18 @@ async function performHokSync() {
   return Plan.find({ category: "hok" }).sort({ amount: 1 }).lean();
 }
 
-async function syncGwGenshinCatalog() {
-  if (genshinSyncPromise) return genshinSyncPromise;
-  genshinSyncPromise = performSimpleGameSync({
-    category: "genshin",
-    labelFallback: "Genesis Crystals",
-    emptyMessage: "GW Genshin Impact katalogi bo'sh qaytdi",
-    fetchProducts: getGenshinProducts,
+async function syncGwFreeFireCatalog() {
+  if (freeFireSyncPromise) return freeFireSyncPromise;
+  freeFireSyncPromise = performSimpleGameSync({
+    category: "freefire",
+    labelFallback: "Diamond",
+    emptyMessage: "GW Free Fire katalogi bo'sh qaytdi",
+    fetchProducts: getFreeFireProducts,
   });
   try {
-    return await genshinSyncPromise;
+    return await freeFireSyncPromise;
   } finally {
-    genshinSyncPromise = null;
+    freeFireSyncPromise = null;
   }
 }
 
@@ -396,4 +396,4 @@ async function performSimpleGameSync({ category, labelFallback, emptyMessage, fe
   return Plan.find({ category }).sort({ amount: 1, label: 1 }).lean();
 }
 
-module.exports = { syncGwPubgCatalog, syncGwMlbbCatalog, syncGwHokCatalog, syncGwGenshinCatalog, syncGwRobloxCatalog, syncGwBloodStrikeCatalog, syncGwDeltaForceCatalog };
+module.exports = { syncGwPubgCatalog, syncGwMlbbCatalog, syncGwHokCatalog, syncGwFreeFireCatalog, syncGwRobloxCatalog, syncGwBloodStrikeCatalog, syncGwDeltaForceCatalog };

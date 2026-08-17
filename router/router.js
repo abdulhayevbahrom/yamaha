@@ -69,14 +69,6 @@ router.post(
   publicController.checkHokPlayer,
 );
 router.post(
-  "/genshin/check-player",
-  telegramAuthMiddleware,
-  freshTelegramWriteAuth,
-  requireRegisteredUser,
-  userWriteRateLimit,
-  publicController.checkGenshinPlayer,
-);
-router.post(
   "/bloodstrike/check-player",
   telegramAuthMiddleware,
   freshTelegramWriteAuth,
@@ -293,9 +285,9 @@ router.post(
   adminController.syncGwHokPlans,
 );
 router.post(
-  "/admin/providers/gw/genshin/sync",
+  "/admin/providers/gw/freefire/sync",
   authMiddleware,
-  adminController.syncGwGenshinPlans,
+  adminController.syncGwFreeFirePlans,
 );
 router.post(
   "/admin/providers/gw/roblox/sync",

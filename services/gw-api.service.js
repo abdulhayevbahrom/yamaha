@@ -94,23 +94,6 @@ function compactGwRow(row) {
   };
 }
 
-function logGwSnapshot({ source, endpoint, payload, rows }) {
-  const safeRows = (Array.isArray(rows) ? rows : [])
-    .slice(0, 20)
-    .map(compactGwRow);
-  const keys =
-    payload && typeof payload === "object" && !Array.isArray(payload)
-      ? Object.keys(payload).slice(0, 20)
-      : [];
-  console.log("[GW_Genshin_Debug]", JSON.stringify({
-    source,
-    endpoint,
-    topLevelKeys: keys,
-    count: Array.isArray(rows) ? rows.length : 0,
-    sample: safeRows,
-  }));
-}
-
 function createClientForBaseUrl(baseURL) {
   const apiKey = normalize(process.env.GW_API_KEY);
   if (!apiKey) throw new Error("GW_API_KEY topilmadi");
@@ -129,32 +112,6 @@ function createClientForBaseUrl(baseURL) {
 async function fetchProductsFromClient(client) {
   const response = await client.get("/products");
   return unwrapProducts(response.data);
-}
-
-async function fetchGwEndpointSnapshot(baseUrl, endpoint) {
-  const client = createClientForBaseUrl(baseUrl);
-  const response = await client.get(endpoint);
-  const payload = response.data;
-  const rows = endpoint === "/services" ? unwrapServices(payload) : unwrapProducts(payload);
-  return { payload, rows };
-}
-
-async function logGwGenshinDebugSnapshots() {
-  const config = getConfig();
-  for (const endpoint of ["/services", "/products"]) {
-    try {
-      const { payload, rows } = await fetchGwEndpointSnapshot(config.baseURL, endpoint);
-      logGwSnapshot({ source: config.baseURL, endpoint, payload, rows });
-    } catch (error) {
-      const status = Number(error?.response?.status || 0);
-      console.error("[GW_Genshin_Debug]", JSON.stringify({
-        source: config.baseURL,
-        endpoint,
-        error: status || error?.code || error?.message || "failed",
-        message: String(error?.response?.data?.message || error?.response?.data?.error || error?.message || "").slice(0, 500),
-      }));
-    }
-  }
 }
 
 async function fetchProductsWithFallback() {
@@ -215,7 +172,7 @@ function isHokTopup(item) {
   ) && !text.includes("giftcard") && !text.includes("gamekey");
 }
 
-function isGenshinTopup(item) {
+function isFreeFireTopup(item) {
   const providerProductId = normalize(item?.id || item?.pid || item?.PID).toUpperCase();
   const text = compactTextFields(item, [
     "slug",
@@ -244,17 +201,12 @@ function isGenshinTopup(item) {
     text.includes("code")
   );
   return (
-    /^GWG\d/.test(providerProductId) ||
-    providerProductId.startsWith("GWGI") ||
-    providerProductId.startsWith("GWGEN") ||
-    providerProductId.startsWith("GIGC") ||
-    providerProductId.startsWith("GI") ||
-    text.includes("genshin") ||
-    text.includes("hoyoverse") ||
-    text.includes("mihoyo") ||
-    text.includes("genesis crystal") ||
-    text.includes("welkin") ||
-    text.includes("chronal nexus")
+    providerProductId.startsWith("GWFF") ||
+    providerProductId.startsWith("GWFREEFIRE") ||
+    providerProductId.startsWith("FF") ||
+    text.includes("freefire") ||
+    text.includes("free fire") ||
+    text.includes("garena free fire")
   ) && !isExcluded;
 }
 
@@ -500,11 +452,10 @@ async function getHokProducts() {
     .filter((item) => item.providerProductId && item.priceUsd > 0);
 }
 
-async function getGenshinProducts() {
-  await logGwGenshinDebugSnapshots();
+async function getFreeFireProducts() {
   const { rows, baseUrl } = await fetchProductsWithFallback();
   const products = rows
-    .filter(isGenshinTopup)
+    .filter(isFreeFireTopup)
     .map(normalizeProduct)
     .filter((item) => item.providerProductId && item.priceUsd > 0);
   if (products.length) return products;
@@ -516,9 +467,9 @@ async function getGenshinProducts() {
     .slice(0, 12)
     .join(", ");
   const error = new Error(
-    `GW Genshin Impact katalogi topilmadi (source=${baseUrl}, total=${rows.length}, sample=${sample || "-"})`,
+    `GW Free Fire katalogi topilmadi (source=${baseUrl}, total=${rows.length}, sample=${sample || "-"})`,
   );
-  error.code = "GW_GENSHIN_PRODUCTS_EMPTY";
+  error.code = "GW_FREEFIRE_PRODUCTS_EMPTY";
   throw error;
 }
 
@@ -648,7 +599,7 @@ module.exports = {
   getPubgRedeemProducts,
   getMlbbProducts,
   getHokProducts,
-  getGenshinProducts,
+  getFreeFireProducts,
   getRobloxProducts,
   getBloodStrikeProducts,
   getDeltaForceProducts,
@@ -663,7 +614,7 @@ module.exports = {
   isPubgRedeem,
   isMlbbTopup,
   isHokTopup,
-  isGenshinTopup,
+  isFreeFireTopup,
   isRobloxTopup,
   isBloodStrikeTopup,
   isDeltaForceTopup,

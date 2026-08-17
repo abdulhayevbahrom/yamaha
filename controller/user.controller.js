@@ -50,7 +50,7 @@ const {
 const SUPPORTED_SCHEMES = new Set(["HUMOCARD", "HUMO", "UZCARD", "UNIONPAY", "UNIYONPAY"]);
 
 const PENDING_TTL_MS = 10 * 60 * 1000;
-const PURCHASE_ORDER_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb", "hok", "genshin", "roblox", "bloodstrike", "deltaforce"];
+const PURCHASE_ORDER_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb", "hok", "roblox", "bloodstrike", "deltaforce"];
 const PAID_ORDER_STATUSES = ["paid_auto_processed", "completed"];
 
 function normalizeString(value) {
@@ -408,7 +408,7 @@ async function getMyReferrals(req, res) {
         {
           $match: {
             tgUserId: { $in: referredUserIds },
-            product: { $in: ["star", "premium", "uc", "freefire", "mlbb", "hok", "genshin"] },
+            product: { $in: ["star", "premium", "uc", "freefire", "mlbb", "hok"] },
             status: { $in: ["paid_auto_processed", "completed"] },
             paidAmount: { $gt: 0 },
           },

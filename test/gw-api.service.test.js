@@ -6,7 +6,7 @@ const {
   isPubgRedeem,
   isMlbbTopup,
   isHokTopup,
-  isGenshinTopup,
+  isFreeFireTopup,
   isRobloxTopup,
   isBloodStrikeTopup,
   isDeltaForceTopup,
@@ -62,15 +62,12 @@ test("GW HOK products are assigned to their storefront region", () => {
   assert.equal(extractHokRegion({ serviceName: "Honor of Kings 80 Tokens" }), "global");
 });
 
-test("GW catalog recognizes Genshin Impact products", () => {
-  assert.equal(isGenshinTopup({ id: "GWG980", serviceName: "980 Genesis Crystals" }), true);
-  assert.equal(isGenshinTopup({ id: "GWGI60", gameName: "Genshin Impact", serviceName: "60 Genesis Crystals" }), true);
-  assert.equal(isGenshinTopup({ serviceName: "HoYoverse Genshin Top Up" }), true);
-  assert.equal(isGenshinTopup({ product: { name: "Blessing of the Welkin Moon" }, service: { name: "Genshin Impact" } }), true);
-  assert.equal(isGenshinTopup({ id: "GI980", service: { name: "980 Genesis Crystals" } }), true);
-  assert.equal(isGenshinTopup({ serviceName: "300 Chronal Nexus" }), true);
-  assert.equal(isGenshinTopup({ id: "GWGP50", serviceName: "Google Play 50 Gift Card" }), false);
-  assert.equal(isGenshinTopup({ category: "giftcard", serviceName: "Genshin Impact Giftcard" }), false);
+test("GW catalog recognizes Free Fire products", () => {
+  assert.equal(isFreeFireTopup({ id: "GWFF100", gameName: "Free Fire", serviceName: "100 Diamonds" }), true);
+  assert.equal(isFreeFireTopup({ id: "FF310", service: { name: "Free Fire 310 Diamonds" } }), true);
+  assert.equal(isFreeFireTopup({ product: { name: "Garena Free Fire 520 Diamonds" } }), true);
+  assert.equal(isFreeFireTopup({ category: "giftcard", serviceName: "Free Fire Gift Card" }), false);
+  assert.equal(isFreeFireTopup({ serviceName: "Free Fire redeem code" }), false);
 });
 
 test("GW catalog recognizes Roblox and Robux giftcard products", () => {

@@ -12,7 +12,6 @@ const productLabels = {
   freefire: "Free Fire Diamond",
   mlbb: "MLBB Diamond",
   hok: "Honor of Kings Tokens",
-  genshin: "Genshin Impact",
   roblox: "Roblox",
   bloodstrike: "Blood Strike",
   deltaforce: "Delta Force",

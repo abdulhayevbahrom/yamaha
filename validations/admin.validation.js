@@ -19,10 +19,10 @@ function normalizeCardNumber(value) {
   return digits;
 }
 
-const validCategories = ["star", "premium", "uc", "redeem", "freefire", "mlbb", "hok", "genshin", "roblox", "bloodstrike", "deltaforce"];
+const validCategories = ["star", "premium", "uc", "redeem", "freefire", "mlbb", "hok", "roblox", "bloodstrike", "deltaforce"];
 const validPaymentCardTypes = ["purchase", "balance_topup"];
 const validContestModes = ["now", "scheduled"];
-const validContestProducts = ["star", "premium", "uc", "freefire", "mlbb", "hok", "genshin", "roblox", "bloodstrike", "deltaforce", "gift", "nft"];
+const validContestProducts = ["star", "premium", "uc", "freefire", "mlbb", "hok", "roblox", "bloodstrike", "deltaforce", "gift", "nft"];
 const validHeroSlideTargets = [
   "",
   "stars",
@@ -31,7 +31,6 @@ const validHeroSlideTargets = [
   "freefire",
   "mlbb",
   "hok",
-  "genshin",
   "roblox",
   "bloodstrike",
   "deltaforce",
