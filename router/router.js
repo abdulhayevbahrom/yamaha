@@ -69,6 +69,14 @@ router.post(
   publicController.checkHokPlayer,
 );
 router.post(
+  "/freefire/check-player",
+  telegramAuthMiddleware,
+  freshTelegramWriteAuth,
+  requireRegisteredUser,
+  userWriteRateLimit,
+  publicController.checkFreeFirePlayer,
+);
+router.post(
   "/bloodstrike/check-player",
   telegramAuthMiddleware,
   freshTelegramWriteAuth,

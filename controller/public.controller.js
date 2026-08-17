@@ -25,6 +25,7 @@ const { getTelegramUserInfo } = require("../services/fragment-api.service");
 const { verifyPubgPlayer } = require("../services/gw-api.service");
 const {
   verifyVolseverHokPlayer,
+  verifyVolseverFreeFirePlayer,
   verifyVolseverBloodStrikePlayer,
   verifyVolseverDeltaForcePlayer,
 } = require("../services/volsever-hok-verification.service");
@@ -658,6 +659,28 @@ const checkHokPlayer = async (req, res) => {
   }
 };
 
+const checkFreeFirePlayer = async (req, res) => {
+  const playerId = String(req.body?.playerId || "").trim();
+  if (!/^\d{5,15}$/.test(playerId)) return response.error(res, "Free Fire Player ID noto'g'ri");
+  try {
+    const result = await verifyVolseverFreeFirePlayer(playerId);
+    return response.success(res, "Free Fire profil topildi", {
+      playerId: result.playerId,
+      playerName: result.playerName,
+      game: result.game,
+    });
+  } catch (error) {
+    const status = Number(error?.response?.status || 0);
+    if ([400, 404, 422].includes(status) || error?.code === "PLAYER_NOT_FOUND") {
+      return response.error(res, "Free Fire profil topilmadi");
+    }
+    if (status === 401 || status === 403) {
+      return response.serverError(res, "Free Fire tekshiruv API kaliti qabul qilinmadi");
+    }
+    return response.serverError(res, "Free Fire profil tekshirishda xatolik", error.message);
+  }
+};
+
 const checkBloodStrikePlayer = async (req, res) => {
   const playerId = String(req.body?.playerId || "").trim();
   if (!/^\d{4,32}$/.test(playerId)) return response.error(res, "Blood Strike Player ID noto'g'ri");
@@ -715,6 +738,7 @@ module.exports = {
   checkMlbbRole,
   checkPubgPlayer,
   checkHokPlayer,
+  checkFreeFirePlayer,
   checkBloodStrikePlayer,
   checkDeltaForcePlayer,
   getTopSalePurchaseAmount,

@@ -3,6 +3,7 @@ const https = require("node:https");
 
 const ENDPOINTS = {
   hok: "https://gate.volsever.com/proxy/api/game/honor-of-kings",
+  freefire: "https://gate.volsever.com/proxy/api/game/free-fire",
   bloodstrike: "https://gate.volsever.com/proxy/api/game/blood-strike",
   deltaforce: "https://gate.volsever.com/proxy/api/game/delta-force",
 };
@@ -63,6 +64,15 @@ async function verifyVolseverHokPlayer(playerId) {
   });
 }
 
+async function verifyVolseverFreeFirePlayer(playerId) {
+  return verifyVolseverGamePlayer({
+    gameKey: "freefire",
+    playerId,
+    label: "Free Fire",
+    idPattern: /^\d{5,15}$/,
+  });
+}
+
 async function verifyVolseverBloodStrikePlayer(playerId) {
   return verifyVolseverGamePlayer({
     gameKey: "bloodstrike",
@@ -83,6 +93,7 @@ async function verifyVolseverDeltaForcePlayer(playerId) {
 
 module.exports = {
   verifyVolseverHokPlayer,
+  verifyVolseverFreeFirePlayer,
   verifyVolseverBloodStrikePlayer,
   verifyVolseverDeltaForcePlayer,
   normalizeResult,

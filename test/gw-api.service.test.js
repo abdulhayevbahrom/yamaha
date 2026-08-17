@@ -24,6 +24,7 @@ const { isGwHokPlanReady } = require("../services/gw-hok-fulfillment.service");
 const { getMlbbBonusTier, isMlbbBonusPlan, isBonusTierAvailable } = require("../services/gw-mlbb-verification.service");
 const {
   normalizeResult: normalizeVolseverHokResult,
+  verifyVolseverFreeFirePlayer,
   verifyVolseverBloodStrikePlayer,
   verifyVolseverDeltaForcePlayer,
 } = require("../services/volsever-hok-verification.service");
@@ -111,6 +112,13 @@ test("Volsever HOK response exposes the verified player", () => {
       game: "Honor of Kings", username: "Test Player", user_id: "89829050619124578",
     } },
   });
+});
+
+test("Volsever Free Fire validates numeric player ids", async () => {
+  await assert.rejects(
+    () => verifyVolseverFreeFirePlayer("abc"),
+    /Free Fire Player ID noto'g'ri/,
+  );
 });
 
 test("Volsever Blood Strike validates numeric player ids", async () => {

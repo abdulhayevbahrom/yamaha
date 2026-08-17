@@ -96,6 +96,7 @@ const {
 const { sanitizePublicOrder } = require("../utils/public-payload");
 const {
   verifyVolseverHokPlayer,
+  verifyVolseverFreeFirePlayer,
   verifyVolseverBloodStrikePlayer,
   verifyVolseverDeltaForcePlayer,
 } = require("../services/volsever-hok-verification.service");
@@ -483,6 +484,17 @@ const createOrder = async (req, res) => {
     }
     if (product === "freefire" && !/^\d{5,15}$/.test(normalizedPlayerId)) {
       return response.error(res, "Free Fire Player ID noto'g'ri");
+    }
+    if (product === "freefire") {
+      try {
+        await verifyVolseverFreeFirePlayer(normalizedPlayerId);
+      } catch (error) {
+        const status = Number(error?.response?.status || 0);
+        if ([400, 404, 422].includes(status) || error?.code === "PLAYER_NOT_FOUND") {
+          return response.error(res, "Free Fire profil topilmadi");
+        }
+        return response.error(res, "Free Fire profilini tekshirib bo'lmadi");
+      }
     }
     if (product === "hok" && !normalizedPlayerId) {
       return response.error(res, "Honor of Kings Player ID kiriting");
