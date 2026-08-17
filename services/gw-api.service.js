@@ -565,13 +565,19 @@ async function getBloodStrikeProducts() {
 }
 
 async function getDeltaForceProducts(options = {}) {
-  const rows = await fetchProductsWithFallback(options);
+  const { rows, baseUrl } = await fetchProductsWithFallback(options);
   const products = rows
     .filter(isDeltaForceTopup)
-    .map((item) => normalizeProduct(item, { type: "deltaforce", labelFallback: "Delta Force" }))
-    .filter((item) => item.providerProductId);
+    .map(normalizeProduct)
+    .filter((item) => item.providerProductId && item.priceUsd > 0);
   if (products.length) return products;
-  const sample = rows.slice(0, 8).map((item) => compactTextFields(item, ["id", "slug", "gameName", "serviceName", "name", "title"])).join(" | ");
+
+  const sample = rows
+    .slice(0, 30)
+    .map((item) => normalize(item?.id || item?.pid || item?.PID || item?.serviceName || item?.name))
+    .filter(Boolean)
+    .slice(0, 12)
+    .join(", ");
   const error = new Error(
     `GW Delta Force katalogi topilmadi (source=${baseUrl}, total=${rows.length}, sample=${sample || "-"})`,
   );
