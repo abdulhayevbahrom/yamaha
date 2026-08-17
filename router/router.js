@@ -76,6 +76,14 @@ router.post(
   userWriteRateLimit,
   publicController.checkGenshinPlayer,
 );
+router.post(
+  "/bloodstrike/check-player",
+  telegramAuthMiddleware,
+  freshTelegramWriteAuth,
+  requireRegisteredUser,
+  userWriteRateLimit,
+  publicController.checkBloodStrikePlayer,
+);
 router.post("/calculate-price", orderController.calculatePrice);
 router.post(
   "/orders",

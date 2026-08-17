@@ -92,6 +92,7 @@ const { sanitizePublicOrder } = require("../utils/public-payload");
 const {
   verifyVolseverHokPlayer,
   verifyVolseverGenshinPlayer,
+  verifyVolseverBloodStrikePlayer,
 } = require("../services/volsever-hok-verification.service");
 
 let sequence = 1;
@@ -512,6 +513,17 @@ const createOrder = async (req, res) => {
     }
     if (product === "bloodstrike" && !/^\d{4,32}$/.test(normalizedPlayerId)) {
       return response.error(res, "Blood Strike Player ID noto'g'ri");
+    }
+    if (product === "bloodstrike") {
+      try {
+        await verifyVolseverBloodStrikePlayer(normalizedPlayerId);
+      } catch (error) {
+        const status = Number(error?.response?.status || 0);
+        if ([400, 404, 422].includes(status) || error?.code === "PLAYER_NOT_FOUND") {
+          return response.error(res, "Blood Strike profil topilmadi");
+        }
+        return response.error(res, "Blood Strike profilini tekshirib bo'lmadi");
+      }
     }
     await expirePendingOrders();
     await syncSequence();

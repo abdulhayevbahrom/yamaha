@@ -26,6 +26,7 @@ const { verifyPubgPlayer } = require("../services/gw-api.service");
 const {
   verifyVolseverHokPlayer,
   verifyVolseverGenshinPlayer,
+  verifyVolseverBloodStrikePlayer,
 } = require("../services/volsever-hok-verification.service");
 const { verifyMlbbAccount } = require("../services/gw-mlbb-verification.service");
 // const { ensureDefaultPlans } = require("../services/plan.service");
@@ -667,6 +668,28 @@ const checkGenshinPlayer = async (req, res) => {
   }
 };
 
+const checkBloodStrikePlayer = async (req, res) => {
+  const playerId = String(req.body?.playerId || "").trim();
+  if (!/^\d{4,32}$/.test(playerId)) return response.error(res, "Blood Strike Player ID noto'g'ri");
+  try {
+    const result = await verifyVolseverBloodStrikePlayer(playerId);
+    return response.success(res, "Blood Strike profil topildi", {
+      playerId: result.playerId,
+      playerName: result.playerName,
+      game: result.game,
+    });
+  } catch (error) {
+    const status = Number(error?.response?.status || 0);
+    if ([400, 404, 422].includes(status) || error?.code === "PLAYER_NOT_FOUND") {
+      return response.error(res, "Blood Strike profil topilmadi");
+    }
+    if (status === 401 || status === 403) {
+      return response.serverError(res, "Blood Strike tekshiruv API kaliti qabul qilinmadi");
+    }
+    return response.serverError(res, "Blood Strike profil tekshirishda xatolik", error.message);
+  }
+};
+
 module.exports = {
   health,
   getCatalog,
@@ -681,6 +704,7 @@ module.exports = {
   checkPubgPlayer,
   checkHokPlayer,
   checkGenshinPlayer,
+  checkBloodStrikePlayer,
   getTopSalePurchaseAmount,
   getTopSalesOrderFilter,
 };

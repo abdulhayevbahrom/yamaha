@@ -4,6 +4,7 @@ const https = require("node:https");
 const ENDPOINTS = {
   hok: "https://gate.volsever.com/proxy/api/game/honor-of-kings",
   genshin: "https://gate.volsever.com/proxy/api/game/genshin-impact",
+  bloodstrike: "https://gate.volsever.com/proxy/api/game/blood-strike",
 };
 const CACHE_TTL_MS = 5 * 60_000;
 const cache = new Map();
@@ -71,4 +72,18 @@ async function verifyVolseverGenshinPlayer(playerId) {
   });
 }
 
-module.exports = { verifyVolseverHokPlayer, verifyVolseverGenshinPlayer, normalizeResult };
+async function verifyVolseverBloodStrikePlayer(playerId) {
+  return verifyVolseverGamePlayer({
+    gameKey: "bloodstrike",
+    playerId,
+    label: "Blood Strike",
+    idPattern: /^\d{4,32}$/,
+  });
+}
+
+module.exports = {
+  verifyVolseverHokPlayer,
+  verifyVolseverGenshinPlayer,
+  verifyVolseverBloodStrikePlayer,
+  normalizeResult,
+};

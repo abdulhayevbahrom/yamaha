@@ -21,7 +21,10 @@ const {
 const { isPlanReady: isMlbbPlanReady } = require("../services/gw-mlbb-fulfillment.service");
 const { isGwHokPlanReady } = require("../services/gw-hok-fulfillment.service");
 const { getMlbbBonusTier, isMlbbBonusPlan, isBonusTierAvailable } = require("../services/gw-mlbb-verification.service");
-const { normalizeResult: normalizeVolseverHokResult } = require("../services/volsever-hok-verification.service");
+const {
+  normalizeResult: normalizeVolseverHokResult,
+  verifyVolseverBloodStrikePlayer,
+} = require("../services/volsever-hok-verification.service");
 
 test("GW catalog keeps PUBG topups and excludes redeem codes", () => {
   assert.equal(
@@ -102,6 +105,13 @@ test("Volsever HOK response exposes the verified player", () => {
       game: "Honor of Kings", username: "Test Player", user_id: "89829050619124578",
     } },
   });
+});
+
+test("Volsever Blood Strike validates numeric player ids", async () => {
+  await assert.rejects(
+    verifyVolseverBloodStrikePlayer("abc"),
+    /Blood Strike Player ID noto'g'ri/,
+  );
 });
 
 test("GW MLBB products are assigned to their storefront region", () => {
