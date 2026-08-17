@@ -9,6 +9,7 @@ const {
   isGenshinTopup,
   isRobloxTopup,
   isBloodStrikeTopup,
+  isDeltaForceTopup,
   extractMlbbRegion,
   extractHokRegion,
   extractUcAmount,
@@ -83,6 +84,13 @@ test("GW catalog recognizes Blood Strike topup products", () => {
   assert.equal(isBloodStrikeTopup({ slug: "blood-strike", gameName: "Blood Strike", serviceName: "Weekly Pass" }), true);
   assert.equal(isBloodStrikeTopup({ id: "GWBS100", serviceName: "100 Gold" }), true);
   assert.equal(isBloodStrikeTopup({ slug: "giftcardbloodstrike", gameName: "Giftcard — Blood Strike", serviceName: "Code" }), false);
+});
+
+test("GW catalog recognizes Delta Force topup products", () => {
+  assert.equal(isDeltaForceTopup({ slug: "deltaforce", gameName: "Delta Force", serviceName: "60 Delta Coins" }), true);
+  assert.equal(isDeltaForceTopup({ slug: "delta-force", gameName: "Delta Force", serviceName: "Weekly Pass" }), true);
+  assert.equal(isDeltaForceTopup({ id: "GWDF100", serviceName: "100 Delta Coins" }), true);
+  assert.equal(isDeltaForceTopup({ slug: "giftcarddeltaforce", gameName: "Giftcard — Delta Force", serviceName: "Code" }), false);
 });
 
 test("GW HOK plan must be mapped, available and fresh", () => {

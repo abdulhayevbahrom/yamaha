@@ -21,6 +21,7 @@ const ELIGIBLE_REFERRAL_PRODUCTS = new Set([
   "genshin",
   "roblox",
   "bloodstrike",
+  "deltaforce",
 ]);
 
 function normalizeString(value) {

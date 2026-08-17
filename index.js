@@ -176,6 +176,10 @@ async function startServer() {
   await resumeGwBloodStrikePolling?.().catch((error) => {
     console.error("GW Blood Strike polling resume error:", error?.message || error);
   });
+  const { resumeGwDeltaForcePolling } = require("./services/gw-deltaforce-fulfillment.service");
+  await resumeGwDeltaForcePolling?.().catch((error) => {
+    console.error("GW Delta Force polling resume error:", error?.message || error);
+  });
 
   if (
     ["1", "true", "yes", "on"].includes(
@@ -258,6 +262,19 @@ async function startServer() {
       Math.max(60_000, Number(process.env.GW_BLOODSTRIKE_CATALOG_SYNC_INTERVAL_MS || 5 * 60_000)),
     );
     bloodStrikeSyncInterval.unref();
+  }
+
+  if (["1", "true", "yes", "on"].includes(String(process.env.GW_DELTAFORCE_AUTOBUY_ENABLED || "").trim().toLowerCase())) {
+    const { syncGwDeltaForceCatalog } = require("./services/gw-catalog.service");
+    const syncDeltaForceCatalog = () => syncGwDeltaForceCatalog().catch((error) => {
+      console.error("GW Delta Force catalog sync error:", error?.message || error);
+    });
+    void syncDeltaForceCatalog();
+    const deltaForceSyncInterval = setInterval(
+      syncDeltaForceCatalog,
+      Math.max(60_000, Number(process.env.GW_DELTAFORCE_CATALOG_SYNC_INTERVAL_MS || 5 * 60_000)),
+    );
+    deltaForceSyncInterval.unref();
   }
 
   server.listen(PORT, () => {

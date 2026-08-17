@@ -15,6 +15,7 @@ const productLabels = {
   genshin: "Genshin Impact",
   roblox: "Roblox",
   bloodstrike: "Blood Strike",
+  deltaforce: "Delta Force",
   balance: "Balans to'ldirish",
   star_sell: "Star Sotish",
   nft_withdrawal: "NFT Yechib Olish",

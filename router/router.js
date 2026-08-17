@@ -299,6 +299,11 @@ router.post(
   authMiddleware,
   adminController.syncGwBloodStrikePlans,
 );
+router.post(
+  "/admin/providers/gw/deltaforce/sync",
+  authMiddleware,
+  adminController.syncGwDeltaForcePlans,
+);
 router.get(
   "/admin/payment-cards",
   authMiddleware,

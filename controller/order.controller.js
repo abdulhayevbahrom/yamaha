@@ -45,6 +45,11 @@ const {
   isGwBloodStrikePlanReady,
 } = require("../services/gw-bloodstrike-fulfillment.service");
 const {
+  isGwDeltaForceAutobuyEnabled,
+  autoFulfillGwDeltaForce,
+  isGwDeltaForcePlanReady,
+} = require("../services/gw-deltaforce-fulfillment.service");
+const {
   isGwPubgRedeemEnabled,
   autoFulfillGwPubgRedeem,
   isPlanReady: isGwPubgRedeemPlanReady,
@@ -98,7 +103,7 @@ const {
 let sequence = 1;
 const PENDING_TTL_MS = 10 * 60 * 1000;
 const ORDER_PAYMENT_METHODS = ["card", "bankomat", "uzumbank", "paynet", "click", "balance", "stars"];
-const STARS_INVOICE_PRODUCTS = new Set(["uc", "freefire", "mlbb", "hok", "genshin", "roblox", "bloodstrike", "star_sell"]);
+const STARS_INVOICE_PRODUCTS = new Set(["uc", "freefire", "mlbb", "hok", "genshin", "roblox", "bloodstrike", "deltaforce", "star_sell"]);
 const GENSHIN_SERVERS = new Set(["Asia", "America", "Europe", "TW/HK/MO"]);
 
 function normalizeCardNumber(value) {
@@ -118,6 +123,7 @@ function getOrderProductLabel(product) {
   if (key === "genshin") return "Genshin Impact";
   if (key === "roblox") return "Roblox";
   if (key === "bloodstrike") return "Blood Strike";
+  if (key === "deltaforce") return "Delta Force";
   if (key === "freefire") return "Free Fire Diamond";
   return "Buyurtma";
 }
@@ -136,6 +142,7 @@ function getGameProductLabel(product) {
   if (key === "genshin") return "Genshin Impact";
   if (key === "roblox") return "Roblox";
   if (key === "bloodstrike") return "Blood Strike";
+  if (key === "deltaforce") return "Delta Force";
   if (key === "freefire") return "Free Fire";
   if (key === "uc") return "PUBG UC";
   return "O'yin";
@@ -436,7 +443,7 @@ const createOrder = async (req, res) => {
     if (currentUser?.isBlocked) {
       return response.error(res, "Foydalanuvchi bloklangan");
     }
-    if (!["star", "premium", "uc", "redeem", "freefire", "mlbb", "hok", "genshin", "roblox", "bloodstrike", "star_sell"].includes(product)) {
+    if (!["star", "premium", "uc", "redeem", "freefire", "mlbb", "hok", "genshin", "roblox", "bloodstrike", "deltaforce", "star_sell"].includes(product)) {
       return response.error(res, "Tanlangan mahsulot noto'g'ri");
     }
     if (!ORDER_PAYMENT_METHODS.includes(normalizedPaymentMethod)) {
@@ -471,7 +478,7 @@ const createOrder = async (req, res) => {
       if (!normalizedPlayerId || !normalizedZoneId) {
         return response.error(res, "Player ID va Zone ID kiriting");
       }
-    } else if (!['star_sell', 'redeem'].includes(product) && !normalizedUsername && !["hok", "genshin", "roblox", "bloodstrike"].includes(product)) {
+    } else if (!['star_sell', 'redeem'].includes(product) && !normalizedUsername && !["hok", "genshin", "roblox", "bloodstrike", "deltaforce"].includes(product)) {
       return response.error(res, "Username kiriting");
     }
     if (product === "hok" && !normalizedPlayerId) {
@@ -524,6 +531,12 @@ const createOrder = async (req, res) => {
         }
         return response.error(res, "Blood Strike profilini tekshirib bo'lmadi");
       }
+    }
+    if (product === "deltaforce" && !normalizedPlayerId) {
+      return response.error(res, "Delta Force Player ID kiriting");
+    }
+    if (product === "deltaforce" && !/^\d{4,32}$/.test(normalizedPlayerId)) {
+      return response.error(res, "Delta Force Player ID noto'g'ri");
     }
     await expirePendingOrders();
     await syncSequence();
@@ -594,6 +607,9 @@ const createOrder = async (req, res) => {
       }
       if (product === "bloodstrike" && isGwBloodStrikeAutobuyEnabled() && !isGwBloodStrikePlanReady(plan)) {
         return response.error(res, "Tanlangan Blood Strike paketi hozir mavjud emas");
+      }
+      if (product === "deltaforce" && isGwDeltaForceAutobuyEnabled() && !isGwDeltaForcePlanReady(plan)) {
+        return response.error(res, "Tanlangan Delta Force paketi hozir mavjud emas");
       }
       if (product === "mlbb" && isMlbbBonusPlan(plan)) {
         let verification;
@@ -717,6 +733,8 @@ const createOrder = async (req, res) => {
         ? "Roblox giftcard"
         : product === "bloodstrike"
         ? `Player ID: ${normalizedPlayerId}`
+        : product === "deltaforce"
+        ? `Player ID: ${normalizedPlayerId}`
         : normalizedIncomingProfileName || fallbackProfileName;
 
     const order = await Order.create({
@@ -736,6 +754,8 @@ const createOrder = async (req, res) => {
           : product === "roblox"
           ? "ROBLOX_GIFTCARD"
           : product === "bloodstrike"
+          ? normalizedPlayerId
+          : product === "deltaforce"
           ? normalizedPlayerId
           : product === "redeem"
           ? "PUBG_REDEEM_CODE"
@@ -789,6 +809,7 @@ const createOrder = async (req, res) => {
         && !(product === "genshin" && isGwGenshinAutobuyEnabled())
         && !(product === "roblox" && isGwRobloxAutobuyEnabled())
         && !(product === "bloodstrike" && isGwBloodStrikeAutobuyEnabled())
+        && !(product === "deltaforce" && isGwDeltaForceAutobuyEnabled())
       ) {
         emitAdminUpdate({
           type: "game_paid",
@@ -841,6 +862,9 @@ const createOrder = async (req, res) => {
       }
       if (product === "bloodstrike" && isGwBloodStrikeAutobuyEnabled()) {
         await autoFulfillGwBloodStrike(order);
+      }
+      if (product === "deltaforce" && isGwDeltaForceAutobuyEnabled()) {
+        await autoFulfillGwDeltaForce(order);
       }
     }
 
@@ -950,7 +974,7 @@ function buildSearchFilter(rawSearch) {
   return { $or: conditions };
 }
 
-const SALES_HISTORY_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb", "hok", "genshin", "roblox", "bloodstrike", "balance"];
+const SALES_HISTORY_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb", "hok", "genshin", "roblox", "bloodstrike", "deltaforce", "balance"];
 
 function buildHistoryFilter(scope, product = "") {
   if (scope === "sales") {
@@ -975,7 +999,7 @@ function buildHistoryFilter(scope, product = "") {
 
   if (scope === "uc_paid") {
     return {
-      product: { $in: ["uc", "freefire", "mlbb", "hok", "genshin", "roblox", "bloodstrike"] },
+      product: { $in: ["uc", "freefire", "mlbb", "hok", "genshin", "roblox", "bloodstrike", "deltaforce"] },
       status: "paid_auto_processed",
     };
   }

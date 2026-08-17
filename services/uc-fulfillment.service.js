@@ -5,7 +5,7 @@ const { sendOrderArchive } = require("./order-archive.service");
 const { emitUserUpdate } = require("../socket");
 const { awardReferralCommissionForOrder } = require("./referral.service");
 
-const MANUAL_GAME_PRODUCTS = ["uc", "freefire", "mlbb", "hok", "genshin", "roblox", "bloodstrike"];
+const MANUAL_GAME_PRODUCTS = ["uc", "freefire", "mlbb", "hok", "genshin", "roblox", "bloodstrike", "deltaforce"];
 
 function isManualGameProduct(product) {
   return MANUAL_GAME_PRODUCTS.includes(product);
@@ -58,6 +58,8 @@ async function syncGameAdminMessages(order, statusText) {
       ? "Roblox"
       : String(order?.product || "").toLowerCase() === "bloodstrike"
       ? "Blood Strike"
+      : String(order?.product || "").toLowerCase() === "deltaforce"
+      ? "Delta Force"
       : "O'yin";
 
   const text = [

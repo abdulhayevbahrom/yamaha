@@ -1,6 +1,6 @@
 const Plan = require("../model/plan.model");
 const crypto = require("node:crypto");
-const { getPubgProducts, getPubgRedeemProducts, getMlbbProducts, getHokProducts, getGenshinProducts, getRobloxProducts, getBloodStrikeProducts } = require("./gw-api.service");
+const { getPubgProducts, getPubgRedeemProducts, getMlbbProducts, getHokProducts, getGenshinProducts, getRobloxProducts, getBloodStrikeProducts, getDeltaForceProducts } = require("./gw-api.service");
 
 let syncPromise = null;
 let mlbbSyncPromise = null;
@@ -8,6 +8,7 @@ let hokSyncPromise = null;
 let genshinSyncPromise = null;
 let robloxSyncPromise = null;
 let bloodStrikeSyncPromise = null;
+let deltaForceSyncPromise = null;
 
 async function syncGwPubgCatalog() {
   if (syncPromise) return syncPromise;
@@ -339,6 +340,21 @@ async function syncGwBloodStrikeCatalog() {
   }
 }
 
+async function syncGwDeltaForceCatalog() {
+  if (deltaForceSyncPromise) return deltaForceSyncPromise;
+  deltaForceSyncPromise = performSimpleGameSync({
+    category: "deltaforce",
+    labelFallback: "Delta Force",
+    emptyMessage: "GW Delta Force katalogi bo'sh qaytdi",
+    fetchProducts: getDeltaForceProducts,
+  });
+  try {
+    return await deltaForceSyncPromise;
+  } finally {
+    deltaForceSyncPromise = null;
+  }
+}
+
 async function performSimpleGameSync({ category, labelFallback, emptyMessage, fetchProducts }) {
   const products = await fetchProducts();
   if (!products.length) throw new Error(emptyMessage);
@@ -380,4 +396,4 @@ async function performSimpleGameSync({ category, labelFallback, emptyMessage, fe
   return Plan.find({ category }).sort({ amount: 1, label: 1 }).lean();
 }
 
-module.exports = { syncGwPubgCatalog, syncGwMlbbCatalog, syncGwHokCatalog, syncGwGenshinCatalog, syncGwRobloxCatalog, syncGwBloodStrikeCatalog };
+module.exports = { syncGwPubgCatalog, syncGwMlbbCatalog, syncGwHokCatalog, syncGwGenshinCatalog, syncGwRobloxCatalog, syncGwBloodStrikeCatalog, syncGwDeltaForceCatalog };

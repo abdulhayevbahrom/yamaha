@@ -344,6 +344,43 @@ function isBloodStrikeTopup(item) {
   ) && !isExcluded;
 }
 
+function isDeltaForceTopup(item) {
+  const providerProductId = normalize(item?.id || item?.pid || item?.PID).toUpperCase();
+  const text = compactTextFields(item, [
+    "slug",
+    "gameName",
+    "game.name",
+    "game.title",
+    "product.gameName",
+    "product.name",
+    "product.title",
+    "serviceName",
+    "service.name",
+    "service.title",
+    "name",
+    "label",
+    "title",
+    "category",
+    "categoryName",
+    "type",
+  ]);
+  const isExcluded = (
+    text.includes("giftcard") ||
+    text.includes("gift card") ||
+    text.includes("gamekey") ||
+    text.includes("game key") ||
+    text.includes("redeem") ||
+    text.includes("code")
+  );
+  return (
+    providerProductId.startsWith("GWDF") ||
+    providerProductId.startsWith("GWDELTA") ||
+    text.includes("deltaforce") ||
+    text.includes("delta force") ||
+    text.includes("delta-force")
+  ) && !isExcluded;
+}
+
 function extractMlbbRegion(item) {
   const explicit = normalize(item?.region || item?.country || item?.server).toLowerCase();
   const pid = normalize(item?.id || item?.pid || item?.PID).toUpperCase();
@@ -527,6 +564,21 @@ async function getBloodStrikeProducts() {
   throw error;
 }
 
+async function getDeltaForceProducts(options = {}) {
+  const rows = await fetchProductsWithFallback(options);
+  const products = rows
+    .filter(isDeltaForceTopup)
+    .map((item) => normalizeProduct(item, { type: "deltaforce", labelFallback: "Delta Force" }))
+    .filter((item) => item.providerProductId);
+  if (products.length) return products;
+  const sample = rows.slice(0, 8).map((item) => compactTextFields(item, ["id", "slug", "gameName", "serviceName", "name", "title"])).join(" | ");
+  const error = new Error(
+    `GW Delta Force katalogi topilmadi (source=${baseUrl}, total=${rows.length}, sample=${sample || "-"})`,
+  );
+  error.code = "GW_DELTAFORCE_PRODUCTS_EMPTY";
+  throw error;
+}
+
 async function createOrder(body) {
   const response = await createClient().post("/orders", body);
   return response.data;
@@ -593,6 +645,7 @@ module.exports = {
   getGenshinProducts,
   getRobloxProducts,
   getBloodStrikeProducts,
+  getDeltaForceProducts,
   createOrder,
   createGameKeyOrder,
   createRedeemOrder,
@@ -607,6 +660,7 @@ module.exports = {
   isGenshinTopup,
   isRobloxTopup,
   isBloodStrikeTopup,
+  isDeltaForceTopup,
   extractMlbbRegion,
   extractHokRegion,
   extractUcAmount,
