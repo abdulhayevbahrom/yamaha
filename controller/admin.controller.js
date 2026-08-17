@@ -58,9 +58,9 @@ const {
   listReferralPromoCodes: listReferralPromoCodesService,
   markReferralPromoCodeUsed: markReferralPromoCodeUsedService,
 } = require("../services/referral-promo-code.service");
-const { syncGwPubgCatalog, syncGwMlbbCatalog, syncGwHokCatalog, syncGwGenshinCatalog, syncGwRobloxCatalog } = require("../services/gw-catalog.service");
+const { syncGwPubgCatalog, syncGwMlbbCatalog, syncGwHokCatalog, syncGwGenshinCatalog, syncGwRobloxCatalog, syncGwBloodStrikeCatalog } = require("../services/gw-catalog.service");
 
-const PURCHASE_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb", "hok", "genshin", "roblox"];
+const PURCHASE_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb", "hok", "genshin", "roblox", "bloodstrike"];
 const PAID_STATUSES = ["paid_auto_processed", "completed"];
 
 function normalizeString(value) {
@@ -818,6 +818,28 @@ const syncGwRobloxPlans = async (_, res) => {
       RATE_LIMIT: "GW API so'rov limiti oshdi; birozdan keyin qayta urinib ko'ring",
     };
     return response.error(res, knownMessages[code] || String(error?.message || "GW Roblox katalogini olib bo'lmadi").slice(0, 300), {
+      code: code || "GW_CATALOG_SYNC_FAILED",
+      providerStatus: status || null,
+    });
+  }
+};
+
+const syncGwBloodStrikePlans = async (_, res) => {
+  try {
+    const plans = await syncGwBloodStrikeCatalog();
+    return response.success(res, "GW Blood Strike katalogi yangilandi", plans);
+  } catch (error) {
+    const status = Number(error?.response?.status || 0);
+    const payload = error?.response?.data;
+    const code = String(payload?.code || payload?.error || "").trim().toUpperCase();
+    const knownMessages = {
+      MISSING_API_KEY: "GW API kaliti serverda topilmadi",
+      INVALID_API_KEY: "GW API kaliti noto'g'ri yoki bekor qilingan",
+      IP_ALLOWLIST_REQUIRED: "GW profilida server IPv4 manzilini allowlistga kiriting",
+      IP_NOT_ALLOWED: "Serverning chiqish IPv4 manzili GW allowlistda yo'q",
+      RATE_LIMIT: "GW API so'rov limiti oshdi; birozdan keyin qayta urinib ko'ring",
+    };
+    return response.error(res, knownMessages[code] || String(error?.message || "GW Blood Strike katalogini olib bo'lmadi").slice(0, 300), {
       code: code || "GW_CATALOG_SYNC_FAILED",
       providerStatus: status || null,
     });
@@ -2404,7 +2426,7 @@ const getActiveUsers = async (req, res) => {
     }
 
     const rows = await Order.find({
-      product: { $in: ["star", "premium", "uc", "freefire", "mlbb", "hok", "genshin", "roblox"] },
+      product: { $in: ["star", "premium", "uc", "freefire", "mlbb", "hok", "genshin", "roblox", "bloodstrike"] },
       status: { $in: ["paid_auto_processed", "completed"] },
       $or: [{ paidAt: { $gte: start } }, { createdAt: { $gte: start } }],
       tgUserId: { $exists: true, $ne: "" },
@@ -2524,6 +2546,7 @@ module.exports = {
   syncGwHokPlans,
   syncGwGenshinPlans,
   syncGwRobloxPlans,
+  syncGwBloodStrikePlans,
   getSettings,
   updateSettings,
   getReferralPromoCodes,

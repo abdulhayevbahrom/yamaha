@@ -8,6 +8,7 @@ const {
   isHokTopup,
   isGenshinTopup,
   isRobloxTopup,
+  isBloodStrikeTopup,
   extractMlbbRegion,
   extractHokRegion,
   extractUcAmount,
@@ -72,6 +73,13 @@ test("GW catalog recognizes Roblox and Robux giftcard products", () => {
   assert.equal(isRobloxTopup({ slug: "giftcardrobux", gameName: "Giftcard — Robux", serviceName: "Robux 800" }), true);
   assert.equal(isRobloxTopup({ gameName: "Roblox", serviceName: "400 Robux" }), true);
   assert.equal(isRobloxTopup({ slug: "giftcardpsn", gameName: "Giftcard — PlayStation USD", serviceName: "PSN 10 USD" }), false);
+});
+
+test("GW catalog recognizes Blood Strike topup products", () => {
+  assert.equal(isBloodStrikeTopup({ slug: "bloodstrike", gameName: "Blood Strike", serviceName: "100 Gold" }), true);
+  assert.equal(isBloodStrikeTopup({ slug: "blood-strike", gameName: "Blood Strike", serviceName: "Weekly Pass" }), true);
+  assert.equal(isBloodStrikeTopup({ id: "GWBS100", serviceName: "100 Gold" }), true);
+  assert.equal(isBloodStrikeTopup({ slug: "giftcardbloodstrike", gameName: "Giftcard — Blood Strike", serviceName: "Code" }), false);
 });
 
 test("GW HOK plan must be mapped, available and fresh", () => {

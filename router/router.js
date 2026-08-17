@@ -286,6 +286,11 @@ router.post(
   authMiddleware,
   adminController.syncGwRobloxPlans,
 );
+router.post(
+  "/admin/providers/gw/bloodstrike/sync",
+  authMiddleware,
+  adminController.syncGwBloodStrikePlans,
+);
 router.get(
   "/admin/payment-cards",
   authMiddleware,

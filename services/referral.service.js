@@ -20,6 +20,7 @@ const ELIGIBLE_REFERRAL_PRODUCTS = new Set([
   "hok",
   "genshin",
   "roblox",
+  "bloodstrike",
 ]);
 
 function normalizeString(value) {

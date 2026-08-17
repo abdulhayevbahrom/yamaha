@@ -172,6 +172,10 @@ async function startServer() {
   await resumeGwRobloxPolling().catch((error) => {
     console.error("GW Roblox polling resume error:", error?.message || error);
   });
+  const { resumeGwBloodStrikePolling } = require("./services/gw-bloodstrike-fulfillment.service");
+  await resumeGwBloodStrikePolling?.().catch((error) => {
+    console.error("GW Blood Strike polling resume error:", error?.message || error);
+  });
 
   if (
     ["1", "true", "yes", "on"].includes(
@@ -241,6 +245,19 @@ async function startServer() {
       Math.max(60_000, Number(process.env.GW_ROBLOX_CATALOG_SYNC_INTERVAL_MS || 5 * 60_000)),
     );
     robloxSyncInterval.unref();
+  }
+
+  if (["1", "true", "yes", "on"].includes(String(process.env.GW_BLOODSTRIKE_AUTOBUY_ENABLED || "").trim().toLowerCase())) {
+    const { syncGwBloodStrikeCatalog } = require("./services/gw-catalog.service");
+    const syncBloodStrikeCatalog = () => syncGwBloodStrikeCatalog().catch((error) => {
+      console.error("GW Blood Strike catalog sync error:", error?.message || error);
+    });
+    void syncBloodStrikeCatalog();
+    const bloodStrikeSyncInterval = setInterval(
+      syncBloodStrikeCatalog,
+      Math.max(60_000, Number(process.env.GW_BLOODSTRIKE_CATALOG_SYNC_INTERVAL_MS || 5 * 60_000)),
+    );
+    bloodStrikeSyncInterval.unref();
   }
 
   server.listen(PORT, () => {

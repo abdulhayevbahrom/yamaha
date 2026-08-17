@@ -5,7 +5,7 @@ const { buildHistoryFilter } = require("../controller/order.controller");
 
 test("sales history includes only successfully completed products and balance top-ups", () => {
   assert.deepEqual(buildHistoryFilter("sales"), {
-    product: { $in: ["star", "premium", "uc", "freefire", "mlbb", "hok", "genshin", "roblox", "balance"] },
+    product: { $in: ["star", "premium", "uc", "freefire", "mlbb", "hok", "genshin", "roblox", "bloodstrike", "balance"] },
     status: "completed",
     fulfillmentStatus: "success",
   });
@@ -29,6 +29,7 @@ test("sales history ignores an unsupported product filter", () => {
     "hok",
     "genshin",
     "roblox",
+    "bloodstrike",
     "balance",
   ]);
 });

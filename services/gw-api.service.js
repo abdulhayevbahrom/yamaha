@@ -307,6 +307,43 @@ function isRobloxTopup(item) {
   ) && !isExcluded;
 }
 
+function isBloodStrikeTopup(item) {
+  const providerProductId = normalize(item?.id || item?.pid || item?.PID).toUpperCase();
+  const text = compactTextFields(item, [
+    "slug",
+    "gameName",
+    "game.name",
+    "game.title",
+    "product.gameName",
+    "product.name",
+    "product.title",
+    "serviceName",
+    "service.name",
+    "service.title",
+    "name",
+    "label",
+    "title",
+    "category",
+    "categoryName",
+    "type",
+  ]);
+  const isExcluded = (
+    text.includes("giftcard") ||
+    text.includes("gift card") ||
+    text.includes("gamekey") ||
+    text.includes("game key") ||
+    text.includes("redeem") ||
+    text.includes("code")
+  );
+  return (
+    providerProductId.startsWith("GWBS") ||
+    providerProductId.startsWith("GWBLS") ||
+    text.includes("bloodstrike") ||
+    text.includes("blood strike") ||
+    text.includes("blood-strike")
+  ) && !isExcluded;
+}
+
 function extractMlbbRegion(item) {
   const explicit = normalize(item?.region || item?.country || item?.server).toLowerCase();
   const pid = normalize(item?.id || item?.pid || item?.PID).toUpperCase();
@@ -469,6 +506,27 @@ async function getRobloxProducts() {
   throw error;
 }
 
+async function getBloodStrikeProducts() {
+  const { rows, baseUrl } = await fetchProductsWithFallback();
+  const products = rows
+    .filter(isBloodStrikeTopup)
+    .map(normalizeProduct)
+    .filter((item) => item.providerProductId && item.priceUsd > 0);
+  if (products.length) return products;
+
+  const sample = rows
+    .slice(0, 30)
+    .map((item) => normalize(item?.id || item?.pid || item?.PID || item?.serviceName || item?.name))
+    .filter(Boolean)
+    .slice(0, 12)
+    .join(", ");
+  const error = new Error(
+    `GW Blood Strike katalogi topilmadi (source=${baseUrl}, total=${rows.length}, sample=${sample || "-"})`,
+  );
+  error.code = "GW_BLOODSTRIKE_PRODUCTS_EMPTY";
+  throw error;
+}
+
 async function createOrder(body) {
   const response = await createClient().post("/orders", body);
   return response.data;
@@ -534,6 +592,7 @@ module.exports = {
   getHokProducts,
   getGenshinProducts,
   getRobloxProducts,
+  getBloodStrikeProducts,
   createOrder,
   createGameKeyOrder,
   createRedeemOrder,
@@ -547,6 +606,7 @@ module.exports = {
   isHokTopup,
   isGenshinTopup,
   isRobloxTopup,
+  isBloodStrikeTopup,
   extractMlbbRegion,
   extractHokRegion,
   extractUcAmount,

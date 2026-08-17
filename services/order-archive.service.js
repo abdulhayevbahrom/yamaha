@@ -14,6 +14,7 @@ const productLabels = {
   hok: "Honor of Kings Tokens",
   genshin: "Genshin Impact",
   roblox: "Roblox",
+  bloodstrike: "Blood Strike",
   balance: "Balans to'ldirish",
   star_sell: "Star Sotish",
   nft_withdrawal: "NFT Yechib Olish",
