@@ -12,6 +12,9 @@ const { buildTelegramClientOptions } = require("../utils/telegram-client-options
 const {
   shouldProcessCardxabarMessage,
 } = require("../utils/cardxabar-message-filter");
+const {
+  processGwPriceAlertMessage,
+} = require("../services/gw-price-alert.service");
 
 const telegramCredentials = getTelegramCredentials("cardxabar");
 const apiId = telegramCredentials.apiId;
@@ -21,6 +24,10 @@ const stringSession = new StringSession(sessionString || "");
 const cardxabarChatId = String(process.env.CARDXABAR_CHAT_ID || "").trim();
 const cardxabarUsername = String(
   process.env.CARDXABAR_USERNAME || "CardXabarBot",
+).trim();
+const gwPriceAlertChatId = String(process.env.GW_PRICE_ALERT_SOURCE_CHAT_ID || "").trim();
+const gwPriceAlertUsername = String(
+  process.env.GW_PRICE_ALERT_SOURCE_USERNAME || "gwbotupdate",
 ).trim();
 const adminNotifyChatId = process.env.ADMIN_NOTIFY_CHAT_ID || "";
 const botToken = process.env.BOT_TOKEN || "";
@@ -44,11 +51,15 @@ const runtimeStatus = {
   selfUsername: "",
   monitoredChatId: cardxabarChatId,
   monitoredUsername: cardxabarUsername,
+  gwAlertChatId: gwPriceAlertChatId,
+  gwAlertUsername: gwPriceAlertUsername,
   lastCommandAt: null,
   lastMonitoredMessageAt: null,
+  lastGwAlertAt: null,
   lastPaymentProcessedAt: null,
   processedPayments: 0,
   matchedPayments: 0,
+  processedGwAlerts: 0,
   statusWatcherRunning: false,
   lastSavedMessageId: 0,
   lastError: "",
@@ -98,13 +109,17 @@ function buildStatusMessage() {
     `Ulangan vaqti: ${formatStatusTime(runtimeStatus.connectedAt)}`,
     `Monitoring chat ID: ${monitorChat}`,
     `Monitoring username: ${monitorUser}`,
+    `GW alert chat ID: ${runtimeStatus.gwAlertChatId || "sozlanmagan"}`,
+    `GW alert username: ${runtimeStatus.gwAlertUsername || "sozlanmagan"}`,
     `Oxirgi tekshirilgan buyruq: ${formatStatusTime(runtimeStatus.lastCommandAt)}`,
     `Saved Messages kuzatuvi: ${runtimeStatus.statusWatcherRunning ? "Yoqilgan" : "O'chirilgan"}`,
     `Oxirgi Saved Messages ID: ${runtimeStatus.lastSavedMessageId || "-"}`,
     `Oxirgi kuzatilgan xabar: ${formatStatusTime(runtimeStatus.lastMonitoredMessageAt)}`,
+    `Oxirgi GW alert: ${formatStatusTime(runtimeStatus.lastGwAlertAt)}`,
     `Oxirgi qayta ishlangan to'lov: ${formatStatusTime(runtimeStatus.lastPaymentProcessedAt)}`,
     `Qayta ishlangan to'lovlar soni: ${runtimeStatus.processedPayments}`,
     `Mos tushgan to'lovlar soni: ${runtimeStatus.matchedPayments}`,
+    `Qayta ishlangan GW alertlar: ${runtimeStatus.processedGwAlerts}`,
     `Oxirgi xato: ${lastError}`,
   ].join("\n");
 }
@@ -352,6 +367,20 @@ async function startUserClient({ strict = false } = {}) {
               ? await message.getSender()
               : null);
           const senderUsername = String(sender?.username || "").trim();
+          const isGwAlertMessage = shouldProcessCardxabarMessage({
+            configuredChatId: gwPriceAlertChatId,
+            configuredUsername: gwPriceAlertUsername,
+            messageChatId: chatId,
+            senderUsername,
+          });
+          if (isGwAlertMessage) {
+            const alertResult = await processGwPriceAlertMessage(text);
+            runtimeStatus.lastGwAlertAt = new Date().toISOString();
+            if (alertResult?.ok) {
+              runtimeStatus.processedGwAlerts += Number(alertResult.sent || 0);
+            }
+          }
+
           if (
             !shouldProcessCardxabarMessage({
               configuredChatId: cardxabarChatId,
