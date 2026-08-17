@@ -25,6 +25,7 @@ const { getMlbbBonusTier, isMlbbBonusPlan, isBonusTierAvailable } = require("../
 const {
   normalizeResult: normalizeVolseverHokResult,
   verifyVolseverBloodStrikePlayer,
+  verifyVolseverDeltaForcePlayer,
 } = require("../services/volsever-hok-verification.service");
 
 test("GW catalog keeps PUBG topups and excludes redeem codes", () => {
@@ -119,6 +120,13 @@ test("Volsever Blood Strike validates numeric player ids", async () => {
   await assert.rejects(
     verifyVolseverBloodStrikePlayer("abc"),
     /Blood Strike Player ID noto'g'ri/,
+  );
+});
+
+test("Volsever Delta Force validates numeric player ids", async () => {
+  await assert.rejects(
+    verifyVolseverDeltaForcePlayer("abc"),
+    /Delta Force Player ID noto'g'ri/,
   );
 });
 

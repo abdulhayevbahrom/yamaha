@@ -84,6 +84,14 @@ router.post(
   userWriteRateLimit,
   publicController.checkBloodStrikePlayer,
 );
+router.post(
+  "/deltaforce/check-player",
+  telegramAuthMiddleware,
+  freshTelegramWriteAuth,
+  requireRegisteredUser,
+  userWriteRateLimit,
+  publicController.checkDeltaForcePlayer,
+);
 router.post("/calculate-price", orderController.calculatePrice);
 router.post(
   "/orders",

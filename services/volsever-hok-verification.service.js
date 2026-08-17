@@ -5,6 +5,7 @@ const ENDPOINTS = {
   hok: "https://gate.volsever.com/proxy/api/game/honor-of-kings",
   genshin: "https://gate.volsever.com/proxy/api/game/genshin-impact",
   bloodstrike: "https://gate.volsever.com/proxy/api/game/blood-strike",
+  deltaforce: "https://gate.volsever.com/proxy/api/game/delta-force",
 };
 const CACHE_TTL_MS = 5 * 60_000;
 const cache = new Map();
@@ -81,9 +82,19 @@ async function verifyVolseverBloodStrikePlayer(playerId) {
   });
 }
 
+async function verifyVolseverDeltaForcePlayer(playerId) {
+  return verifyVolseverGamePlayer({
+    gameKey: "deltaforce",
+    playerId,
+    label: "Delta Force",
+    idPattern: /^\d{4,32}$/,
+  });
+}
+
 module.exports = {
   verifyVolseverHokPlayer,
   verifyVolseverGenshinPlayer,
   verifyVolseverBloodStrikePlayer,
+  verifyVolseverDeltaForcePlayer,
   normalizeResult,
 };

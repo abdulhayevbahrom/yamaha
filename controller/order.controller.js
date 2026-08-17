@@ -98,6 +98,7 @@ const {
   verifyVolseverHokPlayer,
   verifyVolseverGenshinPlayer,
   verifyVolseverBloodStrikePlayer,
+  verifyVolseverDeltaForcePlayer,
 } = require("../services/volsever-hok-verification.service");
 
 let sequence = 1;
@@ -537,6 +538,17 @@ const createOrder = async (req, res) => {
     }
     if (product === "deltaforce" && !/^\d{4,32}$/.test(normalizedPlayerId)) {
       return response.error(res, "Delta Force Player ID noto'g'ri");
+    }
+    if (product === "deltaforce") {
+      try {
+        await verifyVolseverDeltaForcePlayer(normalizedPlayerId);
+      } catch (error) {
+        const status = Number(error?.response?.status || 0);
+        if ([400, 404, 422].includes(status) || error?.code === "PLAYER_NOT_FOUND") {
+          return response.error(res, "Delta Force profil topilmadi");
+        }
+        return response.error(res, "Delta Force profilini tekshirib bo'lmadi");
+      }
     }
     await expirePendingOrders();
     await syncSequence();

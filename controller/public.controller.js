@@ -27,6 +27,7 @@ const {
   verifyVolseverHokPlayer,
   verifyVolseverGenshinPlayer,
   verifyVolseverBloodStrikePlayer,
+  verifyVolseverDeltaForcePlayer,
 } = require("../services/volsever-hok-verification.service");
 const { verifyMlbbAccount } = require("../services/gw-mlbb-verification.service");
 // const { ensureDefaultPlans } = require("../services/plan.service");
@@ -698,6 +699,28 @@ const checkBloodStrikePlayer = async (req, res) => {
   }
 };
 
+const checkDeltaForcePlayer = async (req, res) => {
+  const playerId = String(req.body?.playerId || "").trim();
+  if (!/^\d{4,32}$/.test(playerId)) return response.error(res, "Delta Force Player ID noto'g'ri");
+  try {
+    const result = await verifyVolseverDeltaForcePlayer(playerId);
+    return response.success(res, "Delta Force profil topildi", {
+      playerId: result.playerId,
+      playerName: result.playerName,
+      game: result.game,
+    });
+  } catch (error) {
+    const status = Number(error?.response?.status || 0);
+    if ([400, 404, 422].includes(status) || error?.code === "PLAYER_NOT_FOUND") {
+      return response.error(res, "Delta Force profil topilmadi");
+    }
+    if (status === 401 || status === 403) {
+      return response.serverError(res, "Delta Force tekshiruv API kaliti qabul qilinmadi");
+    }
+    return response.serverError(res, "Delta Force profil tekshirishda xatolik", error.message);
+  }
+};
+
 module.exports = {
   health,
   getCatalog,
@@ -713,6 +736,7 @@ module.exports = {
   checkHokPlayer,
   checkGenshinPlayer,
   checkBloodStrikePlayer,
+  checkDeltaForcePlayer,
   getTopSalePurchaseAmount,
   getTopSalesOrderFilter,
 };
