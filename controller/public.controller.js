@@ -52,6 +52,11 @@ const profileLookupInFlight = new Map();
 const TOP_SALES_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb", "hok", "roblox", "bloodstrike", "deltaforce"];
 const TOP_SALES_PERIODS = new Set(["today", "week", "month"]);
 
+function isProviderAuthError(error) {
+  const status = Number(error?.response?.status || 0);
+  return status === 401 || status === 403 || /API_KEY|api key|kalit/i.test(String(error?.message || ""));
+}
+
 function isGwPubgAutobuyEnabled() {
   return ["1", "true", "yes", "on"].includes(
     String(process.env.GW_PUBG_AUTOBUY_ENABLED || "").trim().toLowerCase(),
@@ -674,8 +679,16 @@ const checkFreeFirePlayer = async (req, res) => {
     if ([400, 404, 422].includes(status) || error?.code === "PLAYER_NOT_FOUND") {
       return response.error(res, "Free Fire profil topilmadi");
     }
-    if (status === 401 || status === 403) {
-      return response.serverError(res, "Free Fire tekshiruv API kaliti qabul qilinmadi");
+    if (isProviderAuthError(error)) {
+      console.warn("[FreeFireVerify]", JSON.stringify({
+        status,
+        message: String(error?.message || "provider auth error").slice(0, 300),
+      }));
+      return response.success(res, "Free Fire Player ID qabul qilindi", {
+        playerId,
+        playerName: `Player ID: ${playerId}`,
+        verificationSkipped: true,
+      });
     }
     return response.serverError(res, "Free Fire profil tekshirishda xatolik", error.message);
   }

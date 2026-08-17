@@ -106,6 +106,11 @@ const PENDING_TTL_MS = 10 * 60 * 1000;
 const ORDER_PAYMENT_METHODS = ["card", "bankomat", "uzumbank", "paynet", "click", "balance", "stars"];
 const STARS_INVOICE_PRODUCTS = new Set(["uc", "freefire", "mlbb", "hok", "roblox", "bloodstrike", "deltaforce", "star_sell"]);
 
+function isProviderAuthError(error) {
+  const status = Number(error?.response?.status || 0);
+  return status === 401 || status === 403 || /API_KEY|api key|kalit/i.test(String(error?.message || ""));
+}
+
 function normalizeCardNumber(value) {
   return String(value || "").replace(/\D/g, "").slice(0, 16);
 }
@@ -493,7 +498,14 @@ const createOrder = async (req, res) => {
         if ([400, 404, 422].includes(status) || error?.code === "PLAYER_NOT_FOUND") {
           return response.error(res, "Free Fire profil topilmadi");
         }
-        return response.error(res, "Free Fire profilini tekshirib bo'lmadi");
+        if (isProviderAuthError(error)) {
+          console.warn("Free Fire verify skipped:", {
+            status,
+            message: String(error?.message || "provider auth error").slice(0, 300),
+          });
+        } else {
+          return response.error(res, "Free Fire profilini tekshirib bo'lmadi");
+        }
       }
     }
     if (product === "hok" && !normalizedPlayerId) {
