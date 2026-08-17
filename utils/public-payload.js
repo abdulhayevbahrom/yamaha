@@ -39,6 +39,8 @@ function sanitizePublicOrder(order) {
     orderId: Number(plain.orderId || 0),
     product: String(plain.product || ""),
     planCode: String(plain.planCode || ""),
+    planLabel: String(plain.planLabel || ""),
+    planAmount: Number(plain.planAmount || 0),
     customAmount: Number(plain.customAmount || 0),
     username: String(plain.username || ""),
     playerId: String(plain.playerId || ""),

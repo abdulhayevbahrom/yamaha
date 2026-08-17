@@ -490,9 +490,11 @@ const createOrder = async (req, res) => {
     if (product === "freefire" && !/^\d{5,15}$/.test(normalizedPlayerId)) {
       return response.error(res, "Free Fire Player ID noto'g'ri");
     }
+    let verifiedFreeFirePlayerName = "";
     if (product === "freefire") {
       try {
-        await verifyVolseverFreeFirePlayer(normalizedPlayerId);
+        const result = await verifyVolseverFreeFirePlayer(normalizedPlayerId);
+        verifiedFreeFirePlayerName = String(result?.playerName || "").trim();
       } catch (error) {
         const status = Number(error?.response?.status || 0);
         if ([400, 404, 422].includes(status) || error?.code === "PLAYER_NOT_FOUND") {
@@ -746,7 +748,7 @@ const createOrder = async (req, res) => {
         : product === "hok"
         ? `Player ID: ${normalizedPlayerId}`
         : product === "freefire"
-        ? `Player ID: ${normalizedPlayerId}`
+        ? verifiedFreeFirePlayerName || normalizedIncomingProfileName || `Player ID: ${normalizedPlayerId}`
         : product === "roblox"
         ? "Roblox giftcard"
         : product === "bloodstrike"

@@ -1,4 +1,5 @@
 const Order = require("../model/order.model");
+const Plan = require("../model/plan.model");
 const { sendTelegramText } = require("./telegram-notify.service");
 
 const ARCHIVE_CHANNEL_ID = String(
@@ -23,6 +24,10 @@ const productLabels = {
 function getArchiveCustomerLabel(order) {
   const profileName = String(order?.profileName || "").trim();
   if (!profileName) return "-";
+  const customerLabel = profileName
+    .replace(/^Player ID:\s*/i, "")
+    .replace(/\s*\|\s*Zone ID:\s*/i, " / Zone ID: ")
+    .trim();
 
   const normalize = (value) =>
     String(value || "")
@@ -48,18 +53,42 @@ function getArchiveCustomerLabel(order) {
     return "-";
   }
 
-  return profileName;
+  return customerLabel || "-";
 }
 
-function getArchiveAmountLabel(order) {
+function formatGwPlanCode(product, planCode) {
+  const match = String(planCode || "").match(/^gw_.*?(\d+)$/i);
+  if (!match) return "";
+  const amount = Number(match[1] || 0);
+  if (!amount) return "";
+  if (product === "freefire" || product === "mlbb") return `${amount} Diamond`;
+  if (product === "uc") return `${amount} UC`;
+  if (product === "hok") return `${amount} Tokens`;
+  if (product === "deltaforce") return `${amount} Delta Force`;
+  if (product === "bloodstrike") return `${amount} Blood Strike`;
+  if (product === "roblox") return `${amount} Robux`;
+  return "";
+}
+
+async function getArchiveAmountLabel(order) {
   const product = String(order?.product || "").trim().toLowerCase();
+  const planCode = String(order?.planCode || "").trim();
   const customAmount = Number(order?.customAmount || 0);
 
   if ((product === "star" || product === "star_sell") && customAmount > 0) {
     return customAmount;
   }
 
-  return String(order?.planCode || "-");
+  const plan = planCode
+    ? await Plan.findOne({ category: product, code: planCode })
+        .select({ label: 1, amount: 1 })
+        .lean()
+    : null;
+
+  if (plan?.label) return String(plan.label);
+  if (Number(plan?.amount || 0) > 0) return `${plan.amount}`;
+
+  return formatGwPlanCode(product, planCode) || planCode || "-";
 }
 
 async function sendOrderArchive(orderOrId, options = {}) {
@@ -78,7 +107,7 @@ async function sendOrderArchive(orderOrId, options = {}) {
       return { ok: true, skipped: true, reason: "already_archived" };
     }
 
-    const amountValue = getArchiveAmountLabel(order);
+    const amountValue = await getArchiveAmountLabel(order);
     const customerLabel = getArchiveCustomerLabel(order);
 
     const message = [

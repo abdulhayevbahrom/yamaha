@@ -684,11 +684,7 @@ const checkFreeFirePlayer = async (req, res) => {
         status,
         message: String(error?.message || "provider auth error").slice(0, 300),
       }));
-      return response.success(res, "Free Fire Player ID qabul qilindi", {
-        playerId,
-        playerName: `Player ID: ${playerId}`,
-        verificationSkipped: true,
-      });
+      return response.serverError(res, "Free Fire profil tekshirish vaqtincha ishlamayapti");
     }
     return response.serverError(res, "Free Fire profil tekshirishda xatolik", error.message);
   }

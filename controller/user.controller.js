@@ -2,6 +2,7 @@ const crypto = require("node:crypto");
 const response = require("../utils/response");
 const User = require("../model/user.model");
 const Order = require("../model/order.model");
+const Plan = require("../model/plan.model");
 const UserGift = require("../model/user-gift.model");
 const UserNft = require("../model/user-nft.model");
 const NftOffer = require("../model/nft-offer.model");
@@ -1049,10 +1050,36 @@ async function getMyOrders(req, res) {
       nftDocs.map((item) => [normalizeString(item?.nftId), item]),
     );
 
-    const orderItems = orders.map((item) => ({
-      ...(sanitizePublicOrder(item) || {}),
-      sourceType: "order",
-    }));
+    const planKeys = Array.from(
+      new Set(
+        orders
+          .map((item) => `${String(item?.product || "").trim()}:${String(item?.planCode || "").trim()}`)
+          .filter((key) => !key.endsWith(":")),
+      ),
+    );
+    const planDocs = planKeys.length
+      ? await Plan.find({
+          $or: planKeys.map((key) => {
+            const [category, ...codeParts] = key.split(":");
+            return { category, code: codeParts.join(":") };
+          }),
+        })
+          .select({ category: 1, code: 1, label: 1, amount: 1 })
+          .lean()
+      : [];
+    const planMap = new Map(
+      planDocs.map((item) => [`${String(item.category)}:${String(item.code)}`, item]),
+    );
+
+    const orderItems = orders.map((item) => {
+      const plan = planMap.get(`${String(item?.product || "").trim()}:${String(item?.planCode || "").trim()}`);
+      return {
+        ...(sanitizePublicOrder(item) || {}),
+        planLabel: String(plan?.label || ""),
+        planAmount: Number(plan?.amount || 0),
+        sourceType: "order",
+      };
+    });
 
     const giftItems = userGifts.map((gift) => ({
       _id: `gift_${gift._id}`,
