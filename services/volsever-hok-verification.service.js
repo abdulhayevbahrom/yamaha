@@ -28,6 +28,25 @@ function normalizeResult(payload, requestedPlayerId) {
   return { valid, playerId, playerName, game: String(data.game || "").trim(), payload };
 }
 
+function logVerifyResponse(gameKey, requestedPlayerId, payload, normalizedResult) {
+  if (gameKey !== "freefire") return;
+  const data = payload?.data && typeof payload.data === "object" ? payload.data : {};
+  console.log("[VOLSEVER_VERIFY]", JSON.stringify({
+    gameKey,
+    requestedPlayerId,
+    status: payload?.status,
+    code: payload?.code,
+    message: String(payload?.message || "").slice(0, 300),
+    rootUsername: String(payload?.username || "").slice(0, 120),
+    dataUsername: String(data.username || "").slice(0, 120),
+    dataNickname: String(data.nickname || "").slice(0, 120),
+    dataName: String(data.name || "").slice(0, 120),
+    dataUserId: String(data.user_id || data.userId || "").slice(0, 80),
+    normalizedPlayerName: String(normalizedResult?.playerName || "").slice(0, 120),
+    valid: Boolean(normalizedResult?.valid),
+  }));
+}
+
 async function verifyVolseverGamePlayer({ gameKey, playerId, label, idPattern }) {
   const normalized = normalizePlayerId(playerId);
   if (!idPattern.test(normalized)) throw new Error(`${label} Player ID noto'g'ri`);
@@ -44,6 +63,7 @@ async function verifyVolseverGamePlayer({ gameKey, playerId, label, idPattern })
     headers: { "X-API-KEY": getApiKey(), Accept: "application/json" },
   });
   const normalizedResult = normalizeResult(response.data, normalized);
+  logVerifyResponse(gameKey, normalized, response.data, normalizedResult);
   const result = { ...normalizedResult, game: normalizedResult.game || label };
   if (!result.valid) {
     const error = new Error(String(response.data?.message || `${label} profil topilmadi`));

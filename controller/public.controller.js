@@ -676,6 +676,12 @@ const checkFreeFirePlayer = async (req, res) => {
     });
   } catch (error) {
     const status = Number(error?.response?.status || 0);
+    console.warn("[FreeFireVerifyResult]", JSON.stringify({
+      status,
+      code: String(error?.code || ""),
+      message: String(error?.message || "").slice(0, 300),
+      responseData: error?.response?.data || null,
+    }));
     if ([400, 404, 422].includes(status) || error?.code === "PLAYER_NOT_FOUND") {
       return response.error(res, "Free Fire profil topilmadi");
     }
