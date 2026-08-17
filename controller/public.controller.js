@@ -690,11 +690,7 @@ const checkFreeFirePlayer = async (req, res) => {
         status,
         message: String(error?.message || "provider auth error").slice(0, 300),
       }));
-      return response.success(res, "Free Fire Player ID qabul qilindi", {
-        playerId,
-        playerName: playerId,
-        verificationSkipped: true,
-      });
+      return response.serverError(res, "Volsever Free Fire endpoint ruxsati kerak");
     }
     return response.serverError(res, "Free Fire profil tekshirishda xatolik", error.message);
   }
