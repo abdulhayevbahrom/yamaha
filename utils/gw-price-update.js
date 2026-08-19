@@ -131,6 +131,11 @@ function parseGwPriceUpdateMessage(text) {
   return items;
 }
 
+function isGwPriceAlertText(text) {
+  const raw = normalize(text).toUpperCase();
+  return raw.includes("PRICE UPDATE ALERT");
+}
+
 function buildPlanSearchKeys(plan) {
   const label = normalize(plan?.label);
   const amount = Number(plan?.amount || 0);
@@ -223,6 +228,7 @@ function formatGwAlertMessage({ update, plan }) {
 
 module.exports = {
   parseGwPriceUpdateMessage,
+  isGwPriceAlertText,
   pickMatchingPlan,
   formatGwAlertMessage,
 };

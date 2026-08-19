@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 
 const {
   parseGwPriceUpdateMessage,
+  isGwPriceAlertText,
   pickMatchingPlan,
   formatGwAlertMessage,
 } = require("../utils/gw-price-update");
@@ -68,6 +69,35 @@ MOBILE LEGEND (MALAYSIA) · 355 Diamonds
 
   assert.equal(pickMatchingPlan(pubgUpdate, plans)?.label, "8100 UC");
   assert.equal(pickMatchingPlan(mlbbUpdate, plans)?.providerRegion, "my");
+});
+
+test("GW update matcher handles membership labels without amount or provider code", () => {
+  const freeFireUpdate = parseGwPriceUpdateMessage(`
+💰 PRICE UPDATE ALERT
+
+📉 Price decreased
+━━━━━━━━━━━━━━━━
+
+FREEFIRE DIAMONDS (LATAM) · Monthly Membership
+   $10.64 → $10.62
+`)[0];
+
+  const plans = [
+    { category: "freefire", label: "Weekly Membership", amount: 0, basePrice: 22000, providerProductId: "", providerRegion: "global" },
+    { category: "freefire", label: "Monthly Membership", amount: 0, basePrice: 99000, providerProductId: "", providerRegion: "global" },
+  ];
+
+  assert.equal(freeFireUpdate.category, "freefire");
+  assert.equal(freeFireUpdate.productLabel, "Monthly Membership");
+  assert.equal(pickMatchingPlan(freeFireUpdate, plans)?.label, "Monthly Membership");
+});
+
+test("GW alert text detector recognizes source messages even before parsing items", () => {
+  assert.equal(
+    isGwPriceAlertText("💰 PRICE UPDATE ALERT\n\n📈 Price increased"),
+    true,
+  );
+  assert.equal(isGwPriceAlertText("oddiy matn"), false);
 });
 
 test("GW alert formatter returns admin-friendly summary", () => {

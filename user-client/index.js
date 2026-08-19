@@ -15,6 +15,9 @@ const {
 const {
   processGwPriceAlertMessage,
 } = require("../services/gw-price-alert.service");
+const {
+  isGwPriceAlertText,
+} = require("../utils/gw-price-update");
 
 const telegramCredentials = getTelegramCredentials("cardxabar");
 const apiId = telegramCredentials.apiId;
@@ -60,6 +63,8 @@ const runtimeStatus = {
   processedPayments: 0,
   matchedPayments: 0,
   processedGwAlerts: 0,
+  lastGwAlertReason: "",
+  lastGwAlertSource: "",
   statusWatcherRunning: false,
   lastSavedMessageId: 0,
   lastError: "",
@@ -116,6 +121,8 @@ function buildStatusMessage() {
     `Oxirgi Saved Messages ID: ${runtimeStatus.lastSavedMessageId || "-"}`,
     `Oxirgi kuzatilgan xabar: ${formatStatusTime(runtimeStatus.lastMonitoredMessageAt)}`,
     `Oxirgi GW alert: ${formatStatusTime(runtimeStatus.lastGwAlertAt)}`,
+    `Oxirgi GW alert sababi: ${runtimeStatus.lastGwAlertReason || "-"}`,
+    `Oxirgi GW alert manbasi: ${runtimeStatus.lastGwAlertSource || "-"}`,
     `Oxirgi qayta ishlangan to'lov: ${formatStatusTime(runtimeStatus.lastPaymentProcessedAt)}`,
     `Qayta ishlangan to'lovlar soni: ${runtimeStatus.processedPayments}`,
     `Mos tushgan to'lovlar soni: ${runtimeStatus.matchedPayments}`,
@@ -126,6 +133,73 @@ function buildStatusMessage() {
 
 function isStatusCommand(text) {
   return /^\/status(?:@\w+)?$/i.test(String(text || "").trim());
+}
+
+function normalizeIdentity(value) {
+  return String(value || "").trim().toLowerCase().replace(/^@/, "");
+}
+
+function collectMessageSourceCandidates(message, sender) {
+  const messageChat = message?.chat || null;
+  const peerId =
+    typeof message?.chatId?.toString === "function"
+      ? message.chatId.toString()
+      : String(message?.chatId || "").trim();
+
+  return {
+    chatId: peerId,
+    usernames: [
+      sender?.username,
+      messageChat?.username,
+      message?.chat?.username,
+    ]
+      .map((value) => normalizeIdentity(value))
+      .filter(Boolean),
+    labels: [
+      sender?.firstName,
+      sender?.title,
+      messageChat?.title,
+      messageChat?.username,
+    ]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean),
+  };
+}
+
+function isGwAlertSourceMessage({ message, sender, text }) {
+  const expectedChatId = String(gwPriceAlertChatId || "").trim();
+  const expectedUsername = normalizeIdentity(gwPriceAlertUsername);
+  const source = collectMessageSourceCandidates(message, sender);
+
+  const chatIdMatches = Boolean(
+    expectedChatId && source.chatId && String(source.chatId) === expectedChatId,
+  );
+  const usernameMatches = Boolean(
+    expectedUsername && source.usernames.some((value) => value === expectedUsername),
+  );
+  const looksLikeGwAlert = isGwPriceAlertText(text);
+
+  if (chatIdMatches || usernameMatches) {
+    return {
+      matched: true,
+      reason: chatIdMatches ? "source_chat_id" : "source_username",
+      source,
+    };
+  }
+
+  if (!expectedChatId && expectedUsername && looksLikeGwAlert) {
+    return {
+      matched: true,
+      reason: "price_alert_text_fallback",
+      source,
+    };
+  }
+
+  return {
+    matched: false,
+    reason: looksLikeGwAlert ? "source_identity_mismatch" : "not_gw_alert_text",
+    source,
+  };
 }
 
 async function releaseSessionLock() {
@@ -334,7 +408,7 @@ async function startUserClient({ strict = false } = {}) {
       await startSavedMessagesStatusWatcher(client);
       console.log("User-client ishga tushdi.");
 
-      client.addEventHandler(async (event) => {
+      const handleIncomingTelegramMessage = async (event) => {
         try {
           const message = event.message;
           if (!message) return;
@@ -367,18 +441,56 @@ async function startUserClient({ strict = false } = {}) {
               ? await message.getSender()
               : null);
           const senderUsername = String(sender?.username || "").trim();
-          const isGwAlertMessage = shouldProcessCardxabarMessage({
-            configuredChatId: gwPriceAlertChatId,
-            configuredUsername: gwPriceAlertUsername,
-            messageChatId: chatId,
-            senderUsername,
+          const gwSourceMatch = isGwAlertSourceMessage({
+            message,
+            sender,
+            text,
           });
-          if (isGwAlertMessage) {
+          if (gwSourceMatch.matched) {
             const alertResult = await processGwPriceAlertMessage(text);
             runtimeStatus.lastGwAlertAt = new Date().toISOString();
-            if (alertResult?.ok) {
+            runtimeStatus.lastGwAlertReason = String(alertResult?.reason || gwSourceMatch.reason || "").trim();
+            runtimeStatus.lastGwAlertSource = [
+              `chat:${gwSourceMatch.source?.chatId || "-"}`,
+              `user:${(gwSourceMatch.source?.usernames || [])[0] || "-"}`,
+              `mode:${gwSourceMatch.reason}`,
+            ].join(" | ");
+            if (alertResult?.sent > 0) {
               runtimeStatus.processedGwAlerts += Number(alertResult.sent || 0);
             }
+            console.log(
+              "[gw-price-alert]",
+              JSON.stringify({
+                reason: alertResult?.reason || "",
+                parsed: Number(alertResult?.parsed || 0),
+                matched: Number(alertResult?.matched || 0),
+                sent: Number(alertResult?.sent || 0),
+                skipped: Number(alertResult?.skipped || 0),
+                unmatched: Array.isArray(alertResult?.unmatched)
+                  ? alertResult.unmatched.slice(0, 5)
+                  : [],
+                sendFailures: Array.isArray(alertResult?.sendFailures)
+                  ? alertResult.sendFailures.slice(0, 3)
+                  : [],
+                source: gwSourceMatch.source,
+              }),
+            );
+          }
+          else if (isGwPriceAlertText(text)) {
+            runtimeStatus.lastGwAlertAt = new Date().toISOString();
+            runtimeStatus.lastGwAlertReason = gwSourceMatch.reason;
+            runtimeStatus.lastGwAlertSource = [
+              `chat:${gwSourceMatch.source?.chatId || "-"}`,
+              `user:${(gwSourceMatch.source?.usernames || [])[0] || "-"}`,
+              `mode:${gwSourceMatch.reason}`,
+            ].join(" | ");
+            console.log(
+              "[gw-price-alert]",
+              JSON.stringify({
+                reason: gwSourceMatch.reason,
+                source: gwSourceMatch.source,
+              }),
+            );
           }
 
           if (
@@ -408,7 +520,9 @@ async function startUserClient({ strict = false } = {}) {
           markRuntimeError(err.message);
           console.error("User-client message error:", err.message);
         }
-      }, new NewMessage({}));
+      };
+
+      client.addEventHandler(handleIncomingTelegramMessage, new NewMessage({}));
 
       activeClient = client;
       return client;
