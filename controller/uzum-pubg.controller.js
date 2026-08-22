@@ -87,14 +87,7 @@ function mapPubgPlan(plan) {
   return {
     code: String(plan?.code || ""),
     label: String(plan?.label || ""),
-    amount: Number(plan?.amount || 0),
     price: Number(plan?.basePrice || 0),
-    currency: String(plan?.currency || "UZS"),
-    isActive: Boolean(plan?.isActive),
-    available:
-      plan?.provider === "gw"
-        ? Boolean(plan?.providerAvailable) && (!isGwPubgAutobuyEnabled() || isPlanReady(plan))
-        : Boolean(plan?.isActive),
   };
 }
 
