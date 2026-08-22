@@ -230,7 +230,9 @@ class UzumPubgController {
     if (!plan) return res.json({ serviceId, timestamp: Date.now(), status: "FAILED", errorCode: "10007" });
     const expectedAmount = Math.max(0, Math.round(Number(plan.basePrice || 0)));
     if (expectedAmount <= 0) return res.json({ serviceId, timestamp: Date.now(), status: "FAILED", errorCode: "10007" });
-    if (priceAmount !== expectedAmount) {
+    // Uzum sends price_amount in tiyin, while plans and orders store UZS.
+    const expectedPriceAmountInTiyin = expectedAmount * 100;
+    if (priceAmount !== expectedPriceAmountInTiyin) {
       return res.json({ serviceId, timestamp: Date.now(), status: "FAILED", errorCode: "10011" });
     }
 
