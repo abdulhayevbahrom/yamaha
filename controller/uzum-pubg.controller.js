@@ -88,17 +88,13 @@ function mapPubgPlan(plan) {
     code: String(plan?.code || ""),
     label: String(plan?.label || ""),
     amount: Number(plan?.amount || 0),
-    basePrice: Number(plan?.basePrice || 0),
+    price: Number(plan?.basePrice || 0),
     currency: String(plan?.currency || "UZS"),
     isActive: Boolean(plan?.isActive),
-    provider: String(plan?.provider || "manual"),
-    providerProductId: String(plan?.providerProductId || ""),
-    providerAvailable: Boolean(plan?.providerAvailable),
     available:
       plan?.provider === "gw"
         ? Boolean(plan?.providerAvailable) && (!isGwPubgAutobuyEnabled() || isPlanReady(plan))
         : Boolean(plan?.isActive),
-    providerSyncedAt: plan?.providerSyncedAt || null,
   };
 }
 
