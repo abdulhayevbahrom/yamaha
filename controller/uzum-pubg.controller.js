@@ -66,7 +66,14 @@ function missingParams(res, serviceId) {
 }
 
 function getPlanCodeFromBody(reqBody) {
-  return normalize(reqBody?.planCode || reqBody?.params?.planCode || reqBody?.params?.quantity || reqBody?.params?.amount);
+  return normalize(
+    reqBody?.code ||
+      reqBody?.params?.code ||
+      reqBody?.planCode ||
+      reqBody?.params?.planCode ||
+      reqBody?.params?.quantity ||
+      reqBody?.params?.amount
+  );
 }
 
 function getPlayerIdFromBody(reqBody) {
