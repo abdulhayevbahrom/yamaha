@@ -95,6 +95,7 @@ const DEFAULT_NFT_WITHDRAWAL_CONFIG = {
 };
 const DEFAULT_SUPPORT_CONFIG = {
   username: "@manager_premium",
+  termsLink: "https://telegra.ph/BuyStarsUzBot-foydalanuvchi-shartlari-08-17",
 };
 
 function normalizeRewardCatalogItem(item = {}, fallbackInviteThreshold = 0, index = 0) {
@@ -359,9 +360,13 @@ async function getSupportConfig() {
   const doc = await Settings.findOne({ key: "support_config" }).lean();
   const configured = String(doc?.value?.username || "").trim();
   const fallback = String(DEFAULT_SUPPORT_CONFIG.username || "").trim();
+  const termsLink = String(
+    doc?.value?.termsLink || DEFAULT_SUPPORT_CONFIG.termsLink || "",
+  ).trim();
   const normalized = configured || fallback;
   return {
     username: normalized.startsWith("@") ? normalized : `@${normalized.replace(/^@+/, "")}`,
+    termsLink,
   };
 }
 
@@ -730,18 +735,22 @@ async function updateNftWithdrawalConfig(payload) {
 
 async function updateSupportConfig(payload) {
   const username = String(payload?.username || "").trim().replace(/^@+/, "");
+  const termsLink = String(payload?.termsLink || "").trim();
   if (!username) {
     throw new Error("support username required");
   }
   const normalized = `@${username}`;
   const doc = await Settings.findOneAndUpdate(
     { key: "support_config" },
-    { value: { username: normalized } },
+    { value: { username: normalized, termsLink } },
     { new: true, upsert: true },
   ).lean();
   const saved = String(doc?.value?.username || normalized).trim();
   return {
     username: saved.startsWith("@") ? saved : `@${saved.replace(/^@+/, "")}`,
+    termsLink: String(
+      doc?.value?.termsLink || DEFAULT_SUPPORT_CONFIG.termsLink || "",
+    ).trim(),
   };
 }
 

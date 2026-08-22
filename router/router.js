@@ -5,6 +5,7 @@ const adminController = require("../controller/admin.controller");
 const contestController = require("../controller/contest.controller");
 const userController = require("../controller/user.controller");
 const giftController = require("../controller/gift.controller");
+const uzumPubgController = require("../controller/uzum-pubg.controller");
 const authMiddleware = require("../middleware/auth.middleware");
 const botActiveMiddleware = require("../middleware/bot-active.middleware");
 const { requireTelegramAuth } = require("../middleware/telegram-auth.middleware");
@@ -52,6 +53,11 @@ router.get("/force-join/check", publicController.checkForceJoin);
 router.get("/lookup-profile", publicController.lookupProfile);
 router.get("/premium-status", publicController.checkPremiumStatus);
 router.get("/mlbb/check-role", publicController.checkMlbbRole);
+router.post("/uzum/pubg/catalog", uzumPubgController.catalog);
+router.post("/uzum/pubg/check", uzumPubgController.check);
+router.post("/uzum/pubg/create", uzumPubgController.create);
+router.post("/uzum/pubg/confirm", uzumPubgController.confirm);
+router.post("/uzum/pubg/status", uzumPubgController.status);
 router.post(
   "/pubg/check-player",
   telegramAuthMiddleware,
