@@ -317,19 +317,13 @@ class UzumPubgController {
       product: order.product,
     });
 
-    if (isGwPubgAutobuyEnabled()) {
-      void autoFulfillGwPubg(order).catch((error) => {
-        console.error("Uzum PUBG auto fulfill error:", order._id, error.message);
-      });
-    }
-
     return res.json({
       serviceId,
       transId,
       status: "CREATED",
       transTime: order?.createdAt ? new Date(order.createdAt).getTime() : Date.now(),
       data: {},
-      amount: expectedAmount,
+      amount: expectedPriceAmountInTiyin,
     });
   }
 
@@ -360,10 +354,28 @@ class UzumPubgController {
       });
     }
 
+    if (order.fulfillmentStatus !== "success") {
+      if (!isGwPubgAutobuyEnabled()) {
+        return res.json({ serviceId, transId, status: "FAILED", errorCode: "10015" });
+      }
+
+      let fulfillmentResult;
+      try {
+        fulfillmentResult = await autoFulfillGwPubg(order);
+      } catch (error) {
+        console.error("Uzum PUBG auto fulfill error:", order._id, error.message);
+        return res.json({ serviceId, transId, status: "FAILED", errorCode: "99999" });
+      }
+
+      if (!fulfillmentResult?.ok) {
+        return res.json({ serviceId, transId, status: "FAILED", errorCode: "10015" });
+      }
+    }
+
     return res.json({
       serviceId,
       transId,
-      confirmTime: order.updatedAt ? new Date(order.updatedAt).getTime() : Date.now(),
+      confirmTime: Date.now(),
       status: "CONFIRMED",
       data: {},
       amount: Math.max(0, Math.round(Number(order.expectedAmount || order.paidAmount || 0))) * 100,
