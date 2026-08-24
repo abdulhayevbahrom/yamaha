@@ -39,7 +39,7 @@ function decodeBasicAuth(headerValue) {
 }
 
 function authFailed(res, serviceId) {
-  return res.json({
+  return sendUzumResponse(res, {
     serviceId,
     timestamp: Date.now(),
     status: "FAILED",
@@ -48,7 +48,7 @@ function authFailed(res, serviceId) {
 }
 
 function invalidServiceId(res, serviceId) {
-  return res.json({
+  return sendUzumResponse(res, {
     serviceId,
     timestamp: Date.now(),
     status: "FAILED",
@@ -57,12 +57,32 @@ function invalidServiceId(res, serviceId) {
 }
 
 function missingParams(res, serviceId) {
-  return res.json({
+  return sendUzumResponse(res, {
     serviceId,
     timestamp: Date.now(),
     status: "FAILED",
     errorCode: "10005",
   });
+}
+
+function sendUzumResponse(res, payload) {
+  if (payload?.status === "FAILED") {
+    const httpStatus = payload.errorCode === "99999" ? 500 : 400;
+    return res.status(httpStatus).json(payload);
+  }
+  return res.status(200).json(payload);
+}
+
+function applyUzumHttpStatus(res) {
+  const json = res.json.bind(res);
+  res.json = (payload) => {
+    if (payload?.status === "FAILED") {
+      res.status(payload.errorCode === "99999" ? 500 : 400);
+    } else {
+      res.status(200);
+    }
+    return json(payload);
+  };
 }
 
 function getPlanCodeFromBody(reqBody) {
@@ -122,6 +142,7 @@ async function buildResponsePrice(plan) {
 
 class UzumPubgController {
   async catalog(req, res) {
+    applyUzumHttpStatus(res);
     const serviceId = Number(req.body?.serviceId || 0);
     if (!isServiceIdValid(serviceId)) return invalidServiceId(res, serviceId || req.body?.serviceId);
     if (!isAuthValid(req)) return authFailed(res, serviceId);
@@ -151,6 +172,7 @@ class UzumPubgController {
   }
 
   async check(req, res) {
+    applyUzumHttpStatus(res);
     const serviceId = Number(req.body?.serviceId || 0);
     if (!isServiceIdValid(serviceId)) return invalidServiceId(res, serviceId || req.body?.serviceId);
     if (!isAuthValid(req)) return authFailed(res, serviceId);
@@ -202,6 +224,7 @@ class UzumPubgController {
   }
 
   async create(req, res) {
+    applyUzumHttpStatus(res);
     const serviceId = Number(req.body?.serviceId || 0);
     if (!isServiceIdValid(serviceId)) return invalidServiceId(res, serviceId || req.body?.serviceId);
     if (!isAuthValid(req)) return authFailed(res, serviceId);
@@ -311,6 +334,7 @@ class UzumPubgController {
   }
 
   async confirm(req, res) {
+    applyUzumHttpStatus(res);
     const serviceId = Number(req.body?.serviceId || 0);
     if (!isServiceIdValid(serviceId)) return invalidServiceId(res, serviceId || req.body?.serviceId);
     if (!isAuthValid(req)) return authFailed(res, serviceId);
@@ -347,6 +371,7 @@ class UzumPubgController {
   }
 
   async status(req, res) {
+    applyUzumHttpStatus(res);
     const serviceId = Number(req.body?.serviceId || 0);
     if (!isServiceIdValid(serviceId)) return invalidServiceId(res, serviceId || req.body?.serviceId);
     if (!isAuthValid(req)) return authFailed(res, serviceId);
