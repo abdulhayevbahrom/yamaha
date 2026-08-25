@@ -140,6 +140,64 @@ async function buildResponsePrice(plan) {
   return Math.max(0, Math.round(Number(plan?.basePrice || 0)));
 }
 
+function isFulfillmentSuccessful(order) {
+  return order?.status === "completed" && order?.fulfillmentStatus === "success";
+}
+
+function isFulfillmentTerminalFailure(order) {
+  return (
+    ["cancelled", "failed"].includes(String(order?.status || "")) ||
+    order?.fulfillmentStatus === "needs_review"
+  );
+}
+
+function getConfirmWaitMs() {
+  const configured = Number(process.env.UZUM_PUBG_CONFIRM_WAIT_MS);
+  return Number.isFinite(configured) && configured >= 0 ? configured : 125_000;
+}
+
+function getConfirmCheckIntervalMs() {
+  const configured = Number(process.env.UZUM_PUBG_CONFIRM_CHECK_INTERVAL_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : 500;
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForFulfillmentResult(order) {
+  const deadline = Date.now() + getConfirmWaitMs();
+  const intervalMs = getConfirmCheckIntervalMs();
+  let latestOrder = order;
+
+  while (
+    !isFulfillmentSuccessful(latestOrder) &&
+    !isFulfillmentTerminalFailure(latestOrder) &&
+    Date.now() < deadline
+  ) {
+    await wait(Math.min(intervalMs, Math.max(1, deadline - Date.now())));
+    latestOrder = await Order.findById(order._id).lean();
+    if (!latestOrder) break;
+  }
+
+  return latestOrder;
+}
+
+function buildConfirmedResponse(serviceId, transId, order) {
+  return {
+    serviceId,
+    transId,
+    confirmTime: order?.fulfilledAt
+      ? new Date(order.fulfilledAt).getTime()
+      : order?.updatedAt
+        ? new Date(order.updatedAt).getTime()
+        : Date.now(),
+    status: "CONFIRMED",
+    data: {},
+    amount: Math.max(0, Math.round(Number(order?.expectedAmount || order?.paidAmount || 0))) * 100,
+  };
+}
+
 class UzumPubgController {
   async catalog(req, res) {
     applyUzumHttpStatus(res);
@@ -341,7 +399,7 @@ class UzumPubgController {
       return res.json({ serviceId, transId, status: "FAILED", errorCode: "10014" });
     }
     if (order.status === "cancelled" || order.status === "failed") {
-      return res.json({ serviceId, transId, status: "FAILED", errorCode: "10015" });
+      return res.json({ serviceId, transId, confirmTime: null, status: "FAILED", errorCode: "10015" });
     }
     if (order.status === "reversed") {
       return res.json({
@@ -354,9 +412,10 @@ class UzumPubgController {
       });
     }
 
-    if (order.fulfillmentStatus !== "success") {
+    let finalOrder = order;
+    if (!isFulfillmentSuccessful(finalOrder)) {
       if (!isGwPubgAutobuyEnabled()) {
-        return res.json({ serviceId, transId, status: "FAILED", errorCode: "10015" });
+        return res.json({ serviceId, transId, confirmTime: null, status: "FAILED", errorCode: "10015" });
       }
 
       let fulfillmentResult;
@@ -367,32 +426,20 @@ class UzumPubgController {
         return res.json({ serviceId, transId, status: "FAILED", errorCode: "99999" });
       }
 
-      if (!fulfillmentResult?.ok) {
-        if (fulfillmentResult?.skipped && fulfillmentResult?.reason === "not_claimed") {
-          const latestOrder = await Order.findOne({ paymentEventKey: transId }).lean();
-          if (latestOrder?.status === "completed" || latestOrder?.fulfillmentStatus === "success") {
-            return res.json({
-              serviceId,
-              transId,
-              confirmTime: latestOrder.updatedAt ? new Date(latestOrder.updatedAt).getTime() : Date.now(),
-              status: "CONFIRMED",
-              data: {},
-              amount: Math.max(0, Math.round(Number(latestOrder.expectedAmount || latestOrder.paidAmount || 0))) * 100,
-            });
-          }
-        }
-        return res.json({ serviceId, transId, status: "FAILED", errorCode: "10015" });
+      finalOrder = fulfillmentResult?.order?.toObject
+        ? fulfillmentResult.order.toObject()
+        : fulfillmentResult?.order || await Order.findById(order._id).lean();
+
+      if (!isFulfillmentSuccessful(finalOrder) && !isFulfillmentTerminalFailure(finalOrder)) {
+        finalOrder = await waitForFulfillmentResult(finalOrder || order);
       }
     }
 
-    return res.json({
-      serviceId,
-      transId,
-      confirmTime: Date.now(),
-      status: "CONFIRMED",
-      data: {},
-      amount: Math.max(0, Math.round(Number(order.expectedAmount || order.paidAmount || 0))) * 100,
-    });
+    if (!isFulfillmentSuccessful(finalOrder)) {
+      return res.json({ serviceId, transId, confirmTime: null, status: "FAILED", errorCode: "10015" });
+    }
+
+    return res.json(buildConfirmedResponse(serviceId, transId, finalOrder));
   }
 
   async status(req, res) {
@@ -421,7 +468,7 @@ class UzumPubgController {
       });
     }
 
-    if (order.status === "completed" || order.status === "paid_auto_processed" || order.status === "admin_action_processing") {
+    if (isFulfillmentSuccessful(order)) {
       return res.json({
         serviceId,
         transId,

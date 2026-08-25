@@ -55,7 +55,7 @@ function providerTx(order, payload, extra = {}) {
     provider: "gw",
     providerVersion: "v1",
     productType: "pubg",
-    providerOrderId: providerOrderId(payload),
+    providerOrderId: providerOrderId(payload) || previous.providerOrderId || "",
     providerStatus: normalizeStatus(payload),
     trxid: `YMH-PUBG-${String(order.orderId)}`,
     requestedAt: order?.fragmentTx?.requestedAt || new Date(),
@@ -91,6 +91,19 @@ async function complete(order, payload) {
 }
 
 async function cancelAndRefund(order, payload) {
+  if (order?.paymentMethod === "uzumbank") {
+    const updated = await Order.findByIdAndUpdate(order._id, { $set: {
+      status: "cancelled", fulfillmentStatus: "skipped",
+      fulfillmentError: providerError(payload), fulfilledAt: new Date(),
+      fragmentTx: providerTx(order, payload, { cancelledAt: new Date() }),
+    } }, { new: true });
+    emitUserUpdate(updated.tgUserId, {
+      type: "game_order_cancelled", refreshOrders: true,
+      orderId: updated._id, status: updated.status, product: updated.product,
+    });
+    return { ok: false, cancelled: true, order: updated };
+  }
+
   const refund = await refundToBalance(order);
   if (!refund.ok) {
     await Order.findByIdAndUpdate(order._id, { $set: {
@@ -151,7 +164,7 @@ async function handlePayload(order, payload) {
   await Order.findByIdAndUpdate(order._id, { $set: {
     fulfillmentStatus: attempts >= maxAttempts ? "needs_review" : "processing",
     fulfillmentError: attempts >= maxAttempts ? "GW status polling timeout" : "",
-    fragmentTx: providerTx(order, payload, { pollAttempts: attempts }),
+    fragmentTx: providerTx(order, payload, { phase: "polling", pollAttempts: attempts }),
   } });
   if (attempts < maxAttempts) schedulePoll(order._id);
   return { ok: false, processing: attempts < maxAttempts, needsReview: attempts >= maxAttempts };

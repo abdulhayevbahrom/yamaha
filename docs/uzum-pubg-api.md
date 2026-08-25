@@ -31,6 +31,8 @@ Basic base64(login:password)
 UZUM_PUBG_SERVICE_IDS=7814652
 UZUM_PUBG_LOGIN=uzumloginforpubg
 UZUM_PUBG_PASSWORD=uzumpasswordforpubg
+UZUM_PUBG_CONFIRM_WAIT_MS=125000
+UZUM_PUBG_CONFIRM_CHECK_INTERVAL_MS=500
 ```
 
 ## Endpointlar
@@ -90,6 +92,10 @@ Response `CREATED`:
 ```
 
 ### `POST /uzum/pubg/confirm`
+
+`confirm` GW sotuvining yakuniy natijasini kutadi. Faqat order `completed/success`
+bo'lganda `CONFIRMED`, sotuv bekor qilingan yoki yakunlanmagan bo'lsa `10015`
+qaytaradi. Kutish muddati `UZUM_PUBG_CONFIRM_WAIT_MS` orqali sozlanadi.
 
 Request body:
 ```json
