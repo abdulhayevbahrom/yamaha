@@ -368,6 +368,19 @@ class UzumPubgController {
       }
 
       if (!fulfillmentResult?.ok) {
+        if (fulfillmentResult?.skipped && fulfillmentResult?.reason === "not_claimed") {
+          const latestOrder = await Order.findOne({ paymentEventKey: transId }).lean();
+          if (latestOrder?.status === "completed" || latestOrder?.fulfillmentStatus === "success") {
+            return res.json({
+              serviceId,
+              transId,
+              confirmTime: latestOrder.updatedAt ? new Date(latestOrder.updatedAt).getTime() : Date.now(),
+              status: "CONFIRMED",
+              data: {},
+              amount: Math.max(0, Math.round(Number(latestOrder.expectedAmount || latestOrder.paidAmount || 0))) * 100,
+            });
+          }
+        }
         return res.json({ serviceId, transId, status: "FAILED", errorCode: "10015" });
       }
     }
