@@ -96,6 +96,7 @@ Response `CREATED`:
 `confirm` GW sotuvining yakuniy natijasini kutadi. Faqat order `completed/success`
 bo'lganda `CONFIRMED`, sotuv bekor qilingan yoki yakunlanmagan bo'lsa `10015`
 qaytaradi. Kutish muddati `UZUM_PUBG_CONFIRM_WAIT_MS` orqali sozlanadi.
+`confirmTime` response yuborilgan vaqt emas, GW sotuv muvaffaqiyatli yakunlangan vaqt.
 
 Request body:
 ```json
@@ -118,6 +119,9 @@ Response `CONFIRMED`:
 ```
 
 ### `POST /uzum/pubg/status`
+
+`transTime` order `/create` orqali yaratilgan vaqtni, `confirmTime` esa sotuv
+muvaffaqiyatli yakunlangan vaqtni qaytaradi.
 
 Request body:
 ```json

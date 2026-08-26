@@ -165,6 +165,20 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function toTimestamp(value) {
+  if (!value) return null;
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function getTransactionTime(order) {
+  return toTimestamp(order?.createdAt);
+}
+
+function getConfirmationTime(order) {
+  return toTimestamp(order?.fulfilledAt) || toTimestamp(order?.fragmentTx?.completedAt);
+}
+
 async function waitForFulfillmentResult(order) {
   const deadline = Date.now() + getConfirmWaitMs();
   const intervalMs = getConfirmCheckIntervalMs();
@@ -187,11 +201,7 @@ function buildConfirmedResponse(serviceId, transId, order) {
   return {
     serviceId,
     transId,
-    confirmTime: order?.fulfilledAt
-      ? new Date(order.fulfilledAt).getTime()
-      : order?.updatedAt
-        ? new Date(order.updatedAt).getTime()
-        : Date.now(),
+    confirmTime: getConfirmationTime(order),
     status: "CONFIRMED",
     data: {},
     amount: Math.max(0, Math.round(Number(order?.expectedAmount || order?.paidAmount || 0))) * 100,
@@ -379,7 +389,7 @@ class UzumPubgController {
       serviceId,
       transId,
       status: "CREATED",
-      transTime: order?.createdAt ? new Date(order.createdAt).getTime() : Date.now(),
+      transTime: getTransactionTime(order),
       data: {},
       amount: expectedPriceAmountInTiyin,
     });
@@ -461,8 +471,8 @@ class UzumPubgController {
         serviceId,
         transId,
         status: "REVERSED",
-        transTime: order.createdAt ? new Date(order.createdAt).getTime() : Date.now(),
-        confirmTime: order.updatedAt ? new Date(order.updatedAt).getTime() : Date.now(),
+        transTime: getTransactionTime(order),
+        confirmTime: getConfirmationTime(order),
         reverseTime: order.updatedAt ? new Date(order.updatedAt).getTime() : Date.now(),
         errorCode: "10014",
       });
@@ -473,8 +483,8 @@ class UzumPubgController {
         serviceId,
         transId,
         status: "CONFIRMED",
-        transTime: order.createdAt ? new Date(order.createdAt).getTime() : Date.now(),
-        confirmTime: order.updatedAt ? new Date(order.updatedAt).getTime() : Date.now(),
+        transTime: getTransactionTime(order),
+        confirmTime: getConfirmationTime(order),
         reverseTime: null,
         data: {
           player_id: { value: String(order.playerId || order.username || "") },

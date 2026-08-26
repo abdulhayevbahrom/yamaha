@@ -89,6 +89,7 @@ test("Uzum PUBG confirm waits for a processing GW sale to complete", async () =>
     status: "completed",
     fulfillmentStatus: "success",
     fulfilledAt: new Date("2026-08-25T12:00:00.000Z"),
+    updatedAt: new Date("2026-08-25T12:05:00.000Z"),
   };
 
   await withController(async () => ({ ok: false, processing: true }), async (controller) => {
@@ -104,6 +105,7 @@ test("Uzum PUBG confirm waits for a processing GW sale to complete", async () =>
     assert.equal(res.statusCode, 200);
     assert.equal(res.body.status, "CONFIRMED");
     assert.equal(res.body.amount, 1200000);
+    assert.equal(res.body.confirmTime, new Date("2026-08-25T12:00:00.000Z").getTime());
     assert.equal(res.body.errorCode, undefined);
   });
 });
@@ -151,5 +153,29 @@ test("Uzum PUBG status does not confirm a sale that is still processing", async 
     assert.equal(res.statusCode, 400);
     assert.equal(res.body.status, "FAILED");
     assert.equal(res.body.errorCode, "10014");
+  });
+});
+
+test("Uzum PUBG status returns create and confirmation times from their own fields", async () => {
+  const completedOrder = {
+    _id: "order-4",
+    status: "completed",
+    fulfillmentStatus: "success",
+    expectedAmount: 12000,
+    createdAt: new Date("2026-08-25T11:59:00.000Z"),
+    fulfilledAt: new Date("2026-08-25T12:00:00.000Z"),
+    updatedAt: new Date("2026-08-25T12:05:00.000Z"),
+  };
+
+  await withController(async () => ({ ok: true, order: completedOrder }), async (controller) => {
+    Order.findOne = () => ({ lean: async () => completedOrder });
+
+    const res = buildResponse();
+    await controller.status(buildRequest({ serviceId: 7814652, transId: "uzum-4" }), res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.status, "CONFIRMED");
+    assert.equal(res.body.transTime, new Date("2026-08-25T11:59:00.000Z").getTime());
+    assert.equal(res.body.confirmTime, new Date("2026-08-25T12:00:00.000Z").getTime());
   });
 });
