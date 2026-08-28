@@ -103,7 +103,7 @@ const {
 
 let sequence = 1;
 const PENDING_TTL_MS = 10 * 60 * 1000;
-const ORDER_PAYMENT_METHODS = ["card", "bankomat", "uzumbank", "paynet", "click", "balance", "stars"];
+const ORDER_PAYMENT_METHODS = ["card", "bankomat", "paynet", "click", "balance", "stars"];
 const STARS_INVOICE_PRODUCTS = new Set(["uc", "freefire", "mlbb", "hok", "roblox", "bloodstrike", "deltaforce", "star_sell"]);
 
 function isProviderAuthError(error) {

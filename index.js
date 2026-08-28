@@ -122,7 +122,6 @@ app.use(
       "/gifts/nft-pattern/",
       "/hero-slides",
     ],
-    ignorePrefixes: ["/uzum/pubg"],
   }),
   createWebAppSessionGuard({
     ignorePrefixes: ["/health"],
@@ -132,11 +131,10 @@ app.use(
       "/gifts/nft-pattern/",
       "/hero-slides",
     ],
-    ignorePrefixes: ["/uzum/pubg"],
   }),
   createRequestReplayGuard({
     windowMs: Number(process.env.REQUEST_REPLAY_WINDOW_MS || 120_000),
-    ignorePrefixes: ["/health", "/uzum/pubg"],
+    ignorePrefixes: ["/health"],
   }),
   createTurnstileGuard({
     protectedPrefixes: [
@@ -146,7 +144,6 @@ app.use(
       "/admin/hero-slides",
       "/admin/login",
     ],
-    ignorePrefixes: ["/uzum/pubg"],
   }),
   router,
 );

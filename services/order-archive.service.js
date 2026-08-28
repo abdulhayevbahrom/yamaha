@@ -1,6 +1,7 @@
 const Order = require("../model/order.model");
 const Plan = require("../model/plan.model");
 const { sendTelegramText } = require("./telegram-notify.service");
+const { checkGwBalanceAfterSale } = require("./gw-balance-alert.service");
 
 const ARCHIVE_CHANNEL_ID = String(
   process.env.ORDER_ARCHIVE_CHAT_ID || "@BuyStarsArxiv",
@@ -101,6 +102,15 @@ async function sendOrderArchive(orderOrId, options = {}) {
 
     if (!order || !ARCHIVE_CHANNEL_ID) {
       return { ok: false, reason: "order_or_channel_missing" };
+    }
+
+    if (String(order?.fragmentTx?.provider || "").toLowerCase() === "gw") {
+      const claimed = await Order.findOneAndUpdate(
+        { _id: order._id, gwBalanceAlertCheckedAt: null },
+        { $set: { gwBalanceAlertCheckedAt: new Date() } },
+        { new: true },
+      ).lean();
+      if (claimed) checkGwBalanceAfterSale(order._id);
     }
 
     if (order.archiveSentAt) {

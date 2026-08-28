@@ -541,6 +541,11 @@ async function createOrder(body) {
   return response.data;
 }
 
+async function getBalance() {
+  const response = await createClient().get("/balance");
+  return response.data;
+}
+
 async function createGameKeyOrder(body) {
   const client = createClient();
   try {
@@ -603,6 +608,7 @@ module.exports = {
   getRobloxProducts,
   getBloodStrikeProducts,
   getDeltaForceProducts,
+  getBalance,
   createOrder,
   createGameKeyOrder,
   createRedeemOrder,
