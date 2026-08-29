@@ -144,6 +144,11 @@ function getTopSalesOrderFilter(startDate) {
     product: { $in: TOP_SALES_PRODUCTS, $ne: "balance" },
     status: "completed",
     fulfillmentStatus: "success",
+    // Administrators can complete an order manually after automatic
+    // fulfillment needs review. Those orders must not affect the sales Top 10.
+    // `$ne` preserves legacy automatic orders created before completionMode
+    // was introduced.
+    completionMode: { $ne: "manual" },
     $or: [{ paidAt: { $gte: startDate } }, { createdAt: { $gte: startDate } }],
   };
 }

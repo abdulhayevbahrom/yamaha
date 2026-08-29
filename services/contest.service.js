@@ -188,6 +188,7 @@ async function buildContestLeaderboard(contest) {
       ? Order.find({
           product: { $in: selectedOrderProducts },
           status: { $in: SUCCESS_STATUSES },
+          completionMode: { $ne: "manual" },
           createdAt: { $lte: endsAt },
         })
           .select({

@@ -23,6 +23,7 @@ test("top sales only queries successfully completed purchases", () => {
 
   assert.equal(filter.status, "completed");
   assert.equal(filter.fulfillmentStatus, "success");
+  assert.deepEqual(filter.completionMode, { $ne: "manual" });
   assert.deepEqual(filter.product.$in, ["star", "premium", "uc", "freefire", "mlbb", "hok", "roblox", "bloodstrike", "deltaforce"]);
   assert.equal(filter.product.$ne, "balance");
   assert.deepEqual(filter.$or, [

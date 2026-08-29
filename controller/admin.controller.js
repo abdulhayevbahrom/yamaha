@@ -2450,6 +2450,7 @@ const getActiveUsers = async (req, res) => {
     const rows = await Order.find({
       product: { $in: ["star", "premium", "uc", "freefire", "mlbb", "hok", "roblox", "bloodstrike", "deltaforce"] },
       status: { $in: ["paid_auto_processed", "completed"] },
+      completionMode: { $ne: "manual" },
       $or: [{ paidAt: { $gte: start } }, { createdAt: { $gte: start } }],
       tgUserId: { $exists: true, $ne: "" },
     })
