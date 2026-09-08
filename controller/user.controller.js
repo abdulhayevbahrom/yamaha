@@ -1200,7 +1200,7 @@ async function createBalanceTopup(req, res) {
     const amount = Number(req.body?.amount || 0);
     const paymentMethod = String(req.body?.paymentMethod || "card").trim();
     const minTopupAmount = Math.max(
-      1,
+      1000,
       Number(process.env.MIN_BALANCE_TOPUP_UZS || 1000),
     );
     const maxTopupAmount = Math.max(
@@ -1212,7 +1212,10 @@ async function createBalanceTopup(req, res) {
       amount < minTopupAmount ||
       amount > maxTopupAmount
     ) {
-      return response.error(res, "Summani kiriting");
+      return response.error(
+        res,
+        `Minimal to'ldirish summasi ${minTopupAmount.toLocaleString("uz-UZ")} UZS`,
+      );
     }
     if (!["card", "bankomat"].includes(paymentMethod)) {
       return response.error(res, "To'lov usuli noto'g'ri");
@@ -1235,8 +1238,11 @@ async function createBalanceTopup(req, res) {
       const feePercent = Number(bankomatConfig?.feePercent || 0);
       const netAmount = calculateBankomatNetAmount(amount, feePercent);
 
-      if (netAmount <= 0) {
-        return response.error(res, "Bu summa juda kichik. Kattaroq summa kiriting");
+      if (netAmount < minTopupAmount) {
+        return response.error(
+          res,
+          `Balansga tushadigan summa kamida ${minTopupAmount.toLocaleString("uz-UZ")} UZS bo'lishi kerak`,
+        );
       }
 
       expectedAmount = amount;

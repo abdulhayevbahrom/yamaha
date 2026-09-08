@@ -120,11 +120,11 @@ async function listPaymentCardsForAdmin() {
 
 async function selectPaymentCardForType(type) {
   const config = await getPaymentCardConfig();
-  const cards = await PaymentCard.find({ type, isActive: true })
+  const preferredCards = await PaymentCard.find({ type, isActive: true })
     .sort({ sortOrder: 1, createdAt: 1 })
     .lean();
 
-  if (!cards.length) {
+  if (!preferredCards.length) {
     const fallback = getLegacyFallbackCard(type);
     return {
       ...(fallback || {
@@ -137,11 +137,23 @@ async function selectPaymentCardForType(type) {
   }
 
   const dailyMaxTransactions = Number(config.dailyMaxTransactions || 0);
-  const usageMap = await getCardUsageMap(cards);
+  const alternateCards = await PaymentCard.find({
+    type: { $ne: type },
+    isActive: true,
+  })
+    .sort({ sortOrder: 1, createdAt: 1 })
+    .lean();
+  const usageMap = await getCardUsageMap([...preferredCards, ...alternateCards]);
   const usageDay = getPaymentCardDayKey();
-  const candidates = [...cards];
+  const candidates = [...preferredCards, ...alternateCards];
   if (config.selectionMode === "random") {
-    candidates.sort(() => Math.random() - 0.5);
+    const shuffle = (items) => items.sort(() => Math.random() - 0.5);
+    candidates.splice(
+      0,
+      candidates.length,
+      ...shuffle([...preferredCards]),
+      ...shuffle([...alternateCards]),
+    );
   }
 
   for (const candidate of candidates) {
@@ -182,7 +194,7 @@ async function selectPaymentCardForType(type) {
         usageDay,
       },
       config,
-      reason: "selected",
+      reason: selected.type === type ? "selected" : "alternate_type_selected",
     };
   }
 

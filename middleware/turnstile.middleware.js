@@ -4,6 +4,8 @@ const response = require("../utils/response");
 
 const SITEVERIFY_URL =
   "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+const TURNSTILE_CLIENT_ERROR_MESSAGE =
+  "Xavfsizlik tekshiruvi yuklanmadi. Internetni tekshirib, ilovani qayta oching.";
 
 function normalizeString(value) {
   return String(value || "").trim();
@@ -38,7 +40,7 @@ function createTurnstileGuard(options = {}) {
     if (!secret) {
       return response.serverError(
         res,
-        "Turnstile server sozlamasi topilmadi",
+        "Xavfsizlik tekshiruvi sozlamasi topilmadi",
         "turnstile_secret_missing",
       );
     }
@@ -49,7 +51,7 @@ function createTurnstileGuard(options = {}) {
         req.body?.["cf-turnstile-response"],
     );
     if (!token || token.length > 2048) {
-      return response.unauthorized(res, "Turnstile tekshiruvi talab qilinadi", {
+      return response.unauthorized(res, TURNSTILE_CLIENT_ERROR_MESSAGE, {
         code: "turnstile_token_missing",
       });
     }
@@ -75,7 +77,7 @@ function createTurnstileGuard(options = {}) {
     } catch (error) {
       return response.serverError(
         res,
-        "Turnstile tekshiruv xizmati vaqtincha ishlamayapti",
+        TURNSTILE_CLIENT_ERROR_MESSAGE,
         error?.code === "ECONNABORTED"
           ? "turnstile_timeout"
           : "turnstile_unavailable",
@@ -98,7 +100,7 @@ function createTurnstileGuard(options = {}) {
       (expectedAction && verification?.action !== expectedAction) ||
       (allowedHostnames.length && !allowedHostnames.includes(hostname))
     ) {
-      return response.unauthorized(res, "Turnstile tekshiruvi muvaffaqiyatsiz", {
+      return response.unauthorized(res, TURNSTILE_CLIENT_ERROR_MESSAGE, {
         code: "turnstile_invalid",
       });
     }
