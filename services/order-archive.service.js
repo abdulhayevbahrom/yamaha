@@ -75,9 +75,11 @@ async function getArchiveAmountLabel(order) {
   const product = String(order?.product || "").trim().toLowerCase();
   const planCode = String(order?.planCode || "").trim();
   const customAmount = Number(order?.customAmount || 0);
+  const starsAmount = Number(order?.starsAmount || 0);
 
-  if ((product === "star" || product === "star_sell") && customAmount > 0) {
-    return customAmount;
+  if (product === "star" || product === "star_sell") {
+    if (customAmount > 0) return customAmount;
+    if (starsAmount > 0) return starsAmount;
   }
 
   const plan = planCode
@@ -86,8 +88,8 @@ async function getArchiveAmountLabel(order) {
         .lean()
     : null;
 
-  if (plan?.label) return String(plan.label);
   if (Number(plan?.amount || 0) > 0) return `${plan.amount}`;
+  if (plan?.label) return String(plan.label);
 
   return formatGwPlanCode(product, planCode) || planCode || "-";
 }
@@ -145,5 +147,6 @@ async function sendOrderArchive(orderOrId, options = {}) {
 }
 
 module.exports = {
+  getArchiveAmountLabel,
   sendOrderArchive,
 };
