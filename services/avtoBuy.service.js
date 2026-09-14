@@ -88,18 +88,29 @@ function isFragmentPayloadUnavailableError(payload, error) {
   );
 }
 
+function isFragmentServerError(payload, error) {
+  const statusCode = Number(
+    error?.statusCode || error?.response?.status || payload?.statusCode || 0,
+  );
+  return statusCode >= 500 && statusCode <= 599;
+}
+
 function isRefundableFragmentFailure(payload, error) {
   const errorMessage = error?.message || "";
 
   return (
     isFragmentLowBalanceError(payload, errorMessage) ||
-    isFragmentPayloadUnavailableError(payload, error)
+    isFragmentPayloadUnavailableError(payload, error) ||
+    isFragmentServerError(payload, error)
   );
 }
 
 function getFragmentRefundReason(payload, error) {
   if (isFragmentPayloadUnavailableError(payload, error)) {
     return "fragment_payload_unavailable";
+  }
+  if (isFragmentServerError(payload, error)) {
+    return "fragment_server_error";
   }
   return "fragment_low_balance";
 }
@@ -502,5 +513,6 @@ module.exports = {
   buyPremium,
   autoFulfillOrder,
   isFragmentPayloadUnavailableError,
+  isFragmentServerError,
   isRefundableFragmentFailure,
 };

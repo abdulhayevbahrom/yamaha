@@ -9,6 +9,7 @@ const {
 } = require("../services/order-request-security.service");
 const {
   isFragmentPayloadUnavailableError,
+  isFragmentServerError,
   isRefundableFragmentFailure,
 } = require("../services/avtoBuy.service");
 
@@ -74,7 +75,7 @@ test("Fragment 502 payload errors are refundable", () => {
   assert.equal(isRefundableFragmentFailure(payload, error), true);
 });
 
-test("unrecognized Fragment 502 errors are not auto-refunded", () => {
+test("generic Fragment 502 server errors are auto-refunded", () => {
   const payload = {
     ok: false,
     message: "Temporary upstream error",
@@ -84,5 +85,19 @@ test("unrecognized Fragment 502 errors are not auto-refunded", () => {
   error.response = { status: 502 };
 
   assert.equal(isFragmentPayloadUnavailableError(payload, error), false);
+  assert.equal(isFragmentServerError(payload, error), true);
+  assert.equal(isRefundableFragmentFailure(payload, error), true);
+});
+
+test("Fragment 4xx validation errors are not auto-refunded as server errors", () => {
+  const payload = {
+    ok: false,
+    message: "Invalid recipient",
+    code: "FRAGMENT_ERROR",
+  };
+  const error = new Error("Request failed with status code 400");
+  error.response = { status: 400 };
+
+  assert.equal(isFragmentServerError(payload, error), false);
   assert.equal(isRefundableFragmentFailure(payload, error), false);
 });
