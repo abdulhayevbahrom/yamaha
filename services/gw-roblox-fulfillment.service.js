@@ -1,6 +1,6 @@
 const Order = require("../model/order.model");
 const Plan = require("../model/plan.model");
-const { createGameKeyOrder, getOrder } = require("./gw-api.service");
+const { createGiftCardOrder, getOrder } = require("./gw-api.service");
 const { extractRedeemCodes } = require("./gw-pubg-redeem.service");
 const { refundToBalance } = require("./order-cancel.service");
 const { isAmbiguousExternalError } = require("./external-operation.service");
@@ -15,6 +15,7 @@ const statusOf = (payload) => String(payload?.status || payload?.order?.status |
 const externalId = (payload) => String(payload?.orderId || payload?.id || payload?.order?.orderId || "").trim();
 const errorOf = (payload, fallback = "") => String(payload?.error || payload?.code || payload?.message || fallback || "GW order failed").trim();
 const maxAge = () => Math.max(60_000, Number(process.env.GW_ROBLOX_CATALOG_MAX_AGE_MS || 30 * 60_000));
+const ROBLOX_GIFTCARD_QUANTITY = 1;
 
 function isGwRobloxPlanReady(plan) {
   const syncedAt = new Date(plan?.providerSyncedAt || 0).getTime();
@@ -163,8 +164,9 @@ async function recoverGwRobloxSubmit(orderId) {
 
   const trxid = `YMH-ROBLOX-${order.orderId}`;
   try {
-    return await handle(order, await createGameKeyOrder({
+    return await handle(order, await createGiftCardOrder({
       pid: plan.providerProductId,
+      quantity: ROBLOX_GIFTCARD_QUANTITY,
       trxid,
       idempotencyKey: trxid,
     }));
@@ -206,8 +208,9 @@ async function autoFulfillGwRoblox(orderOrId) {
   });
   await Order.findByIdAndUpdate(order._id, { $set: { fragmentTx: order.fragmentTx } });
   try {
-    return await handle(order, await createGameKeyOrder({
+    return await handle(order, await createGiftCardOrder({
       pid: plan.providerProductId,
+      quantity: ROBLOX_GIFTCARD_QUANTITY,
       trxid,
       idempotencyKey: trxid,
     }));

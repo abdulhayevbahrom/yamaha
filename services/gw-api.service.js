@@ -558,6 +558,11 @@ async function createGameKeyOrder(body) {
   }
 }
 
+async function createGiftCardOrder(body) {
+  const response = await createClient().post("/orders", body);
+  return response.data;
+}
+
 async function createRedeemOrder(body) {
   const client = createClient();
   try {
@@ -611,6 +616,7 @@ module.exports = {
   getBalance,
   createOrder,
   createGameKeyOrder,
+  createGiftCardOrder,
   createRedeemOrder,
   createPidOrder,
   getOrder,
