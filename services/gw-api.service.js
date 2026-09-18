@@ -13,6 +13,21 @@ function normalize(value) {
   return String(value || "").trim();
 }
 
+function normalizeMlbbRegion(value) {
+  const region = normalize(value).toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+  const aliases = [
+    ["br", /^(br|brazil|brazilian|brasil)$/],
+    ["ph", /^(ph|philippines|philippine)$/],
+    ["ru", /^(ru|russia|russian|cis)$/],
+    ["tr", /^(tr|turkey|turkish|turkiye|türkiye)$/],
+    ["id", /^(id|indonesia|indonesian)$/],
+    ["sg", /^(sg|singapore)$/],
+    ["my", /^(my|malaysia|malaysian)$/],
+    ["global", /^(global|worldwide|world|uzb|uzbekistan)$/],
+  ];
+  return aliases.find(([, pattern]) => pattern.test(region))?.[0] || "";
+}
+
 function readPath(object, path) {
   return path.split(".").reduce((current, key) => (
     current && typeof current === "object" ? current[key] : undefined
@@ -336,14 +351,17 @@ function isDeltaForceTopup(item) {
 function extractMlbbRegion(item) {
   const explicit = normalize(item?.region || item?.country || item?.server).toLowerCase();
   const pid = normalize(item?.id || item?.pid || item?.PID).toUpperCase();
+  if (/^GWMLBR/.test(pid)) return "br";
   if (/^GWMLMY/.test(pid)) return "my";
   if (/^GWML(?:TU|TR)/.test(pid)) return "tr";
   if (/^GWMLRU/.test(pid)) return "ru";
   if (/^GWML?S/.test(pid)) return "sg";
   if (/^GWMI/.test(pid)) return "id";
   if (/^GWMP/.test(pid)) return "ph";
+  const explicitRegion = normalizeMlbbRegion(explicit);
+  if (explicitRegion) return explicitRegion;
   const slug = normalize(item?.slug).toLowerCase().replace(/[^a-z]/g, "");
-  const slugRegion = ["ph", "ru", "tr", "id", "sg", "my"].find(
+  const slugRegion = ["br", "ph", "ru", "tr", "id", "sg", "my"].find(
     (key) => slug.endsWith(key) || slug.includes(`mlbb${key}`) || slug.includes(`mobilelegends${key}`),
   );
   if (slugRegion) return slugRegion;
@@ -351,6 +369,7 @@ function extractMlbbRegion(item) {
     .map((value) => normalize(value).toLowerCase())
     .join(" ");
   const checks = [
+    ["br", /(^|[^a-z])(br|brazil|brazilian|brasil)([^a-z]|$)/],
     ["ph", /(^|[^a-z])(ph|philippines|philippine)([^a-z]|$)/],
     ["ru", /(^|[^a-z])(ru|russia|russian|cis)([^a-z]|$)/],
     ["tr", /(^|[^a-z])(tr|turkey|turkish|turkiye)([^a-z]|$)/],
@@ -631,6 +650,7 @@ module.exports = {
   isBloodStrikeTopup,
   isDeltaForceTopup,
   extractMlbbRegion,
+  normalizeMlbbRegion,
   extractHokRegion,
   extractUcAmount,
   normalizeProduct,

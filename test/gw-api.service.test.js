@@ -11,6 +11,7 @@ const {
   isBloodStrikeTopup,
   isDeltaForceTopup,
   extractMlbbRegion,
+  normalizeMlbbRegion,
   extractHokRegion,
   extractUcAmount,
   normalizeProduct,
@@ -139,9 +140,22 @@ test("GW MLBB products are assigned to their storefront region", () => {
   assert.equal(extractMlbbRegion({ slug: "mobile-legends-ph", serviceName: "86 Diamonds" }), "ph");
   assert.equal(extractMlbbRegion({ gameName: "Mobile Legends Indonesia" }), "id");
   assert.equal(extractMlbbRegion({ gameName: "Mobile Legends Global" }), "global");
+  assert.equal(extractMlbbRegion({ id: "GWMLBR1135", gameName: "Mobile Legends" }), "br");
+  assert.equal(extractMlbbRegion({ gameName: "Mobile Legends Brazil" }), "br");
   assert.equal(extractMlbbRegion({ id: "GWMP11", gameName: "Mobile Legends" }), "ph");
   assert.equal(extractMlbbRegion({ id: "GWMLMY42", gameName: "Mobile Legends" }), "my");
   assert.equal(extractMlbbRegion({ id: "GWMLTU44", gameName: "Mobile Legends" }), "tr");
+});
+
+test("GW MLBB verification region names use catalog region keys", () => {
+  assert.equal(normalizeMlbbRegion("Philippines"), "ph");
+  assert.equal(normalizeMlbbRegion("Brazil"), "br");
+  assert.equal(normalizeMlbbRegion("Indonesia"), "id");
+  assert.equal(normalizeMlbbRegion("Malaysia"), "my");
+  assert.equal(normalizeMlbbRegion("Singapore"), "sg");
+  assert.equal(normalizeMlbbRegion("Turkey"), "tr");
+  assert.equal(normalizeMlbbRegion("Russia"), "ru");
+  assert.equal(normalizeMlbbRegion("Global"), "global");
 });
 
 test("GW MLBB plan must be mapped, available and fresh", () => {

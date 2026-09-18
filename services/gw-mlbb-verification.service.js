@@ -1,5 +1,5 @@
 const crypto = require("node:crypto");
-const { verifyMlbbPlayer } = require("./gw-api.service");
+const { verifyMlbbPlayer, normalizeMlbbRegion } = require("./gw-api.service");
 
 const CACHE_TTL_MS = Math.max(60_000, Number(process.env.GW_MLBB_VERIFY_CACHE_TTL_MS || 10 * 60_000));
 const CACHE_LIMIT = 1_000;
@@ -32,7 +32,7 @@ function normalizeVerification(payload, playerId, zoneId) {
     playerId,
     zoneId,
     profileName: normalize(payload?.playerName || payload?.name),
-    region: normalize(payload?.region),
+    region: normalizeMlbbRegion(payload?.region),
     firstTimeBonus,
     verifiedAt: new Date().toISOString(),
     payload,
