@@ -1,6 +1,14 @@
 const path = require("node:path");
 
 const cwd = __dirname;
+const productionLogging = path.join(cwd, "config", "production-logging.js");
+
+const productionLogOptions = {
+  node_args: ["--require", productionLogging],
+  // Routine console.log/info/warn output must not create ever-growing files.
+  // console.error and fatal process errors still go to each app's error_file.
+  out_file: "/dev/null",
+};
 
 module.exports = {
   apps: [
@@ -14,7 +22,7 @@ module.exports = {
       restart_delay: 3000,
       watch: false,
       time: true,
-      out_file: path.join(cwd, "yamaha-api-out.log"),
+      ...productionLogOptions,
       error_file: path.join(cwd, "yamaha-api-error.log"),
       env: {
         NODE_ENV: "production",
@@ -32,7 +40,7 @@ module.exports = {
       restart_delay: 3000,
       watch: false,
       time: true,
-      out_file: path.join(cwd, "yamaha-bot-out.log"),
+      ...productionLogOptions,
       error_file: path.join(cwd, "yamaha-bot-error.log"),
       env: {
         NODE_ENV: "production",
@@ -48,7 +56,7 @@ module.exports = {
       restart_delay: 5000,
       watch: false,
       time: true,
-      out_file: path.join(cwd, "yamaha-cardxabar-client-out.log"),
+      ...productionLogOptions,
       error_file: path.join(cwd, "yamaha-cardxabar-client-error.log"),
       env: {
         NODE_ENV: "production",
