@@ -216,6 +216,7 @@ async function expirePendingOrders() {
 
 async function handlePostPaymentEffects(order, paidAmount, { userEventType = "payment_matched" } = {}) {
   if (!order) return { order: null, fulfillment: null };
+  let balanceUpdate = null;
 
   if (order.product === "balance" && order.tgUserId) {
     const now = new Date();
@@ -284,6 +285,10 @@ async function handlePostPaymentEffects(order, paidAmount, { userEventType = "pa
         },
       };
     }
+    balanceUpdate = {
+      amount: balanceIncrease,
+      balance: Number(creditResult.user?.balance || 0),
+    };
     const completedOrder = await Order.findOneAndUpdate(
       {
         _id: order._id,
@@ -362,6 +367,7 @@ async function handlePostPaymentEffects(order, paidAmount, { userEventType = "pa
       orderId: order._id,
       status: order.product === "balance" ? "completed" : "paid_auto_processed",
       product: order.product,
+      ...(balanceUpdate || {}),
     });
   }
 

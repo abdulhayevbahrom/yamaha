@@ -2170,6 +2170,7 @@ const topupUserBalance = async (req, res) => {
       refreshBalance: true,
       refreshProfile: true,
       amount: signedAmount,
+      balance: Number(updated?.balance || 0),
       operation: isDecrease ? "decrease" : "increase",
     });
 
