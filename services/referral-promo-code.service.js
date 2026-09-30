@@ -93,6 +93,8 @@ async function getReferralQualifiedInviteCount({ tgUserId, activeFrom = null }) 
   const result = await getQualifiedReferralResult(tgUserId, activeFrom);
   return {
     qualifiedInviteCount: result.users.length,
+    candidateInviteCount: Number(result.candidateCount || 0),
+    channelNotMemberCount: Number(result.channelNotMemberCount || 0),
     membershipVerificationFailureCount: Number(
       result.verificationFailureCount || 0,
     ),
@@ -194,6 +196,10 @@ async function getReferralRedemptionState(tgUserId) {
 
   const inviteThreshold = Math.max(1, Math.floor(Number(config?.inviteThreshold || 50)));
   const qualifiedInviteCount = Number(qualification?.qualifiedInviteCount || 0);
+  const candidateInviteCount = Number(qualification?.candidateInviteCount || 0);
+  const channelNotMemberCount = Number(
+    qualification?.channelNotMemberCount || 0,
+  );
   const membershipVerificationFailureCount = Number(
     qualification?.membershipVerificationFailureCount || 0,
   );
@@ -233,6 +239,8 @@ async function getReferralRedemptionState(tgUserId) {
     rewardLabel: String(config?.rewardLabel || "Telegram Premium").trim(),
     rewardCatalog: progress.sortedRewards,
     qualifiedInviteCount: Number(qualifiedInviteCount || 0),
+    candidateInviteCount,
+    channelNotMemberCount,
     membershipVerificationFailureCount,
     availableRewardCount: progress.availableRewardCount,
     claimedRewardCount: Number(claimedRewardCount || 0),
@@ -317,6 +325,9 @@ async function requestReferralPromoCode({
       return {
         ok: false,
         reason: "membership_check_unavailable",
+        candidateInviteCount: state.candidateInviteCount,
+        qualifiedInviteCount: state.qualifiedInviteCount,
+        channelNotMemberCount: state.channelNotMemberCount,
         membershipVerificationFailureCount: Number(
           state.membershipVerificationFailureCount || 0,
         ),
@@ -327,6 +338,10 @@ async function requestReferralPromoCode({
       reason: "threshold_not_reached",
       inviteThreshold: state.inviteThreshold,
       qualifiedInviteCount: state.qualifiedInviteCount,
+      candidateInviteCount: state.candidateInviteCount,
+      channelNotMemberCount: state.channelNotMemberCount,
+      membershipVerificationFailureCount:
+        state.membershipVerificationFailureCount,
       availableRewardCount: state.availableRewardCount,
       claimedRewardCount: state.claimedRewardCount,
       remainingRewardCount: state.remainingRewardCount,
@@ -349,6 +364,9 @@ async function requestReferralPromoCode({
       return {
         ok: false,
         reason: "membership_check_unavailable",
+        candidateInviteCount: state.candidateInviteCount,
+        qualifiedInviteCount: state.qualifiedInviteCount,
+        channelNotMemberCount: state.channelNotMemberCount,
         membershipVerificationFailureCount: Number(
           state.membershipVerificationFailureCount || 0,
         ),
@@ -359,6 +377,10 @@ async function requestReferralPromoCode({
       reason: "threshold_not_reached",
       inviteThreshold: state.inviteThreshold,
       qualifiedInviteCount: state.qualifiedInviteCount,
+      candidateInviteCount: state.candidateInviteCount,
+      channelNotMemberCount: state.channelNotMemberCount,
+      membershipVerificationFailureCount:
+        state.membershipVerificationFailureCount,
       availableRewardCount: state.availableRewardCount,
       claimedRewardCount: state.claimedRewardCount,
       remainingRewardCount: state.remainingRewardCount,

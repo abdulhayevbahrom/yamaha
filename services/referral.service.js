@@ -179,12 +179,22 @@ function buildRewardQualifyingFilter(referrerTgUserId, activeFrom) {
 async function filterForceJoinQualifiedUsers(users = []) {
   const list = Array.isArray(users) ? users.filter((item) => item?.tgUserId) : [];
   if (!list.length) {
-    return { users: [], verificationFailureCount: 0 };
+    return {
+      users: [],
+      candidateCount: 0,
+      channelNotMemberCount: 0,
+      verificationFailureCount: 0,
+    };
   }
 
   const forceJoin = await getForceJoin();
   if (!forceJoin.enabled || !String(forceJoin.channelId || "").trim()) {
-    return { users: list, verificationFailureCount: 0 };
+    return {
+      users: list,
+      candidateCount: list.length,
+      channelNotMemberCount: 0,
+      verificationFailureCount: 0,
+    };
   }
 
   const concurrency = Math.min(
@@ -222,6 +232,10 @@ async function filterForceJoinQualifiedUsers(users = []) {
     users: list.filter((_, index) =>
       Boolean(membershipResults[index]?.canProceed),
     ),
+    candidateCount: list.length,
+    channelNotMemberCount: membershipResults.filter(
+      (result) => !result?.canProceed && !result?.verificationFailed,
+    ).length,
     verificationFailureCount: membershipResults.filter(
       (result) => result?.verificationFailed,
     ).length,

@@ -500,10 +500,32 @@ async function requestReferralPromoCodeHandler(req, res) {
     if (!result?.ok) {
       const reason = String(result?.reason || "");
       if (reason === "threshold_not_reached") {
-        return response.error(res, "Referral limit hali yetmagan", {
+        const qualifiedCount = Number(result.qualifiedInviteCount || 0);
+        const threshold = Number(result.inviteThreshold || 0);
+        const channelNotMemberCount = Number(result.channelNotMemberCount || 0);
+        const verificationFailureCount = Number(
+          result.membershipVerificationFailureCount || 0,
+        );
+        const reasonParts = [
+          `${qualifiedCount} ta taklif tasdiqlangan, promo kod uchun ${threshold} ta kerak.`,
+        ];
+        if (channelNotMemberCount > 0) {
+          reasonParts.push(
+            `${channelNotMemberCount} ta taklif qilingan foydalanuvchi kanalga a'zo emas.`,
+          );
+        }
+        if (verificationFailureCount > 0) {
+          reasonParts.push(
+            `${verificationFailureCount} ta foydalanuvchining kanal a'zoligini tekshirib bo'lmadi.`,
+          );
+        }
+        return response.error(res, reasonParts.join(" "), {
           code: reason,
-          inviteThreshold: Number(result.inviteThreshold || 0),
-          qualifiedInviteCount: Number(result.qualifiedInviteCount || 0),
+          inviteThreshold: threshold,
+          qualifiedInviteCount: qualifiedCount,
+          candidateInviteCount: Number(result.candidateInviteCount || 0),
+          channelNotMemberCount,
+          membershipVerificationFailureCount: verificationFailureCount,
           availableRewardCount: Number(result.availableRewardCount || 0),
           claimedRewardCount: Number(result.claimedRewardCount || 0),
           remainingRewardCount: Number(result.remainingRewardCount || 0),
@@ -511,14 +533,27 @@ async function requestReferralPromoCodeHandler(req, res) {
         });
       }
       if (reason === "membership_check_unavailable") {
+        const verificationFailureCount = Number(
+          result.membershipVerificationFailureCount || 0,
+        );
+        const channelNotMemberCount = Number(result.channelNotMemberCount || 0);
+        const reasonParts = [
+          `${verificationFailureCount} ta foydalanuvchining kanal a'zoligini hozir tekshirib bo'lmadi. Qayta urinib ko'ring.`,
+        ];
+        if (channelNotMemberCount > 0) {
+          reasonParts.push(
+            `${channelNotMemberCount} ta taklif qilingan foydalanuvchi kanalga a'zo emas.`,
+          );
+        }
         return response.error(
           res,
-          "Kanal a'zoligini tekshirishda vaqtinchalik xatolik. Qayta urinib ko'ring.",
+          reasonParts.join(" "),
           {
             code: reason,
-            membershipVerificationFailureCount: Number(
-              result.membershipVerificationFailureCount || 0,
-            ),
+            candidateInviteCount: Number(result.candidateInviteCount || 0),
+            qualifiedInviteCount: Number(result.qualifiedInviteCount || 0),
+            channelNotMemberCount,
+            membershipVerificationFailureCount: verificationFailureCount,
           },
         );
       }
