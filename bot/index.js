@@ -412,7 +412,10 @@ async function startBot({ strict = false } = {}) {
 
   const ensureBotActive = async (chatId, { silent = false } = {}) => {
     const botStatus = await getBotStatus();
-    if (botStatus.enabled) return true;
+    // Keep the recovery path open for administrators. Otherwise disabling the
+    // bot also blocks /start, so an admin cannot reopen the Mini App to enable
+    // it again.
+    if (botStatus.enabled || isAdmin(chatId)) return true;
     if (!silent) {
       await bot.sendMessage(
         chatId,
