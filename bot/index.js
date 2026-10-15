@@ -208,6 +208,20 @@ const isTelegramRecipientUnavailableError = (error) => {
   );
 };
 
+const isTelegramMessageNotModifiedError = (error) => {
+  const statusCode = Number(
+    error?.response?.statusCode ||
+      error?.response?.status ||
+      error?.response?.body?.error_code ||
+      0,
+  );
+  const message = String(
+    error?.response?.body?.description || error?.message || error || "",
+  ).toLowerCase();
+
+  return statusCode === 400 && message.includes("message is not modified");
+};
+
 async function startBot({ strict = false } = {}) {
   const token = process.env.BOT_TOKEN;
   const webAppUrl = process.env.WEB_APP_URL;
@@ -262,6 +276,12 @@ async function startBot({ strict = false } = {}) {
       try {
         await handler(...args);
       } catch (error) {
+        if (
+          scope === "callback_query" &&
+          isTelegramMessageNotModifiedError(error)
+        ) {
+          return;
+        }
         if (isTelegramRecipientUnavailableError(error)) {
           console.info(
             `[telegram-bot:${scope}] recipient unavailable; update ignored`,

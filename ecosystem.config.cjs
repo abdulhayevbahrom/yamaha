@@ -44,6 +44,7 @@ module.exports = {
       error_file: path.join(cwd, "yamaha-bot-error.log"),
       env: {
         NODE_ENV: "production",
+        NTBA_FIX_350: "1",
       },
     },
     {
