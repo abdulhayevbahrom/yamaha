@@ -43,6 +43,52 @@ const DEFAULT_BANKOMAT_TOPUP_CONFIG = {
   feePercent: 3,
 };
 
+const DEFAULT_CUSTOMER_PAYMENT_LEVELS = [
+  { level: 1, name: "Bronze", qualificationType: "order_amount", qualificationValue: 0, maxAutoTopupAmount: 110000, isActive: true },
+  { level: 2, name: "Silver", qualificationType: "order_amount", qualificationValue: 500000, maxAutoTopupAmount: 220000, isActive: true },
+  { level: 3, name: "Gold", qualificationType: "order_amount", qualificationValue: 2000000, maxAutoTopupAmount: 290000, isActive: true },
+  { level: 4, name: "Platinum", qualificationType: "order_amount", qualificationValue: 5000000, maxAutoTopupAmount: 500000, isActive: true },
+  { level: 5, name: "Diamond", qualificationType: "order_amount", qualificationValue: 10000000, maxAutoTopupAmount: 1000000, isActive: true },
+];
+
+function normalizeCustomerPaymentLevels(value, { strict = false } = {}) {
+  if (!Array.isArray(value) || value.length !== 5) {
+    if (strict) throw new Error("Aynan 5 ta mijoz darajasi kiritilishi kerak");
+    value = DEFAULT_CUSTOMER_PAYMENT_LEVELS;
+  }
+
+  const seen = new Set();
+  const levels = value.map((item, index) => {
+    const level = Number(item?.level);
+    const qualificationType = "order_amount";
+    const qualificationValue = Number(item?.qualificationValue);
+    const maxAutoTopupAmount = Number(item?.maxAutoTopupAmount);
+    if (!Number.isInteger(level) || level < 1 || level > 5 || seen.has(level)) {
+      throw new Error(`Daraja raqami noto'g'ri: ${index + 1}`);
+    }
+    if (!Number.isSafeInteger(qualificationValue) || qualificationValue < 0) {
+      throw new Error(`${level}-daraja talabi noto'g'ri`);
+    }
+    if (!Number.isSafeInteger(maxAutoTopupAmount) || maxAutoTopupAmount < 0) {
+      throw new Error(`${level}-daraja maksimal to'lov summasi noto'g'ri`);
+    }
+    seen.add(level);
+    return {
+      level,
+      name: String(item?.name || `${level}-daraja`).trim().slice(0, 80) || `${level}-daraja`,
+      qualificationType,
+      qualificationValue,
+      maxAutoTopupAmount,
+      isActive: item?.isActive !== false,
+    };
+  }).sort((a, b) => a.level - b.level);
+
+  if (!levels.find((item) => item.level === 1 && item.isActive)) {
+    throw new Error("1-daraja faol bo'lishi kerak");
+  }
+  return levels;
+}
+
 const DEFAULT_REFERRAL_CONFIG = {
   signupBonusAmount: 0,
   orderPercent: 0,
@@ -262,6 +308,18 @@ async function getBankomatTopupConfig() {
         ? feePercent
         : DEFAULT_BANKOMAT_TOPUP_CONFIG.feePercent,
   };
+}
+
+async function getCustomerPaymentLevels() {
+  const doc = await Settings.findOne({ key: "customer_payment_levels" }).lean();
+  if (Number(doc?.value?.version || 0) !== 2) {
+    return normalizeCustomerPaymentLevels(DEFAULT_CUSTOMER_PAYMENT_LEVELS);
+  }
+  try {
+    return normalizeCustomerPaymentLevels(doc?.value?.levels || DEFAULT_CUSTOMER_PAYMENT_LEVELS);
+  } catch (_) {
+    return normalizeCustomerPaymentLevels(DEFAULT_CUSTOMER_PAYMENT_LEVELS);
+  }
 }
 
 async function getReferralConfig() {
@@ -539,6 +597,16 @@ async function updateBankomatTopupConfig(payload) {
   };
 }
 
+async function updateCustomerPaymentLevels(payload) {
+  const levels = normalizeCustomerPaymentLevels(payload?.levels, { strict: true });
+  const doc = await Settings.findOneAndUpdate(
+    { key: "customer_payment_levels" },
+    { value: { version: 2, levels } },
+    { new: true, upsert: true },
+  ).lean();
+  return normalizeCustomerPaymentLevels(doc?.value?.levels, { strict: true });
+}
+
 async function updateReferralConfig(payload) {
   const signupBonusAmount = Number(payload.signupBonusAmount);
   const orderPercent = Number(payload.orderPercent);
@@ -814,6 +882,7 @@ module.exports = {
   getBotBroadcastConfig,
   getPaymentCardConfig,
   getBankomatTopupConfig,
+  getCustomerPaymentLevels,
   getReferralConfig,
   getReferralRewardConfig,
   getNftMarketplaceConfig,
@@ -827,6 +896,7 @@ module.exports = {
   updateBotBroadcastConfig,
   updatePaymentCardConfig,
   updateBankomatTopupConfig,
+  updateCustomerPaymentLevels,
   updateReferralConfig,
   updateReferralRewardConfig,
   updateNftMarketplaceConfig,

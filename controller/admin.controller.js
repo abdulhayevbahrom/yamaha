@@ -21,6 +21,7 @@ const {
   getBotBroadcastConfig,
   getPaymentCardConfig,
   getBankomatTopupConfig,
+  getCustomerPaymentLevels,
   getReferralConfig,
   getReferralRewardConfig,
   getNftMarketplaceConfig,
@@ -34,12 +35,17 @@ const {
   updateBotBroadcastConfig,
   updatePaymentCardConfig,
   updateBankomatTopupConfig,
+  updateCustomerPaymentLevels,
   updateReferralConfig,
   updateReferralRewardConfig,
   updateNftMarketplaceConfig,
   updateNftWithdrawalConfig,
   updateSupportConfig,
 } = require("../services/settings.service");
+const {
+  approveBalanceTopupReview,
+  rejectBalanceTopupReview,
+} = require("../services/balance-topup-review.service");
 const {
   broadcastBotResumed,
   broadcastBotPaused,
@@ -878,6 +884,7 @@ const getSettings = async (_, res) => {
     const botBroadcastConfig = await getBotBroadcastConfig();
     const paymentCardConfig = await getPaymentCardConfig();
     const bankomatTopupConfig = await getBankomatTopupConfig();
+    const customerPaymentLevels = await getCustomerPaymentLevels();
     const referralConfig = await getReferralConfig();
     const referralRewardConfig = await getReferralRewardConfig();
     const nftMarketplaceConfig = await getNftMarketplaceConfig();
@@ -893,6 +900,7 @@ const getSettings = async (_, res) => {
       botBroadcastConfig,
       paymentCardConfig,
       bankomatTopupConfig,
+      customerPaymentLevels,
       referralConfig,
       referralRewardConfig,
       nftMarketplaceConfig,
@@ -915,6 +923,7 @@ const updateSettings = async (req, res) => {
       botBroadcastConfig,
       paymentCardConfig,
       bankomatTopupConfig,
+      customerPaymentLevels,
       referralConfig,
       referralRewardConfig,
       nftMarketplaceConfig,
@@ -931,6 +940,7 @@ const updateSettings = async (req, res) => {
       !botBroadcastConfig &&
       !paymentCardConfig &&
       !bankomatTopupConfig &&
+      !customerPaymentLevels &&
       !referralConfig &&
       !referralRewardConfig &&
       !nftMarketplaceConfig &&
@@ -967,6 +977,11 @@ const updateSettings = async (req, res) => {
       out.bankomatTopupConfig = await updateBankomatTopupConfig(
         bankomatTopupConfig,
       );
+    }
+    if (customerPaymentLevels) {
+      out.customerPaymentLevels = await updateCustomerPaymentLevels({
+        levels: customerPaymentLevels,
+      });
     }
     if (referralConfig) {
       out.referralConfig = await updateReferralConfig(referralConfig);
@@ -2247,6 +2262,53 @@ const updateUserBlockStatus = async (req, res) => {
   }
 };
 
+const getBalanceTopupReviews = async (req, res) => {
+  try {
+    const status = normalizeString(req.query?.status || "pending").toLowerCase();
+    const filter = { product: "balance" };
+    if (status === "pending") filter.status = "manual_review";
+    else if (status === "approved") filter.reviewDecision = "approved";
+    else if (status === "rejected") filter.reviewDecision = "rejected";
+    else filter.reviewDecision = { $in: ["pending", "approved", "rejected"] };
+    const items = await Order.find(filter).sort({ paidAt: -1, createdAt: -1 }).limit(300).lean();
+    return response.success(res, "Tekshiruvdagi balans to'lovlari", items);
+  } catch (error) {
+    return response.serverError(res, "Balans tekshiruvlarini olishda xatolik", error.message);
+  }
+};
+
+const approveBalanceReview = async (req, res) => {
+  try {
+    const result = await approveBalanceTopupReview(req.params.id, {
+      id: req.admin?.tgUserId || req.admin?.username || "admin-panel",
+      note: req.body?.note,
+    });
+    if (!result.ok) {
+      if (result.reason === "not_found") return response.notFound(res, "To'lov topilmadi");
+      return response.error(res, "To'lov allaqachon ko'rib chiqilgan yoki tasdiqlashda xatolik", { code: result.reason });
+    }
+    return response.success(res, result.alreadyProcessed ? "To'lov avval tasdiqlangan" : "Balans to'ldirildi", result.order);
+  } catch (error) {
+    return response.serverError(res, "Balans to'lovini tasdiqlashda xatolik", error.message);
+  }
+};
+
+const rejectBalanceReview = async (req, res) => {
+  try {
+    const result = await rejectBalanceTopupReview(req.params.id, {
+      id: req.admin?.tgUserId || req.admin?.username || "admin-panel",
+      note: req.body?.note,
+    });
+    if (!result.ok) {
+      if (result.reason === "not_found") return response.notFound(res, "To'lov topilmadi");
+      return response.error(res, "To'lov allaqachon ko'rib chiqilgan", { code: result.reason });
+    }
+    return response.success(res, result.alreadyProcessed ? "To'lov avval rad etilgan" : "To'lov rad etildi", result.order);
+  } catch (error) {
+    return response.serverError(res, "Balans to'lovini rad etishda xatolik", error.message);
+  }
+};
+
 const getDiagnostics = async (_, res) => {
   try {
     const [
@@ -2601,6 +2663,9 @@ module.exports = {
   adminTransferUserNft,
   topupUserBalance,
   updateUserBlockStatus,
+  getBalanceTopupReviews,
+  approveBalanceReview,
+  rejectBalanceReview,
   getDiagnostics,
   getSuspiciousDevices,
   getActiveUsers,

@@ -25,6 +25,10 @@ const {
   buildJoinUrl,
 } = require("../services/force-join.service");
 const { getBotStatus } = require("../services/settings.service");
+const {
+  approveBalanceTopupReview,
+  rejectBalanceTopupReview,
+} = require("../services/balance-topup-review.service");
 const Order = require("../model/order.model");
 const User = require("../model/user.model");
 const Broadcast = require("../model/broadcast.model");
@@ -671,6 +675,42 @@ async function startBot({ strict = false } = {}) {
           show_alert: true,
         });
       }
+    }
+
+    if (query.data?.startsWith("CONFIRM_BALANCE_REVIEW:")) {
+      if (!isAdmin(chatId)) {
+        await bot.answerCallbackQuery(query.id, { text: "Ruxsat yo'q", show_alert: true });
+        return;
+      }
+      const orderId = query.data.replace("CONFIRM_BALANCE_REVIEW:", "").trim();
+      const result = await approveBalanceTopupReview(orderId, { id: chatId });
+      await bot.answerCallbackQuery(query.id, {
+        text: result.ok
+          ? (result.alreadyProcessed ? "Avval tasdiqlangan" : "Balans to'ldirildi")
+          : (result.reason === "not_found" ? "To'lov topilmadi" : "To'lov allaqachon ko'rib chiqilgan yoki xatolik yuz berdi"),
+        show_alert: !result.ok,
+      });
+      if (result.ok && query.message?.message_id) {
+        await bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: query.message.message_id }).catch(() => {});
+      }
+      return;
+    }
+
+    if (query.data?.startsWith("REJECT_BALANCE_REVIEW:")) {
+      if (!isAdmin(chatId)) {
+        await bot.answerCallbackQuery(query.id, { text: "Ruxsat yo'q", show_alert: true });
+        return;
+      }
+      const orderId = query.data.replace("REJECT_BALANCE_REVIEW:", "").trim();
+      const result = await rejectBalanceTopupReview(orderId, { id: chatId });
+      await bot.answerCallbackQuery(query.id, {
+        text: result.ok ? (result.alreadyProcessed ? "Avval rad etilgan" : "To'lov rad etildi") : (result.reason === "not_found" ? "To'lov topilmadi" : "To'lov allaqachon ko'rib chiqilgan"),
+        show_alert: !result.ok,
+      });
+      if (result.ok && query.message?.message_id) {
+        await bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: query.message.message_id }).catch(() => {});
+      }
+      return;
     }
 
     if (query.data?.startsWith("CANCEL_GAME:")) {

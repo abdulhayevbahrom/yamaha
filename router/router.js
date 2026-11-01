@@ -423,6 +423,9 @@ router.get(
   adminController.getActiveUsers,
 );
 router.put("/admin/settings", authMiddleware, adminController.updateSettings);
+router.get("/admin/balance-reviews", authMiddleware, adminController.getBalanceTopupReviews);
+router.post("/admin/balance-reviews/:id/approve", authMiddleware, adminController.approveBalanceReview);
+router.post("/admin/balance-reviews/:id/reject", authMiddleware, adminController.rejectBalanceReview);
 router.get(
   "/admin/referral-promo-codes",
   authMiddleware,

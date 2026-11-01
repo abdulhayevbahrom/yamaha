@@ -42,6 +42,7 @@ const {
   notifyAdminsAboutNftWithdrawalRequest,
   refundUpfrontNftWithdrawalFeeIfCharged,
 } = require("../services/nft-withdrawal-payout.service");
+const { resolveCustomerPaymentLevel } = require("../services/customer-payment-level.service");
 const {
   attachReservationToOrder,
   releasePaymentReservation,
@@ -128,6 +129,7 @@ async function getMe(req, res) {
       giftStats,
       nftTradeCount,
       nftBuySpending,
+      customerPaymentLevel,
     ] =
       await Promise.all([
         ensureUser(tgUser),
@@ -189,6 +191,7 @@ async function getMe(req, res) {
             },
           },
         ]),
+        resolveCustomerPaymentLevel(tgUser.tgUserId),
       ]);
 
     const baseOrderCount = Number(totalOrders || 0);
@@ -208,6 +211,7 @@ async function getMe(req, res) {
         totalOrders: totalHistoryCount,
         totalSpent,
       },
+      paymentLevel: customerPaymentLevel,
       referral: {
         isBlocked: Boolean(user?.referralBlockedAt),
         blockedReason: String(user?.referralBlockedReason || ""),

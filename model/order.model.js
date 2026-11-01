@@ -95,6 +95,13 @@ const orderSchema = new Schema(
       enum: ["card", "bankomat", "uzumbank", "paynet", "click", "balance", "stars"],
       default: "card"
     },
+    paymentProvider: {
+      type: String,
+      enum: ["", "click", "alif", "other", "unknown"],
+      default: ""
+    },
+    paymentProviderName: { type: String, default: "" },
+    paymentProviderDetails: { type: String, default: "" },
     sellCardNumber: {
       type: String,
       default: ""
@@ -163,6 +170,24 @@ const orderSchema = new Schema(
       type: Date,
       default: null
     },
+    customerPaymentLevelSnapshot: {
+      type: new Schema({
+        level: { type: Number, min: 1, max: 5, default: 1 },
+        name: { type: String, default: "" },
+        badge: { type: String, default: "" },
+        qualificationType: { type: String, enum: ["order_count", "order_amount"], default: "order_count" },
+        qualificationValue: { type: Number, default: 0 },
+        maxAutoTopupAmount: { type: Number, default: 0 },
+        completedOrderCount: { type: Number, default: 0 },
+        completedOrderAmount: { type: Number, default: 0 }
+      }, { _id: false }),
+      default: null
+    },
+    reviewReason: { type: String, enum: ["", "LEVEL_LIMIT_EXCEEDED"], default: "" },
+    reviewDecision: { type: String, enum: ["", "pending", "approved", "rejected"], default: "" },
+    reviewedAt: { type: Date, default: null },
+    reviewedBy: { type: String, default: "" },
+    reviewNote: { type: String, default: "" },
     referralReferrerUserId: {
       type: String,
       default: ""
@@ -186,6 +211,8 @@ const orderSchema = new Schema(
         "payment_processing",
         "payment_submitted",
         "paid_auto_processed",
+        "manual_review",
+        "review_rejected",
         "admin_action_processing",
         "completed",
         "cancelled",

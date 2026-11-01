@@ -18,6 +18,8 @@ const paymentLogSchema = new mongoose.Schema(
       type: String,
       default: ""
     },
+    paymentProvider: { type: String, default: "unknown" },
+    paymentProviderDetails: { type: String, default: "" },
     matchedOrderId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Order",

@@ -9,6 +9,9 @@ const { sendOrderArchive } = require("./order-archive.service");
 const { isManualGameProduct } = require("./uc-fulfillment.service");
 const { sendTelegramText } = require("./telegram-notify.service");
 const { applyBalanceDeltaOnce } = require("./balance-operation.service");
+const { resolveCustomerPaymentLevel, requiresManualTopupReview } = require("./customer-payment-level.service");
+const { notifyAdminsAboutBalanceReview } = require("./balance-topup-review.service");
+const { parseCardxabarPaymentProvider, isLevelReviewPaymentProvider } = require("../utils/cardxabar-payment-provider");
 const {
   releaseReservationForOrder,
 } = require("./payment-amount-reservation.service");
@@ -185,6 +188,36 @@ async function notifyAdminsAboutStarSell(order) {
       },
     },
   });
+}
+
+async function routeBalanceTopupToReview(order, paidAmount, providerCode) {
+  if (!order || order.product !== "balance" || order.status !== "payment_processing") {
+    return { held: false, order };
+  }
+  const levelSnapshot = await resolveCustomerPaymentLevel(order.tgUserId);
+  const topupPaymentAmount = Number(order.paymentGrossAmount || paidAmount || 0);
+  if (
+    !isLevelReviewPaymentProvider(providerCode || order.paymentProvider) ||
+    !requiresManualTopupReview(topupPaymentAmount, levelSnapshot.maxAutoTopupAmount)
+  ) {
+    const updated = await Order.findOneAndUpdate(
+      { _id: order._id, status: "payment_processing" },
+      { $set: { customerPaymentLevelSnapshot: levelSnapshot } },
+      { new: true },
+    ).lean();
+    return { held: false, order: updated || order };
+  }
+
+  const reviewOrder = await Order.findOneAndUpdate(
+    { _id: order._id, status: "payment_processing" },
+    { $set: { status: "manual_review", fulfillmentStatus: "needs_review", fulfillmentError: "", customerPaymentLevelSnapshot: levelSnapshot, reviewReason: "LEVEL_LIMIT_EXCEEDED", reviewDecision: "pending" } },
+    { new: true },
+  ).lean();
+  if (!reviewOrder) return { held: false, order };
+  emitAdminUpdate({ type: "balance_topup_manual_review", refreshHistory: true, orderId: reviewOrder._id, orderCode: reviewOrder.orderId });
+  emitUserUpdate(reviewOrder.tgUserId, { type: "balance_topup_manual_review", refreshOrders: true, refreshBalance: false, orderId: reviewOrder._id, status: reviewOrder.status });
+  await notifyAdminsAboutBalanceReview(reviewOrder).catch((error) => console.error("Balance review admin notify error:", error.message));
+  return { held: true, order: reviewOrder, fulfillment: { skipped: true, reason: "level_limit_exceeded" } };
 }
 
 function parseAmountFromText(text) {
@@ -387,6 +420,9 @@ async function resumeExistingPayment(order, paidAmount) {
   if (!order) return { recovered: false, order: null, fulfillment: null };
 
   if (order.product === "balance" && order.status !== "completed") {
+    const review = await routeBalanceTopupToReview(order, paidAmount, order.paymentProvider);
+    if (review.held) return { recovered: true, order: review.order, fulfillment: review.fulfillment };
+    order = review.order || order;
     const result = await handlePostPaymentEffects(order, paidAmount);
     return { recovered: true, ...result };
   }
@@ -428,6 +464,7 @@ async function processIncomingPayment({
   const parsedAmount = Math.round(
     Number(amount || parseAmountFromText(rawText) || 0),
   );
+  const paymentProvider = parseCardxabarPaymentProvider(rawText);
   const normalizedSource = String(source || "cardxabar").trim().slice(0, 80);
   const normalizedExternalMessageId =
     externalMessageId == null
@@ -444,6 +481,8 @@ async function processIncomingPayment({
       externalMessageId: normalizedExternalMessageId || undefined,
       amount: 0,
       rawText,
+      paymentProvider: paymentProvider.code,
+      paymentProviderDetails: paymentProvider.details,
       status: "invalid",
     });
     return { matched: false, reason: "amount_not_found", amount: 0 };
@@ -457,6 +496,8 @@ async function processIncomingPayment({
         externalMessageId: normalizedExternalMessageId,
         amount: parsedAmount,
         rawText,
+        paymentProvider: paymentProvider.code,
+        paymentProviderDetails: paymentProvider.details,
         status: "processing",
       });
     } catch (error) {
@@ -492,7 +533,7 @@ async function processIncomingPayment({
     const claimedByEvent = await Order.findOne({
       paymentEventKey,
       status: {
-        $in: ["payment_processing", "paid_auto_processed", "completed"],
+        $in: ["payment_processing", "paid_auto_processed", "manual_review", "review_rejected", "admin_action_processing", "completed"],
       },
     }).lean();
     if (claimedByEvent) {
@@ -566,6 +607,8 @@ async function processIncomingPayment({
         externalMessageId: undefined,
         amount: parsedAmount,
         rawText,
+        paymentProvider: paymentProvider.code,
+        paymentProviderDetails: paymentProvider.details,
         status: "unmatched",
       });
     }
@@ -590,6 +633,9 @@ async function processIncomingPayment({
             paidAmount: parsedAmount,
             paidAt: now,
             paymentEventKey,
+            paymentProvider: paymentProvider.code,
+            paymentProviderName: paymentProvider.name,
+            paymentProviderDetails: paymentProvider.details,
           },
         },
         { new: true },
@@ -608,6 +654,8 @@ async function processIncomingPayment({
         externalMessageId: undefined,
         amount: parsedAmount,
         rawText,
+        paymentProvider: paymentProvider.code,
+        paymentProviderDetails: paymentProvider.details,
         status: "unmatched",
       });
     }
@@ -636,6 +684,8 @@ async function processIncomingPayment({
       externalMessageId: undefined,
       amount: parsedAmount,
       rawText,
+      paymentProvider: paymentProvider.code,
+      paymentProviderDetails: paymentProvider.details,
       status: "matched",
       matchedOrderId: pending._id,
     });
@@ -658,6 +708,12 @@ async function processIncomingPayment({
       };
     }
     pending = paidOrder;
+  }
+
+  if (pending.product === "balance") {
+    const review = await routeBalanceTopupToReview(pending, parsedAmount, paymentProvider.code);
+    if (review.held) return { matched: true, manualReview: true, amount: parsedAmount, order: review.order, fulfillment: review.fulfillment };
+    pending = review.order || pending;
   }
 
   const { fulfillment } = await handlePostPaymentEffects(pending, parsedAmount, {
