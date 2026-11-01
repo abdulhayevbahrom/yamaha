@@ -60,11 +60,14 @@ function normalizeCustomerPaymentLevels(value, { strict = false } = {}) {
   const seen = new Set();
   const levels = value.map((item, index) => {
     const level = Number(item?.level);
-    const qualificationType = "order_amount";
+    const qualificationType = String(item?.qualificationType || "").trim();
     const qualificationValue = Number(item?.qualificationValue);
     const maxAutoTopupAmount = Number(item?.maxAutoTopupAmount);
     if (!Number.isInteger(level) || level < 1 || level > 5 || seen.has(level)) {
       throw new Error(`Daraja raqami noto'g'ri: ${index + 1}`);
+    }
+    if (!["order_count", "order_amount"].includes(qualificationType)) {
+      throw new Error(`${level}-daraja hisoblash mezoni noto'g'ri`);
     }
     if (!Number.isSafeInteger(qualificationValue) || qualificationValue < 0) {
       throw new Error(`${level}-daraja talabi noto'g'ri`);
@@ -312,7 +315,7 @@ async function getBankomatTopupConfig() {
 
 async function getCustomerPaymentLevels() {
   const doc = await Settings.findOne({ key: "customer_payment_levels" }).lean();
-  if (Number(doc?.value?.version || 0) !== 2) {
+  if (Number(doc?.value?.version || 0) < 2) {
     return normalizeCustomerPaymentLevels(DEFAULT_CUSTOMER_PAYMENT_LEVELS);
   }
   try {
@@ -601,7 +604,7 @@ async function updateCustomerPaymentLevels(payload) {
   const levels = normalizeCustomerPaymentLevels(payload?.levels, { strict: true });
   const doc = await Settings.findOneAndUpdate(
     { key: "customer_payment_levels" },
-    { value: { version: 2, levels } },
+    { value: { version: 3, levels } },
     { new: true, upsert: true },
   ).lean();
   return normalizeCustomerPaymentLevels(doc?.value?.levels, { strict: true });

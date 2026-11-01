@@ -72,6 +72,12 @@ async function resolveCustomerPaymentLevel(tgUserId) {
     .filter((item) => item.isActive && Number(item.level) > Number(selected?.level || 1))
     .sort((a, b) => Number(a.level) - Number(b.level))[0] || null;
   const badges = { 1: "🥉", 2: "🥈", 3: "🥇", 4: "💎", 5: "👑" };
+  const currentMetric = selected?.qualificationType === "order_count"
+    ? Number(stats.completedOrderCount || 0)
+    : Number(stats.completedOrderAmount || 0);
+  const nextMetric = nextLevel?.qualificationType === "order_count"
+    ? Number(stats.completedOrderCount || 0)
+    : Number(stats.completedOrderAmount || 0);
   return {
     level: Number(selected?.level || 1),
     name: String(selected?.name || "Bronze"),
@@ -79,12 +85,15 @@ async function resolveCustomerPaymentLevel(tgUserId) {
     maxAutoTopupAmount: Number(selected?.maxAutoTopupAmount || 0),
     qualificationType: String(selected?.qualificationType || "order_count"),
     qualificationValue: Number(selected?.qualificationValue || 0),
+    currentMetric,
     nextLevel: nextLevel ? {
       level: Number(nextLevel.level),
       name: String(nextLevel.name || ""),
       badge: badges[Number(nextLevel.level)] || "",
-      requiredAmount: Number(nextLevel.qualificationValue || 0),
-      remainingAmount: Math.max(0, Number(nextLevel.qualificationValue || 0) - Number(stats.completedOrderAmount || 0)),
+      qualificationType: String(nextLevel.qualificationType || "order_amount"),
+      requiredValue: Number(nextLevel.qualificationValue || 0),
+      currentValue: nextMetric,
+      remainingValue: Math.max(0, Number(nextLevel.qualificationValue || 0) - nextMetric),
     } : null,
     ...stats,
   };
