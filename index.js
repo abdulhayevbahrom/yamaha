@@ -13,7 +13,7 @@ const { createWebAppSessionGuard } = require("./middleware/webapp-session.middle
 const { createRequestReplayGuard } = require("./middleware/request-replay.middleware");
 const { createTurnstileGuard } = require("./middleware/turnstile.middleware");
 
-//ads
+//
 
 process.on("unhandledRejection", (reason) => {
   console.error("Unhandled promise rejection:", reason);
