@@ -11,6 +11,8 @@ const Order = require("../model/order.model");
 const UserGift = require("../model/user-gift.model");
 const UserNft = require("../model/user-nft.model");
 const NftOffer = require("../model/nft-offer.model");
+const Broadcast = require("../model/broadcast.model");
+const BroadcastDelivery = require("../model/broadcastDelivery.model");
 const UserBalanceAdjustment = require("../model/user-balance-adjustment.model");
 const {
   getStarPricing,
@@ -68,6 +70,8 @@ const { syncGwPubgCatalog, syncGwMlbbCatalog, syncGwHokCatalog, syncGwFreeFireCa
 
 const PURCHASE_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb", "hok", "roblox", "bloodstrike", "deltaforce"];
 const PAID_STATUSES = ["paid_auto_processed", "completed"];
+const BROADCAST_GAME_TARGETS = new Set(["stars", "premium", "pubg", "freefire", "mlbb", "hok", "roblox", "bloodstrike", "deltaforce"]);
+const BROADCAST_APP_TARGETS = new Set(["home", "orders", "gifts", "profile", "referral", "contest", "balance", "star-sell"]);
 
 function normalizeString(value) {
   return String(value || "").trim();
@@ -86,6 +90,56 @@ function normalizeGiftId(value) {
 
 function normalizeUsername(value) {
   return normalizeString(value).replace(/^@+/, "");
+}
+
+function buildAdminBroadcastButton(button) {
+  const text = normalizeString(button?.text).slice(0, 64);
+  if (!text) return null;
+  const kind = normalizeString(button?.kind).toLowerCase();
+  const target = normalizeString(button?.target).toLowerCase().replace(/^\/+|\/+$/g, "");
+  if (kind === "external") {
+    if (!/^https?:\/\/\S+$/i.test(target)) return null;
+    return { text, url: target };
+  }
+  const game = target.startsWith("games/") ? target.slice(6) : "";
+  if (!BROADCAST_APP_TARGETS.has(target) && !BROADCAST_GAME_TARGETS.has(game)) return null;
+  try {
+    const url = new URL(normalizeString(process.env.WEB_APP_URL));
+    url.hash = `#/${target}`;
+    return { text, web_app: { url: url.toString() } };
+  } catch (_) {
+    return null;
+  }
+}
+
+async function createAdminBroadcastDeliverySnapshot(broadcastId) {
+  const users = await User.find({ tgUserId: { $exists: true, $ne: "" } })
+    .select({ tgUserId: 1 })
+    .lean();
+  const operations = users.map((user) => ({
+    updateOne: {
+      filter: { broadcastId, tgUserId: String(user.tgUserId) },
+      update: { $setOnInsert: { broadcastId, tgUserId: String(user.tgUserId), status: "pending" } },
+      upsert: true,
+    },
+  }));
+  for (let index = 0; index < operations.length; index += 1000) {
+    await BroadcastDelivery.bulkWrite(operations.slice(index, index + 1000), { ordered: false });
+  }
+  return users.length;
+}
+
+async function callTelegramBot(method, body) {
+  const token = normalizeString(process.env.BOT_TOKEN);
+  if (!token) throw new Error("BOT_TOKEN topilmadi");
+  const result = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+    method: "POST",
+    body,
+    ...(body instanceof URLSearchParams ? { headers: { "content-type": "application/x-www-form-urlencoded" } } : {}),
+  });
+  const payload = await result.json().catch(() => null);
+  if (!result.ok || !payload?.ok) throw new Error(payload?.description || `Telegram ${method} xatoligi`);
+  return payload.result;
 }
 
 function escapeRegex(value) {
@@ -2620,6 +2674,153 @@ const getActiveUsers = async (req, res) => {
   }
 };
 
+const getBroadcasts = async (req, res) => {
+  try {
+    const page = Math.max(1, Math.floor(Number(req.query?.page || 1)));
+    const limit = Math.min(50, Math.max(1, Math.floor(Number(req.query?.limit || 20))));
+    const [items, totalItems] = await Promise.all([
+      Broadcast.find({ status: { $ne: "draft" } })
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      Broadcast.countDocuments({ status: { $ne: "draft" } }),
+    ]);
+    return response.success(res, "Reklamalar", {
+      items,
+      page,
+      limit,
+      totalItems,
+      totalPages: Math.max(1, Math.ceil(totalItems / limit)),
+    });
+  } catch (error) {
+    return response.serverError(res, "Reklamalarni olishda xatolik", error.message);
+  }
+};
+
+const uploadBroadcastMedia = async (req, res) => {
+  try {
+    const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    if (!buffer.length) return response.error(res, "Media fayl topilmadi");
+    const contentType = normalizeString(req.headers["content-type"] || "application/octet-stream").split(";")[0];
+    const requestedKind = normalizeString(req.headers["x-media-kind"]).toLowerCase();
+    const type = requestedKind === "photo" || requestedKind === "video" || requestedKind === "document"
+      ? requestedKind
+      : contentType.startsWith("image/")
+        ? "photo"
+        : contentType.startsWith("video/")
+          ? "video"
+          : "document";
+    const fileName = decodeURIComponent(normalizeString(req.headers["x-file-name"] || `broadcast-${Date.now()}`)).slice(0, 180);
+    const chatId = normalizeString(process.env.ADMIN_NOTIFY_CHAT_ID).split(",").map((item) => item.trim()).find(Boolean);
+    if (!chatId) return response.error(res, "ADMIN_NOTIFY_CHAT_ID topilmadi");
+
+    const field = type === "photo" ? "photo" : type === "video" ? "video" : "document";
+    const method = type === "photo" ? "sendPhoto" : type === "video" ? "sendVideo" : "sendDocument";
+    const form = new FormData();
+    form.append("chat_id", chatId);
+    form.append(field, new Blob([buffer], { type: contentType }), fileName);
+    const sent = await callTelegramBot(method, form);
+    const fileId = type === "photo"
+      ? sent?.photo?.[sent.photo.length - 1]?.file_id
+      : sent?.[field]?.file_id;
+    if (!fileId) throw new Error("Telegram file_id qaytarmadi");
+    if (sent?.message_id) {
+      const deleteBody = new URLSearchParams({ chat_id: chatId, message_id: String(sent.message_id) });
+      callTelegramBot("deleteMessage", deleteBody).catch(() => null);
+    }
+    return response.created(res, "Media yuklandi", { type, fileId, fileName });
+  } catch (error) {
+    return response.serverError(res, "Media yuklashda xatolik", error.message);
+  }
+};
+
+const createBroadcast = async (req, res) => {
+  try {
+    const type = normalizeString(req.body?.type).toLowerCase();
+    if (!["text", "photo", "video", "document"].includes(type)) return response.error(res, "Reklama turi noto'g'ri");
+    const text = normalizeString(req.body?.text);
+    const fileId = normalizeString(req.body?.fileId);
+    if (type === "text" && !text) return response.error(res, "Reklama matnini kiriting");
+    if (type !== "text" && !fileId) return response.error(res, "Media faylni yuklang");
+    const scheduledAt = new Date(req.body?.scheduledAt);
+    if (Number.isNaN(scheduledAt.getTime()) || scheduledAt.getTime() < Date.now() - 60_000) {
+      return response.error(res, "Yuborish vaqti noto'g'ri yoki o'tib ketgan");
+    }
+    let buttons = [];
+    if (req.body?.button?.text) {
+      const button = buildAdminBroadcastButton(req.body.button);
+      if (!button) return response.error(res, "Reklama tugmasi noto'g'ri");
+      buttons = [[button]];
+    }
+    const broadcast = await Broadcast.create({
+      adminChatId: "admin-panel",
+      type,
+      text,
+      fileId,
+      fileName: normalizeString(req.body?.fileName),
+      buttons,
+      status: "draft",
+      draftStage: "",
+      scheduledAt,
+    });
+    const totalCount = await createAdminBroadcastDeliverySnapshot(broadcast._id);
+    const queued = await Broadcast.findByIdAndUpdate(
+      broadcast._id,
+      { $set: { status: "scheduled", totalCount, sentCount: 0, failedCount: 0 } },
+      { new: true },
+    ).lean();
+    return response.created(res, "Reklama navbatga qo'yildi", queued);
+  } catch (error) {
+    return response.serverError(res, "Reklama yaratishda xatolik", error.message);
+  }
+};
+
+const deleteBroadcast = async (req, res) => {
+  try {
+    const item = await Broadcast.findById(req.params.id).lean();
+    if (!item) return response.notFound(res, "Reklama topilmadi");
+    const sentCount = await BroadcastDelivery.countDocuments({ broadcastId: item._id, status: "sent", messageId: { $gt: 0 } });
+    await Broadcast.findByIdAndUpdate(item._id, {
+      $set: { status: sentCount ? "deleting" : "cancelled", lockUntil: null },
+    });
+    if (sentCount) {
+      setImmediate(async () => {
+        try {
+          let failed = 0;
+          const deliveries = await BroadcastDelivery.find({ broadcastId: item._id, status: "sent", messageId: { $gt: 0 } }).lean();
+          for (const delivery of deliveries) {
+            try {
+              await callTelegramBot("deleteMessage", new URLSearchParams({
+                chat_id: String(delivery.tgUserId),
+                message_id: String(delivery.messageId),
+              }));
+              await BroadcastDelivery.updateOne({ _id: delivery._id }, { $set: { status: "deleted", lastError: "" } });
+            } catch (error) {
+              failed += 1;
+              await BroadcastDelivery.updateOne({ _id: delivery._id }, { $set: { lastError: normalizeString(error?.message).slice(0, 500) } });
+            }
+          }
+          await Broadcast.findByIdAndUpdate(item._id, {
+            $set: {
+              status: failed ? "failed" : "deleted",
+              completedAt: new Date(),
+              lastError: failed ? `${failed} ta xabar o'chmadi` : "",
+            },
+          });
+        } catch (error) {
+          await Broadcast.findByIdAndUpdate(item._id, {
+            $set: { status: "failed", lastError: normalizeString(error?.message).slice(0, 500) },
+          }).catch(() => null);
+        }
+      });
+    }
+    return response.success(res, sentCount ? "Reklamalar o'chirilmoqda" : "Reklama bekor qilindi", { id: item._id });
+  } catch (error) {
+    return response.serverError(res, "Reklamani bekor qilishda xatolik", error.message);
+  }
+};
+
 module.exports = {
   checkAccess,
   login,
@@ -2669,4 +2870,8 @@ module.exports = {
   getDiagnostics,
   getSuspiciousDevices,
   getActiveUsers,
+  getBroadcasts,
+  uploadBroadcastMedia,
+  createBroadcast,
+  deleteBroadcast,
 };

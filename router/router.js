@@ -1,4 +1,5 @@
-const router = require("express").Router();
+const express = require("express");
+const router = express.Router();
 const publicController = require("../controller/public.controller");
 const orderController = require("../controller/order.controller");
 const adminController = require("../controller/admin.controller");
@@ -423,6 +424,19 @@ router.get(
   adminController.getActiveUsers,
 );
 router.put("/admin/settings", authMiddleware, adminController.updateSettings);
+router.get("/admin/broadcasts", authMiddleware, adminController.getBroadcasts);
+router.post("/admin/broadcasts", authMiddleware, adminController.createBroadcast);
+router.post(
+  "/admin/broadcasts/media",
+  authMiddleware,
+  express.raw({ type: () => true, limit: "50mb" }),
+  adminController.uploadBroadcastMedia,
+);
+router.delete(
+  "/admin/broadcasts/:id",
+  authMiddleware,
+  adminController.deleteBroadcast,
+);
 router.get("/admin/balance-reviews", authMiddleware, adminController.getBalanceTopupReviews);
 router.post("/admin/balance-reviews/:id/approve", authMiddleware, adminController.approveBalanceReview);
 router.post("/admin/balance-reviews/:id/reject", authMiddleware, adminController.rejectBalanceReview);

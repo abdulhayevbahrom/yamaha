@@ -34,6 +34,10 @@ const User = require("../model/user.model");
 const Broadcast = require("../model/broadcast.model");
 const BroadcastDelivery = require("../model/broadcastDelivery.model");
 const { bindReferralFromStart } = require("../services/referral.service");
+const {
+  refreshCounts,
+  startBroadcastWorker,
+} = require("../services/broadcast-worker.service");
 
 const startCaption =
   "Star, Premium, PUBG UC va MLBB Diamond ni xavfsiz sotib oling.\n\nDo'konga kirish uchun tugmani bosing.";
@@ -193,6 +197,111 @@ const normalizeTelegramEntities = (entities) => {
     .map((entity) => ({ ...entity }));
 };
 
+const BROADCAST_APP_TARGETS = new Set([
+  "home",
+  "orders",
+  "gifts",
+  "profile",
+  "referral",
+  "contest",
+  "balance",
+  "star-sell",
+]);
+
+const parseBroadcastButtons = (value, webAppUrl = "") => {
+  const lines = String(value || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length) return { ok: true, buttons: [] };
+  if (lines.length > 8) return { ok: false, reason: "Ko'pi bilan 8 ta tugma kiriting." };
+  const buttons = [];
+  for (const line of lines) {
+    const separator = line.indexOf("|");
+    const text = line.slice(0, separator).trim();
+    const destination = line.slice(separator + 1).trim();
+    if (separator < 1 || !text) {
+      return { ok: false, reason: `Noto'g'ri tugma: ${line}\nFormat: Nomi | https://example.com` };
+    }
+    if (/^app:/i.test(destination)) {
+      const target = destination.slice(4).trim().toLowerCase().replace(/^\/+|\/+$/g, "");
+      const gameKey = target.startsWith("games/") ? target.slice(6) : "";
+      if (!webAppUrl || (!BROADCAST_APP_TARGETS.has(target) && !["stars", "premium", "pubg", "freefire", "mlbb", "hok", "roblox", "bloodstrike", "deltaforce"].includes(gameKey))) {
+        return { ok: false, reason: `Web App bo'limi noto'g'ri: ${destination}` };
+      }
+      let appUrl;
+      try {
+        appUrl = new URL(webAppUrl);
+      } catch (_) {
+        return { ok: false, reason: "WEB_APP_URL sozlanmagan yoki noto'g'ri." };
+      }
+      appUrl.hash = `#/${target}`;
+      buttons.push([{ text: text.slice(0, 64), web_app: { url: appUrl.toString() } }]);
+      continue;
+    }
+    if (!/^https?:\/\/\S+$/i.test(destination)) {
+      return { ok: false, reason: `Noto'g'ri tugma: ${line}\nFormat: Nomi | app:profile yoki https://example.com` };
+    }
+    buttons.push([{ text: text.slice(0, 64), url: destination }]);
+  }
+  return { ok: true, buttons };
+};
+
+const parseTashkentSchedule = (value) => {
+  const raw = String(value || "").trim().toLowerCase();
+  if (["hozir", "now", "/now"].includes(raw)) return new Date();
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})[ t](\d{2}):(\d{2})$/);
+  if (!match) return null;
+  const date = new Date(`${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:00+05:00`);
+  if (Number.isNaN(date.getTime()) || date.getTime() < Date.now() - 60_000) return null;
+  return date;
+};
+
+const formatTashkentDate = (date) =>
+  new Intl.DateTimeFormat("uz-UZ", {
+    timeZone: "Asia/Tashkent",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(date));
+
+const WEB_APP_BUTTON_TARGETS = [
+  ["🏠 Bosh sahifa", "home"],
+  ["🛍 Buyurtmalar", "orders"],
+  ["🎁 Giftlar", "gifts"],
+  ["👤 Profil", "profile"],
+  ["👥 Referral", "referral"],
+  ["🏆 Konkurs", "contest"],
+  ["💳 Balans", "balance"],
+  ["⭐ Stars sotish", "star-sell"],
+  ["⭐ Stars", "games/stars"],
+  ["💎 Premium", "games/premium"],
+  ["🎮 PUBG", "games/pubg"],
+  ["🔥 Free Fire", "games/freefire"],
+  ["💠 MLBB", "games/mlbb"],
+  ["👑 HOK", "games/hok"],
+  ["🧱 Roblox", "games/roblox"],
+  ["🩸 Blood Strike", "games/bloodstrike"],
+  ["DF Delta Force", "games/deltaforce"],
+];
+
+const buildWebAppTargetKeyboard = (broadcastId) => {
+  const rows = [];
+  for (let index = 0; index < WEB_APP_BUTTON_TARGETS.length; index += 2) {
+    rows.push(
+      WEB_APP_BUTTON_TARGETS.slice(index, index + 2).map(([label, target]) => ({
+        text: label,
+        callback_data: `AD_TARGET:${broadcastId}:${target}`,
+      })),
+    );
+  }
+  rows.push([{ text: "🌐 Tashqi URL", callback_data: `AD_EXTERNAL:${broadcastId}` }]);
+  return { inline_keyboard: rows };
+};
+
 const isTelegramRecipientUnavailableError = (error) => {
   const statusCode = Number(
     error?.response?.statusCode ||
@@ -263,7 +372,6 @@ async function startBot({ strict = false } = {}) {
     .split(",")
     .map((id) => id.trim())
     .filter(Boolean);
-  const pendingByAdmin = new Map();
   const startPhotoExt = path.extname(startPhotoPath).toLowerCase();
   const startPhotoContentType =
     {
@@ -274,7 +382,6 @@ async function startBot({ strict = false } = {}) {
     }[startPhotoExt] || "application/octet-stream";
 
   const isAdmin = (chatId) => adminIds.includes(String(chatId));
-  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const withSafeHandler = (scope, handler) => {
     return async (...args) => {
       try {
@@ -487,6 +594,27 @@ async function startBot({ strict = false } = {}) {
       .select({ tgUserId: 1 })
       .lean();
     return users.map((u) => String(u.tgUserId));
+  };
+
+  const getAdminDraft = (chatId) =>
+    Broadcast.findOne({ adminChatId: String(chatId), status: "draft" })
+      .sort({ updatedAt: -1 });
+
+  const createDeliverySnapshot = async (broadcastId) => {
+    const users = await getAllUsers();
+    const operations = users.map((tgUserId) => ({
+      updateOne: {
+        filter: { broadcastId, tgUserId },
+        update: { $setOnInsert: { broadcastId, tgUserId, status: "pending" } },
+        upsert: true,
+      },
+    }));
+    for (let index = 0; index < operations.length; index += 1000) {
+      await BroadcastDelivery.bulkWrite(operations.slice(index, index + 1000), {
+        ordered: false,
+      });
+    }
+    return users.length;
   };
 
   const sendStartFlow = async (chatId) => {
@@ -952,6 +1080,91 @@ async function startBot({ strict = false } = {}) {
       await bot.sendMessage(chatId, `🆔 PUBG ID: ${order.username}`);
     }
 
+    if (query.data?.startsWith("AD_BUTTONS:")) {
+      if (!isAdmin(chatId)) {
+        await bot.answerCallbackQuery(query.id, { text: "Ruxsat yo'q", show_alert: true });
+        return;
+      }
+      const [, choice, broadcastId] = query.data.split(":");
+      const draft = await Broadcast.findOne({
+        _id: broadcastId,
+        adminChatId: String(chatId),
+        status: "draft",
+        draftStage: "buttons",
+      }).lean();
+      if (!draft) {
+        await bot.answerCallbackQuery(query.id, { text: "Draft topilmadi", show_alert: true });
+        return;
+      }
+      await bot.answerCallbackQuery(query.id);
+      if (choice === "NO") {
+        await Broadcast.findByIdAndUpdate(draft._id, {
+          $set: { buttons: [], draftStage: "schedule", draftButtonText: "" },
+        });
+        await bot.sendMessage(chatId, "Yuborish vaqtini kiriting:\n• hozir\n• 2026-11-02 21:30\n\nVaqt Toshkent vaqti (UTC+5) bo'yicha.");
+        return;
+      }
+      await Broadcast.findByIdAndUpdate(draft._id, {
+        $set: { draftStage: "button_name", draftButtonText: "" },
+      });
+      await bot.sendMessage(chatId, "Tugmada ko'rinadigan nomni yuboring. Masalan: PUBG UC olish");
+      return;
+    }
+
+    if (query.data?.startsWith("AD_TARGET:")) {
+      if (!isAdmin(chatId)) {
+        await bot.answerCallbackQuery(query.id, { text: "Ruxsat yo'q", show_alert: true });
+        return;
+      }
+      const payload = query.data.slice("AD_TARGET:".length);
+      const separator = payload.indexOf(":");
+      const broadcastId = payload.slice(0, separator);
+      const target = payload.slice(separator + 1);
+      const draft = await Broadcast.findOne({
+        _id: broadcastId,
+        adminChatId: String(chatId),
+        status: "draft",
+        draftStage: "button_target",
+      }).lean();
+      if (!draft) {
+        await bot.answerCallbackQuery(query.id, { text: "Draft topilmadi", show_alert: true });
+        return;
+      }
+      const parsed = parseBroadcastButtons(`${draft.draftButtonText} | app:${target}`, webAppUrl);
+      if (!parsed.ok) {
+        await bot.answerCallbackQuery(query.id, { text: parsed.reason, show_alert: true });
+        return;
+      }
+      await Broadcast.findByIdAndUpdate(draft._id, {
+        $set: { buttons: parsed.buttons, draftStage: "schedule" },
+      });
+      await bot.answerCallbackQuery(query.id, { text: "Bo'lim tanlandi" });
+      await bot.sendMessage(chatId, "Yuborish vaqtini kiriting:\n• hozir\n• 2026-11-02 21:30\n\nVaqt Toshkent vaqti (UTC+5) bo'yicha.");
+      return;
+    }
+
+    if (query.data?.startsWith("AD_EXTERNAL:")) {
+      if (!isAdmin(chatId)) {
+        await bot.answerCallbackQuery(query.id, { text: "Ruxsat yo'q", show_alert: true });
+        return;
+      }
+      const broadcastId = query.data.slice("AD_EXTERNAL:".length);
+      const draft = await Broadcast.findOne({
+        _id: broadcastId,
+        adminChatId: String(chatId),
+        status: "draft",
+        draftStage: "button_target",
+      }).lean();
+      if (!draft) {
+        await bot.answerCallbackQuery(query.id, { text: "Draft topilmadi", show_alert: true });
+        return;
+      }
+      await Broadcast.findByIdAndUpdate(draft._id, { $set: { draftStage: "external_url" } });
+      await bot.answerCallbackQuery(query.id);
+      await bot.sendMessage(chatId, "Tashqi havolani yuboring. Masalan: https://t.me/example");
+      return;
+    }
+
     if (query.data?.startsWith("AD_EDIT:")) {
       if (!isAdmin(chatId)) {
         await bot.answerCallbackQuery(query.id, {
@@ -961,15 +1174,56 @@ async function startBot({ strict = false } = {}) {
         return;
       }
       const broadcastId = query.data.replace("AD_EDIT:", "").trim();
-      pendingByAdmin.set(String(chatId), {
-        mode: "edit",
-        broadcastId,
+      const broadcast = await Broadcast.findById(broadcastId).lean();
+      if (!broadcast || ["draft", "scheduled", "processing", "cancelled", "deleted"].includes(broadcast.status)) {
+        await bot.answerCallbackQuery(query.id, { text: "Bu reklamani hozir tahrirlab bo'lmaydi", show_alert: true });
+        return;
+      }
+      await Broadcast.updateMany(
+        { adminChatId: String(chatId), status: "draft" },
+        { $set: { status: "cancelled", draftStage: "" } },
+      );
+      await Broadcast.create({
+        adminChatId: String(chatId),
+        status: "draft",
+        draftStage: "content",
+        type: broadcast.type,
+        text: broadcast.text,
+        fileId: broadcast.fileId || broadcast.photoFileId,
+        fileName: broadcast.fileName,
+        buttons: broadcast.buttons || [],
+        lastError: `edit:${broadcastId}`,
       });
       await bot.answerCallbackQuery(query.id);
       await bot.sendMessage(
         chatId,
-        "Yangi matnni yuboring (caption ham shu matn bilan yangilanadi).",
+        "Yangi matnni yuboring. Media reklamada faqat caption yangilanadi. /cancel — bekor qilish.",
       );
+      return;
+    }
+
+    if (query.data?.startsWith("AD_STATUS:")) {
+      if (!isAdmin(chatId)) {
+        await bot.answerCallbackQuery(query.id, { text: "Ruxsat yo'q", show_alert: true });
+        return;
+      }
+      const broadcastId = query.data.replace("AD_STATUS:", "").trim();
+      const broadcast = await Broadcast.findById(broadcastId).lean();
+      if (!broadcast) {
+        await bot.answerCallbackQuery(query.id, { text: "Reklama topilmadi", show_alert: true });
+        return;
+      }
+      const counts = await refreshCounts(broadcast._id);
+      await bot.answerCallbackQuery(query.id);
+      await bot.sendMessage(chatId, [
+        `📊 Reklama: ${broadcast._id}`,
+        `Holat: ${broadcast.status}`,
+        `Jami: ${counts.totalCount}`,
+        `Yuborildi: ${counts.sentCount}`,
+        `Yuborilmadi: ${counts.failedCount}`,
+        broadcast.scheduledAt ? `Vaqt: ${formatTashkentDate(broadcast.scheduledAt)}` : "",
+      ].filter(Boolean).join("\n"));
+      return;
     }
 
     if (query.data?.startsWith("AD_DEL:")) {
@@ -981,23 +1235,42 @@ async function startBot({ strict = false } = {}) {
         return;
       }
       const broadcastId = query.data.replace("AD_DEL:", "").trim();
-      const deliveries = await BroadcastDelivery.find({ broadcastId }).lean();
+      const broadcast = await Broadcast.findById(broadcastId).lean();
+      if (!broadcast) {
+        await bot.answerCallbackQuery(query.id, { text: "Reklama topilmadi", show_alert: true });
+        return;
+      }
+      await Broadcast.findByIdAndUpdate(broadcastId, {
+        $set: { status: "cancelled", lockUntil: null },
+      });
+      const deliveries = await BroadcastDelivery.find({
+        broadcastId,
+        $or: [
+          { status: "sent" },
+          { status: { $exists: false }, messageId: { $gt: 0 } },
+        ],
+      }).lean();
       let removed = 0;
+      let removeFailed = 0;
       for (const delivery of deliveries) {
         try {
           await bot.deleteMessage(delivery.tgUserId, delivery.messageId);
+          await BroadcastDelivery.updateOne({ _id: delivery._id }, { $set: { status: "deleted" } });
           removed += 1;
-        } catch (_) {
-          // ignore
+        } catch (error) {
+          removeFailed += 1;
+          await BroadcastDelivery.updateOne({ _id: delivery._id }, { $set: { lastError: String(error?.message || error).slice(0, 500) } });
         }
       }
-      await Broadcast.deleteOne({ _id: broadcastId });
-      await BroadcastDelivery.deleteMany({ broadcastId });
+      await Broadcast.findByIdAndUpdate(broadcastId, {
+        $set: { status: removeFailed ? "failed" : "deleted", completedAt: new Date(), lastError: removeFailed ? `${removeFailed} ta xabar o'chmadi` : "" },
+      });
       await bot.answerCallbackQuery(query.id, { text: "O'chirildi" });
       await bot.sendMessage(
         chatId,
-        `✅ Reklama o'chirildi. ID: ${broadcastId} (o'chirildi: ${removed})`,
+        `✅ Reklama bekor qilindi/o'chirildi. ID: ${broadcastId}\nO'chirildi: ${removed}\nO'chmadi: ${removeFailed}`,
       );
+      return;
     }
     }),
   );
@@ -1015,182 +1288,226 @@ async function startBot({ strict = false } = {}) {
       if (!isAdmin(chatId)) return;
 
       if (msg.text === "📣 Reklama yuborish") {
-        pendingByAdmin.set(String(chatId), { mode: "create" });
+        await Broadcast.updateMany(
+          { adminChatId: String(chatId), status: "draft" },
+          { $set: { status: "cancelled", draftStage: "" } },
+        );
+        await Broadcast.create({
+          adminChatId: String(chatId),
+          status: "draft",
+          draftStage: "content",
+        });
         await bot.sendMessage(
           chatId,
-          "Reklama xabarini yuboring (matn yoki rasm+matn). Bekor qilish uchun /cancel.",
+          "Reklamani yuboring: matn, rasm, video yoki hujjat. Media bilan caption ham bo'lishi mumkin.\n/cancel — bekor qilish.",
         );
         return;
       }
 
       if (msg.text === "/cancel") {
-        pendingByAdmin.delete(String(chatId));
+        await Broadcast.updateMany(
+          { adminChatId: String(chatId), status: "draft" },
+          { $set: { status: "cancelled", draftStage: "" } },
+        );
         await bot.sendMessage(chatId, "Bekor qilindi.");
         return;
       }
 
-      const pending = pendingByAdmin.get(String(chatId));
+      const pending = await getAdminDraft(chatId);
       if (!pending) return;
 
-      if (pending.mode === "edit") {
+      if (pending.draftStage === "content" && String(pending.lastError || "").startsWith("edit:")) {
         const newText = String(msg.text || "").trim();
         const newEntities = normalizeTelegramEntities(msg.entities);
         if (!newText) {
           await bot.sendMessage(chatId, "❗ Matn kiriting.");
           return;
         }
-        const broadcast = await Broadcast.findById(pending.broadcastId).lean();
+        const broadcastId = pending.lastError.slice("edit:".length);
+        const broadcast = await Broadcast.findById(broadcastId).lean();
         if (!broadcast) {
           await bot.sendMessage(chatId, "❗ Reklama topilmadi.");
-          pendingByAdmin.delete(String(chatId));
+          await Broadcast.findByIdAndUpdate(pending._id, { status: "cancelled", draftStage: "" });
           return;
         }
         await Broadcast.findByIdAndUpdate(broadcast._id, {
           text: newText,
-          ...(broadcast.type === "photo"
+          ...(broadcast.type !== "text"
             ? { captionEntities: newEntities, entities: [] }
             : { entities: newEntities, captionEntities: [] }),
         });
         const deliveries = await BroadcastDelivery.find({
           broadcastId: broadcast._id,
+          $or: [
+            { status: "sent" },
+            { status: { $exists: false }, messageId: { $gt: 0 } },
+          ],
         }).lean();
+        let edited = 0;
+        let editFailed = 0;
         for (const delivery of deliveries) {
           try {
-            if (broadcast.type === "photo") {
+            if (broadcast.type !== "text") {
               await bot.editMessageCaption(newText, {
                 chat_id: delivery.tgUserId,
                 message_id: delivery.messageId,
                 ...(newEntities.length
                   ? { caption_entities: newEntities }
                   : {}),
+                ...(broadcast.buttons?.length ? { reply_markup: { inline_keyboard: broadcast.buttons } } : {}),
               });
             } else {
               await bot.editMessageText(newText, {
                 chat_id: delivery.tgUserId,
                 message_id: delivery.messageId,
                 ...(newEntities.length ? { entities: newEntities } : {}),
+                ...(broadcast.buttons?.length ? { reply_markup: { inline_keyboard: broadcast.buttons } } : {}),
               });
             }
-          } catch (_) {
-            // ignore
+            edited += 1;
+          } catch (error) {
+            editFailed += 1;
+            await BroadcastDelivery.updateOne({ _id: delivery._id }, { $set: { lastError: String(error?.message || error).slice(0, 500) } });
           }
         }
-        pendingByAdmin.delete(String(chatId));
-        await bot.sendMessage(chatId, "✅ Reklama yangilandi.");
+        await Broadcast.findByIdAndUpdate(pending._id, { status: "cancelled", draftStage: "" });
+        await bot.sendMessage(chatId, `✅ Reklama yangilandi.\nYangilandi: ${edited}\nYangilanmadi: ${editFailed}`);
         return;
       }
 
-      if (pending.mode === "create") {
-        const users = await getAllUsers();
-        let sentCount = 0;
-
+      if (pending.draftStage === "content") {
+        let content = null;
         if (msg.photo?.length) {
-          const fileId = msg.photo[msg.photo.length - 1]?.file_id;
-          const caption = String(msg.caption || "").trim();
-          const captionEntities = normalizeTelegramEntities(msg.caption_entities);
-          const broadcast = await Broadcast.create({
-            adminChatId: String(chatId),
+          content = {
             type: "photo",
-            text: caption,
-            photoFileId: fileId,
-            captionEntities,
-          });
-          for (const tgUserId of users) {
-            try {
-              const sent = await bot.sendPhoto(
-                tgUserId,
-                fileId,
-                caption
-                  ? {
-                      caption,
-                      ...(captionEntities.length
-                        ? { caption_entities: captionEntities }
-                        : {}),
-                    }
-                  : undefined,
-              );
-              await BroadcastDelivery.create({
-                broadcastId: broadcast._id,
-                tgUserId,
-                messageId: sent.message_id,
-              });
-              sentCount += 1;
-              if (sentCount % 20 === 0) await sleep(300);
-            } catch (_) {
-              // ignore
-            }
-          }
-          await bot.sendMessage(
-            chatId,
-            `✅ Reklama yuborildi. ID: ${broadcast._id}`,
-            {
-              reply_markup: {
-                inline_keyboard: [
-                  [
-                    {
-                      text: "✏️ Tahrirlash",
-                      callback_data: `AD_EDIT:${broadcast._id}`,
-                    },
-                    {
-                      text: "🗑 O'chirish",
-                      callback_data: `AD_DEL:${broadcast._id}`,
-                    },
-                  ],
-                ],
-              },
-            },
-          );
-          pendingByAdmin.delete(String(chatId));
+            fileId: msg.photo[msg.photo.length - 1]?.file_id,
+            text: String(msg.caption || "").trim(),
+            captionEntities: normalizeTelegramEntities(msg.caption_entities),
+          };
+        } else if (msg.video?.file_id) {
+          content = {
+            type: "video",
+            fileId: msg.video.file_id,
+            text: String(msg.caption || "").trim(),
+            captionEntities: normalizeTelegramEntities(msg.caption_entities),
+          };
+        } else if (msg.document?.file_id) {
+          content = {
+            type: "document",
+            fileId: msg.document.file_id,
+            fileName: String(msg.document.file_name || ""),
+            text: String(msg.caption || "").trim(),
+            captionEntities: normalizeTelegramEntities(msg.caption_entities),
+          };
+        } else if (msg.text && !msg.text.startsWith("/")) {
+          content = {
+            type: "text",
+            text: msg.text.trim(),
+            entities: normalizeTelegramEntities(msg.entities),
+          };
+        }
+        if (!content) {
+          await bot.sendMessage(chatId, "❗ Matn, rasm, video yoki hujjat yuboring.");
           return;
         }
-
-        if (msg.text && !msg.text.startsWith("/")) {
-          const payload = msg.text.trim();
-          const entities = normalizeTelegramEntities(msg.entities);
-          const broadcast = await Broadcast.create({
-            adminChatId: String(chatId),
-            type: "text",
-            text: payload,
-            entities,
-          });
-          for (const tgUserId of users) {
-            try {
-              const sent = await bot.sendMessage(tgUserId, payload, {
-                ...(entities.length ? { entities } : {}),
-              });
-              await BroadcastDelivery.create({
-                broadcastId: broadcast._id,
-                tgUserId,
-                messageId: sent.message_id,
-              });
-              sentCount += 1;
-              if (sentCount % 20 === 0) await sleep(300);
-            } catch (_) {
-              // ignore
-            }
-          }
-          await bot.sendMessage(
-            chatId,
-            `✅ Reklama yuborildi. ID: ${broadcast._id}`,
-            {
-              reply_markup: {
-                inline_keyboard: [
-                  [
-                    {
-                      text: "✏️ Tahrirlash",
-                      callback_data: `AD_EDIT:${broadcast._id}`,
-                    },
-                    {
-                      text: "🗑 O'chirish",
-                      callback_data: `AD_DEL:${broadcast._id}`,
-                    },
-                  ],
-                ],
-              },
+        await Broadcast.findByIdAndUpdate(pending._id, {
+          $set: { ...content, draftStage: "buttons", lastError: "" },
+        });
+        await bot.sendMessage(
+          chatId,
+          "Reklamaga tugma qo'shilsinmi?",
+          {
+            reply_markup: {
+              inline_keyboard: [[
+                { text: "✅ Ha", callback_data: `AD_BUTTONS:YES:${pending._id}` },
+                { text: "❌ Yo'q", callback_data: `AD_BUTTONS:NO:${pending._id}` },
+              ]],
             },
-          );
-          pendingByAdmin.delete(String(chatId));
+          },
+        );
+        return;
+      }
+
+      if (pending.draftStage === "buttons") {
+        await bot.sendMessage(chatId, "Yuqoridagi Ha yoki Yo'q tugmasini tanlang.");
+        return;
+      }
+
+      if (pending.draftStage === "button_name") {
+        const buttonText = String(msg.text || "").trim();
+        if (!buttonText || buttonText.startsWith("/") || buttonText.length > 64) {
+          await bot.sendMessage(chatId, "❗ Tugma nomini kiriting (ko'pi bilan 64 ta belgi).");
+          return;
         }
+        await Broadcast.findByIdAndUpdate(pending._id, {
+          $set: { draftButtonText: buttonText, draftStage: "button_target" },
+        });
+        await bot.sendMessage(
+          chatId,
+          "Tugma ochadigan Web App bo'limini tanlang yoki tashqi URL kiriting:",
+          { reply_markup: buildWebAppTargetKeyboard(pending._id) },
+        );
+        return;
+      }
+
+      if (pending.draftStage === "button_target") {
+        await bot.sendMessage(chatId, "Yuqoridagi Web App bo'limlaridan birini yoki Tashqi URL tugmasini tanlang.");
+        return;
+      }
+
+      if (pending.draftStage === "external_url") {
+        const url = String(msg.text || "").trim();
+        const parsed = parseBroadcastButtons(`${pending.draftButtonText} | ${url}`, webAppUrl);
+        if (!parsed.ok || /^app:/i.test(url)) {
+          await bot.sendMessage(chatId, "❗ To'liq tashqi URL kiriting. Masalan: https://t.me/example");
+          return;
+        }
+        await Broadcast.findByIdAndUpdate(pending._id, {
+          $set: { buttons: parsed.buttons, draftStage: "schedule" },
+        });
+        await bot.sendMessage(chatId, "Yuborish vaqtini kiriting:\n• hozir\n• 2026-11-02 21:30\n\nVaqt Toshkent vaqti (UTC+5) bo'yicha.");
+        return;
+      }
+
+      if (pending.draftStage === "schedule") {
+        const scheduledAt = parseTashkentSchedule(msg.text);
+        if (!scheduledAt) {
+          await bot.sendMessage(chatId, "❗ Vaqt noto'g'ri yoki o'tib ketgan. Masalan: 2026-11-02 21:30 yoki hozir");
+          return;
+        }
+        const totalCount = await createDeliverySnapshot(pending._id);
+        const queued = await Broadcast.findByIdAndUpdate(
+          pending._id,
+          {
+            $set: {
+              status: "scheduled",
+              draftStage: "",
+              scheduledAt,
+              totalCount,
+              sentCount: 0,
+              failedCount: 0,
+            },
+          },
+          { new: true },
+        ).lean();
+        await bot.sendMessage(
+          chatId,
+          [
+            "✅ Reklama navbatga qo'yildi.",
+            `ID: ${queued._id}`,
+            `Qabul qiluvchilar: ${totalCount}`,
+            `Vaqt: ${formatTashkentDate(scheduledAt)}`,
+          ].join("\n"),
+          {
+            reply_markup: {
+              inline_keyboard: [[
+                { text: "📊 Holat", callback_data: `AD_STATUS:${queued._id}` },
+                { text: "🗑 Bekor qilish", callback_data: `AD_DEL:${queued._id}` },
+              ]],
+            },
+          },
+        );
+        return;
       }
     } catch (err) {
       console.error("Admin ads error:", err.message);
@@ -1307,11 +1624,18 @@ async function startBot({ strict = false } = {}) {
     });
   }
 
+  startBroadcastWorker(bot);
   console.log("Telegram bot ishga tushdi...");
   return bot;
 }
 
-module.exports = { isTelegramRecipientUnavailableError, startBot };
+module.exports = {
+  formatTashkentDate,
+  isTelegramRecipientUnavailableError,
+  parseBroadcastButtons,
+  parseTashkentSchedule,
+  startBot,
+};
 
 if (require.main === module) {
   startBot({ strict: true }).catch((error) => {
