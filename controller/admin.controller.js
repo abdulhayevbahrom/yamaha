@@ -1616,6 +1616,53 @@ const getUserAssets = async (req, res) => {
   }
 };
 
+const getUserOrders = async (req, res) => {
+  try {
+    const tgUserId = normalizeString(req.params.tgUserId);
+    if (!tgUserId) return response.error(res, "Foydalanuvchi topilmadi");
+    const exists = await User.exists({ tgUserId });
+    if (!exists) return response.notFound(res, "Foydalanuvchi topilmadi");
+
+    const filter = normalizeString(req.query?.status).toLowerCase();
+    const page = Math.max(1, Math.floor(Number(req.query?.page || 1)));
+    const limit = Math.min(50, Math.max(1, Math.floor(Number(req.query?.limit || 20))));
+    const query = { tgUserId };
+    if (filter === "completed") query.status = { $in: ["completed", "paid_auto_processed"] };
+    if (filter === "cancelled") query.status = "cancelled";
+
+    const [orders, totalItems] = await Promise.all([
+      Order.find(query)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .select({ orderId: 1, product: 1, planCode: 1, expectedAmount: 1, paidAmount: 1, paymentMethod: 1, status: 1, createdAt: 1, paidAt: 1 })
+        .lean(),
+      Order.countDocuments(query),
+    ]);
+
+    return response.success(res, "Mijoz buyurtmalari", {
+      items: orders.map((order) => ({
+        id: String(order._id),
+        orderId: Number(order.orderId || 0),
+        product: normalizeString(order.product),
+        planCode: normalizeString(order.planCode),
+        amount: Number(order.paidAmount || order.expectedAmount || 0),
+        paymentMethod: normalizeString(order.paymentMethod),
+        status: normalizeString(order.status),
+        createdAt: order.createdAt || null,
+        paidAt: order.paidAt || null,
+      })),
+      filter: ["completed", "cancelled"].includes(filter) ? filter : "all",
+      page,
+      limit,
+      totalItems,
+      totalPages: Math.max(1, Math.ceil(totalItems / limit)),
+    });
+  } catch (error) {
+    return response.serverError(res, "Mijoz buyurtmalarini olishda xatolik", error.message);
+  }
+};
+
 const searchAssets = async (req, res) => {
   try {
     const rawQuery = normalizeString(req.query.q);
@@ -2084,6 +2131,37 @@ const adminRemoveUserNft = async (req, res) => {
       "NFTni o'chirishda xatolik",
       error.message,
     );
+  }
+};
+
+const adminRemoveUserGift = async (req, res) => {
+  try {
+    const tgUserId = normalizeString(req.params.tgUserId);
+    const userGiftId = normalizeString(req.params.userGiftId);
+    if (!tgUserId || !/^[a-f0-9]{24}$/i.test(userGiftId)) {
+      return response.error(res, "Foydalanuvchi yoki Gift topilmadi");
+    }
+
+    const gift = await UserGift.findOne({ _id: userGiftId, tgUserId }).lean();
+    if (!gift) return response.notFound(res, "Gift topilmadi");
+    if (gift.status === "sending") {
+      return response.error(res, "Yuborilayotgan Giftni hozir o'chirib bo'lmaydi");
+    }
+
+    await UserGift.deleteOne({ _id: userGiftId, tgUserId });
+    emitUserUpdate(tgUserId, {
+      type: "admin_gift_removed",
+      refreshGifts: true,
+      userGiftId,
+      giftId: normalizeString(gift.giftId),
+    });
+
+    return response.success(res, "Gift foydalanuvchi profilidan o'chirildi", {
+      userGiftId,
+      tgUserId,
+    });
+  } catch (error) {
+    return response.serverError(res, "Giftni o'chirishda xatolik", error.message);
   }
 };
 
@@ -2860,7 +2938,9 @@ module.exports = {
   excludeAllUserReferrals,
   updateUserReferralSystemBlock,
   getUserAssets,
+  getUserOrders,
   adminRemoveUserNft,
+  adminRemoveUserGift,
   adminTransferUserNft,
   topupUserBalance,
   updateUserBlockStatus,

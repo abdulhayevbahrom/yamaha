@@ -482,10 +482,20 @@ router.get(
   authMiddleware,
   adminController.getUserAssets,
 );
+router.get(
+  "/admin/users/:tgUserId/orders",
+  authMiddleware,
+  adminController.getUserOrders,
+);
 router.post(
   "/admin/users/:tgUserId/nfts/:nftId/remove",
   authMiddleware,
   adminController.adminRemoveUserNft,
+);
+router.delete(
+  "/admin/users/:tgUserId/gifts/:userGiftId",
+  authMiddleware,
+  adminController.adminRemoveUserGift,
 );
 router.post(
   "/admin/users/:tgUserId/nfts/:nftId/transfer",
