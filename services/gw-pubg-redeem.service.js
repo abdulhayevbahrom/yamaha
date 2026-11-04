@@ -4,6 +4,7 @@ const { createRedeemOrder } = require("./gw-api.service");
 const { refundToBalance } = require("./order-cancel.service");
 const { sendOrderArchive } = require("./order-archive.service");
 const { emitUserUpdate } = require("../socket");
+const { handleGwInsufficientBalance } = require("./gw-insufficient-balance.service");
 
 const enabled = (value) => ["1", "true", "yes", "on"].includes(String(value || "").trim().toLowerCase());
 const isGwPubgRedeemEnabled = () => enabled(process.env.GW_PUBG_REDEEM_ENABLED ?? process.env.GW_PUBG_AUTOBUY_ENABLED);
@@ -49,6 +50,21 @@ async function autoFulfillGwPubgRedeem(orderOrId) {
     emitUserUpdate(updated.tgUserId, { type: "redeem_code_ready", refreshOrders: true, orderId: updated._id, status: updated.status, product: updated.product });
     return { ok: true, order: updated };
   } catch (error) {
+    const payload = error?.response?.data || null;
+    const lowBalance = await handleGwInsufficientBalance({
+      order,
+      payload,
+      error,
+      buildTransaction: (extra) => ({
+        ...(order.fragmentTx || {}),
+        provider: "gw",
+        productType: "pubg_redeem",
+        providerProductId: plan.providerProductId,
+        response: payload,
+        ...extra,
+      }),
+    });
+    if (lowBalance) return lowBalance;
     const refund = await refundToBalance(order);
     await Order.findByIdAndUpdate(order._id, { $set: {
       status: refund.ok ? "cancelled" : order.status,

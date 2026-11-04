@@ -6,6 +6,7 @@ const { isAmbiguousExternalError } = require("./external-operation.service");
 const { sendOrderArchive } = require("./order-archive.service");
 const { awardReferralCommissionForOrder } = require("./referral.service");
 const { emitUserUpdate } = require("../socket");
+const { handleGwInsufficientBalance } = require("./gw-insufficient-balance.service");
 
 const timers = new Map();
 const enabled = (value) => ["1", "true", "yes", "on"].includes(String(value || "").trim().toLowerCase());
@@ -35,6 +36,11 @@ function tx(order, payload, extra = {}) {
     customerPriceUzs: Number(old.customerPriceUzs || order.expectedAmount || 0),
     updatedAt: new Date(), response: payload || null, ...extra,
   };
+}
+
+function handleLowBalance(order, payload, error = null) {
+  const response = payload || error?.response?.data || null;
+  return handleGwInsufficientBalance({ order, payload: response, error, buildTransaction: (extra) => tx(order, response, extra) });
 }
 
 async function complete(order, payload) {
@@ -75,6 +81,8 @@ function schedule(orderId) {
 }
 
 async function handle(order, payload) {
+  const lowBalance = await handleLowBalance(order, payload);
+  if (lowBalance) return lowBalance;
   const status = statusOf(payload);
   if (["completed", "done", "success"].includes(status)) return complete(order, payload);
   if (["cancelled", "failed"].includes(status) || payload?.orderCreated === false) return cancelAndRefund(order, payload);
@@ -94,6 +102,8 @@ async function pollGwDeltaForceOrder(orderId) {
   if (!id) return { ok: false, needsReview: true };
   try { return await handle(order, await getOrder(id)); }
   catch (error) {
+    const lowBalance = await handleLowBalance(order, null, error);
+    if (lowBalance) return lowBalance;
     if (isAmbiguousExternalError(error)) { schedule(order._id); return { ok: false, processing: true }; }
     await Order.findByIdAndUpdate(order._id, { $set: { fulfillmentStatus: "needs_review", fulfillmentError: error.message } });
     return { ok: false, needsReview: true };
@@ -118,6 +128,8 @@ async function autoFulfillGwDeltaForce(orderOrId) {
     return await handle(order, await createOrder({ pid: plan.providerProductId, userId: String(order.playerId || order.username || "").trim(), trxid: `YMH-DELTAFORCE-${order.orderId}`, idempotencyKey: `YMH-DELTAFORCE-${order.orderId}` }));
   } catch (error) {
     const payload = error?.response?.data;
+    const lowBalance = await handleLowBalance(order, payload, error);
+    if (lowBalance) return lowBalance;
     if ([400, 401, 403].includes(Number(error?.response?.status || 0)) && payload) return cancelAndRefund(order, payload);
     await Order.findByIdAndUpdate(order._id, { $set: { fulfillmentStatus: "needs_review", fulfillmentError: "GW Delta Force submit result unknown", fragmentTx: tx(order, payload, { phase: "submit_unknown", ambiguous: true }) } });
     return { ok: false, needsReview: true };

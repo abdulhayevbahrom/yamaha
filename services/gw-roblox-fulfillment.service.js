@@ -7,6 +7,7 @@ const { isAmbiguousExternalError } = require("./external-operation.service");
 const { sendOrderArchive } = require("./order-archive.service");
 const { awardReferralCommissionForOrder } = require("./referral.service");
 const { emitUserUpdate } = require("../socket");
+const { handleGwInsufficientBalance } = require("./gw-insufficient-balance.service");
 
 const timers = new Map();
 const enabled = (value) => ["1", "true", "yes", "on"].includes(String(value || "").trim().toLowerCase());
@@ -47,6 +48,16 @@ function tx(order, payload, extra = {}) {
     response: payload || null,
     ...extra,
   };
+}
+
+function handleLowBalance(order, payload, error = null) {
+  const response = payload || error?.response?.data || null;
+  return handleGwInsufficientBalance({
+    order,
+    payload: response,
+    error,
+    buildTransaction: (extra) => tx(order, response, extra),
+  });
 }
 
 async function complete(order, payload) {
@@ -102,6 +113,8 @@ function scheduleSubmitRecovery(orderId) {
 }
 
 async function handle(order, payload) {
+  const lowBalance = await handleLowBalance(order, payload);
+  if (lowBalance) return lowBalance;
   if (extractRedeemCodes(payload).length) return complete(order, payload);
   const status = statusOf(payload);
   if (["completed", "done", "success"].includes(status)) return complete(order, payload);
@@ -126,6 +139,8 @@ async function pollGwRobloxOrder(orderId) {
   try {
     return await handle(order, await getOrder(id));
   } catch (error) {
+    const lowBalance = await handleLowBalance(order, null, error);
+    if (lowBalance) return lowBalance;
     if (isAmbiguousExternalError(error)) {
       const attempts = Number(order?.fragmentTx?.pollAttempts || 0) + 1;
       const limit = Math.max(1, Number(process.env.GW_ROBLOX_POLL_MAX_ATTEMPTS || 24));
@@ -172,6 +187,8 @@ async function recoverGwRobloxSubmit(orderId) {
     }));
   } catch (error) {
     const payload = error?.response?.data;
+    const lowBalance = await handleLowBalance(order, payload, error);
+    if (lowBalance) return lowBalance;
     if (payload && isDefinitiveSubmitFailure(error, payload)) return cancelAndRefund(order, payload);
     const needsReview = attempts >= limit;
     await Order.findByIdAndUpdate(order._id, { $set: {
@@ -216,6 +233,8 @@ async function autoFulfillGwRoblox(orderOrId) {
     }));
   } catch (error) {
     const payload = error?.response?.data;
+    const lowBalance = await handleLowBalance(order, payload, error);
+    if (lowBalance) return lowBalance;
     if (payload && isDefinitiveSubmitFailure(error, payload)) return cancelAndRefund(order, payload);
     await Order.findByIdAndUpdate(order._id, { $set: {
       fulfillmentStatus: "processing",

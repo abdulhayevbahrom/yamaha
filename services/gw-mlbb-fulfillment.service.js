@@ -6,6 +6,7 @@ const { isAmbiguousExternalError } = require("./external-operation.service");
 const { sendOrderArchive } = require("./order-archive.service");
 const { awardReferralCommissionForOrder } = require("./referral.service");
 const { emitUserUpdate } = require("../socket");
+const { handleGwInsufficientBalance } = require("./gw-insufficient-balance.service");
 
 const pollTimers = new Map();
 const enabled = (value) => ["1", "true", "yes", "on"].includes(String(value || "").trim().toLowerCase());
@@ -66,6 +67,16 @@ function providerTx(order, payload, extra = {}) {
     response: payload || null,
     ...extra,
   };
+}
+
+function handleLowBalance(order, payload, error = null) {
+  const response = payload || error?.response?.data || null;
+  return handleGwInsufficientBalance({
+    order,
+    payload: response,
+    error,
+    buildTransaction: (extra) => providerTx(order, response, extra),
+  });
 }
 
 async function complete(order, payload) {
@@ -141,6 +152,8 @@ function scheduleSubmitRecovery(orderId) {
 }
 
 async function handlePayload(order, payload) {
+  const lowBalance = await handleLowBalance(order, payload);
+  if (lowBalance) return lowBalance;
   const status = normalizeStatus(payload);
   if (status === "completed") return complete(order, payload);
   if (["cancelled", "failed"].includes(status) || payload?.orderCreated === false) {
@@ -169,6 +182,8 @@ async function pollGwMlbbOrder(orderId) {
   try {
     return handlePayload(order, await getOrder(id));
   } catch (error) {
+    const lowBalance = await handleLowBalance(order, null, error);
+    if (lowBalance) return lowBalance;
     if (isAmbiguousExternalError(error)) {
       const attempts = Number(order?.fragmentTx?.pollAttempts || 0) + 1;
       const maxAttempts = Math.max(
@@ -228,6 +243,8 @@ async function recoverGwMlbbSubmit(orderId) {
     }));
   } catch (error) {
     const payload = error?.response?.data;
+    const lowBalance = await handleLowBalance(order, payload, error);
+    if (lowBalance) return lowBalance;
     if (payload && isDefinitiveSubmitFailure(error, payload)) {
       return cancelAndRefund(order, payload);
     }
@@ -285,6 +302,8 @@ async function autoFulfillGwMlbb(orderOrId) {
     }));
   } catch (error) {
     const payload = error?.response?.data;
+    const lowBalance = await handleLowBalance(claimed, payload, error);
+    if (lowBalance) return lowBalance;
     if (payload && isDefinitiveSubmitFailure(error, payload)) {
       return cancelAndRefund(claimed, payload);
     }
