@@ -4,6 +4,7 @@ const { StringSession } = require("telegram/sessions");
 const { NewMessage } = require("telegram/events");
 const TelegramBot = require("node-telegram-bot-api");
 const mongoose = require("mongoose");
+const PaymentLog = require("../model/payment-log.model");
 const { processIncomingPayment } = require("../services/payment-match.service");
 const connectDB = require("../config/dbConfig");
 const { getTelegramCredentials } = require("../config/telegram-credentials");
@@ -37,6 +38,18 @@ const botToken = process.env.BOT_TOKEN || "";
 const statusPollIntervalMs = Number(
   process.env.USER_CLIENT_STATUS_POLL_MS || 5000,
 );
+const historyPollIntervalMs = Number(
+  process.env.CARDXABAR_HISTORY_POLL_MS || 15000,
+);
+const historyPollLimit = Math.min(
+  Math.max(Number(process.env.CARDXABAR_HISTORY_POLL_LIMIT || 100), 10),
+  500,
+);
+const historyProcessingRetryMs = 30_000;
+const historyLookbackMs = Math.max(
+  Number(process.env.CARDXABAR_HISTORY_LOOKBACK_MS || 15 * 60 * 1000),
+  60_000,
+);
 
 let sessionAlertSent = false;
 let sessionLockHandle = null;
@@ -66,6 +79,9 @@ const runtimeStatus = {
   lastGwAlertReason: "",
   lastGwAlertSource: "",
   statusWatcherRunning: false,
+  historyRecoveryRunning: false,
+  lastHistoryRecoveryAt: null,
+  lastHistoryRecoveryCount: 0,
   lastSavedMessageId: 0,
   lastError: "",
   lastErrorAt: null,
@@ -118,6 +134,9 @@ function buildStatusMessage() {
     `GW alert username: ${runtimeStatus.gwAlertUsername || "sozlanmagan"}`,
     `Oxirgi tekshirilgan buyruq: ${formatStatusTime(runtimeStatus.lastCommandAt)}`,
     `Saved Messages kuzatuvi: ${runtimeStatus.statusWatcherRunning ? "Yoqilgan" : "O'chirilgan"}`,
+    `CardXabar history recovery: ${runtimeStatus.historyRecoveryRunning ? "Yoqilgan" : "O'chirilgan"}`,
+    `Oxirgi history recovery: ${formatStatusTime(runtimeStatus.lastHistoryRecoveryAt)}`,
+    `Oxirgi recovery xabarlari: ${runtimeStatus.lastHistoryRecoveryCount}`,
     `Oxirgi Saved Messages ID: ${runtimeStatus.lastSavedMessageId || "-"}`,
     `Oxirgi kuzatilgan xabar: ${formatStatusTime(runtimeStatus.lastMonitoredMessageAt)}`,
     `Oxirgi GW alert: ${formatStatusTime(runtimeStatus.lastGwAlertAt)}`,
@@ -137,6 +156,27 @@ function isStatusCommand(text) {
 
 function normalizeIdentity(value) {
   return String(value || "").trim().toLowerCase().replace(/^@/, "");
+}
+
+function getMessageChatId(message) {
+  if (typeof message?.chatId?.toString === "function") {
+    return message.chatId.toString();
+  }
+  return String(message?.chatId || cardxabarChatId || "").trim();
+}
+
+function getMessageDate(message) {
+  const rawDate = message?.date;
+  if (rawDate instanceof Date && Number.isFinite(rawDate.getTime())) {
+    return rawDate;
+  }
+  const numericDate = Number(rawDate || 0);
+  if (Number.isFinite(numericDate) && numericDate > 0) {
+    return new Date(
+      numericDate < 10_000_000_000 ? numericDate * 1000 : numericDate,
+    );
+  }
+  return new Date();
 }
 
 function collectMessageSourceCandidates(message, sender) {
@@ -407,19 +447,16 @@ async function startUserClient({ strict = false } = {}) {
       runtimeStatus.selfUsername = String(me?.username || "").trim();
       await startSavedMessagesStatusWatcher(client);
       console.log("User-client ishga tushdi.");
+      const processingMessageKeys = new Set();
 
-      const handleIncomingTelegramMessage = async (event) => {
+      const processTelegramMessage = async (message) => {
         try {
-          const message = event.message;
           if (!message) return;
 
           const text = String(message.message || "").trim();
           if (!text) return;
 
-          const chatId =
-            typeof message.chatId?.toString === "function"
-              ? message.chatId.toString()
-              : String(message.chatId || "").trim();
+          const chatId = getMessageChatId(message);
 
           if (chatId && runtimeStatus.selfId && chatId === runtimeStatus.selfId) {
             if (isStatusCommand(text)) {
@@ -506,15 +543,23 @@ async function startUserClient({ strict = false } = {}) {
 
           runtimeStatus.lastMonitoredMessageAt = new Date().toISOString();
           const externalMessageId = `${chatId}:${message.id}`;
-          const result = await processIncomingPayment({
-            rawText: text,
-            externalMessageId,
-            source: "cardxabar-user",
-          });
-          runtimeStatus.lastPaymentProcessedAt = new Date().toISOString();
-          runtimeStatus.processedPayments += 1;
-          if (result?.matched) {
-            runtimeStatus.matchedPayments += 1;
+          if (processingMessageKeys.has(externalMessageId)) return;
+
+          processingMessageKeys.add(externalMessageId);
+          try {
+            const result = await processIncomingPayment({
+              rawText: text,
+              externalMessageId,
+              source: "cardxabar-user",
+              occurredAt: getMessageDate(message),
+            });
+            runtimeStatus.lastPaymentProcessedAt = new Date().toISOString();
+            runtimeStatus.processedPayments += 1;
+            if (result?.matched) {
+              runtimeStatus.matchedPayments += 1;
+            }
+          } finally {
+            processingMessageKeys.delete(externalMessageId);
           }
         } catch (err) {
           markRuntimeError(err.message);
@@ -522,7 +567,106 @@ async function startUserClient({ strict = false } = {}) {
         }
       };
 
+      const handleIncomingTelegramMessage = async (event) => {
+        await processTelegramMessage(event.message);
+      };
+
       client.addEventHandler(handleIncomingTelegramMessage, new NewMessage({}));
+
+      let historyRecoveryInFlight = false;
+      const recoverCardxabarHistory = async () => {
+        if (
+          historyRecoveryInFlight ||
+          !runtimeStatus.running ||
+          !client.connected
+        ) {
+          return;
+        }
+
+        historyRecoveryInFlight = true;
+        try {
+          const historyTargets = [cardxabarChatId, cardxabarUsername].filter(
+            (value, index, values) => value && values.indexOf(value) === index,
+          );
+          if (historyTargets.length === 0) return;
+
+          let recent = null;
+          let historyError = null;
+          for (const historyTarget of historyTargets) {
+            try {
+              recent = await client.getMessages(historyTarget, {
+                limit: historyPollLimit,
+              });
+              break;
+            } catch (error) {
+              historyError = error;
+            }
+          }
+          if (recent == null) {
+            throw historyError || new Error("CardXabar chat tarixi topilmadi");
+          }
+          const messages = (Array.isArray(recent)
+            ? recent
+            : Array.from(recent || []))
+            .filter(Boolean)
+            .filter(
+              (message) =>
+                getMessageDate(message).getTime() >=
+                Date.now() - historyLookbackMs,
+            )
+            .sort((left, right) => Number(left.id || 0) - Number(right.id || 0));
+
+          const messageKeyPairs = messages.map((message) => {
+            const chatId = getMessageChatId(message);
+            return {
+              message,
+              externalMessageId: `${chatId}:${message.id}`,
+            };
+          });
+          const existingLogs = await PaymentLog.find({
+            source: "cardxabar-user",
+            externalMessageId: {
+              $in: messageKeyPairs.map((item) => item.externalMessageId),
+            },
+          })
+            .select({ externalMessageId: 1, status: 1, createdAt: 1 })
+            .lean();
+          const staleBefore = Date.now() - historyProcessingRetryMs;
+          const existingKeys = new Set(
+            existingLogs
+              .filter(
+                (item) =>
+                  item.status !== "processing" ||
+                  new Date(item.createdAt || 0).getTime() > staleBefore,
+              )
+              .map((item) => String(item.externalMessageId || "")),
+          );
+          const missingMessages = messageKeyPairs
+            .filter((item) => !existingKeys.has(item.externalMessageId))
+            .map((item) => item.message);
+
+          for (const message of missingMessages) {
+            await processTelegramMessage(message);
+          }
+
+          runtimeStatus.lastHistoryRecoveryAt = new Date().toISOString();
+          runtimeStatus.lastHistoryRecoveryCount = missingMessages.length;
+        } catch (error) {
+          markRuntimeError(error.message);
+          console.error("CardXabar history recovery error:", error.message);
+        } finally {
+          historyRecoveryInFlight = false;
+        }
+      };
+
+      runtimeStatus.historyRecoveryRunning = true;
+      const historyTimer = setInterval(() => {
+        void recoverCardxabarHistory();
+      }, Math.max(historyPollIntervalMs, 5000));
+      if (typeof historyTimer.unref === "function") {
+        historyTimer.unref();
+      }
+      void recoverCardxabarHistory();
 
       activeClient = client;
       return client;

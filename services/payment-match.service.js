@@ -458,6 +458,7 @@ async function processIncomingPayment({
   amount = null,
   externalMessageId = null,
   source = "cardxabar",
+  occurredAt = null,
 }) {
   await expirePendingOrders();
 
@@ -529,6 +530,10 @@ async function processIncomingPayment({
   }
 
   const now = new Date();
+  const paymentOccurredAt = occurredAt ? new Date(occurredAt) : now;
+  const validPaymentOccurredAt = Number.isFinite(paymentOccurredAt.getTime())
+    ? paymentOccurredAt
+    : now;
   if (paymentEventKey) {
     const claimedByEvent = await Order.findOne({
       paymentEventKey,
@@ -564,6 +569,7 @@ async function processIncomingPayment({
 
   const matchFilter = {
     status: "pending_payment",
+    createdAt: { $lte: validPaymentOccurredAt },
     expiresAt: { $gt: now },
     $or: [
       { paymentMatchAmount: parsedAmount },
