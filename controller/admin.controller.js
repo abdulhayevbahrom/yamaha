@@ -27,6 +27,7 @@ const {
   getReferralConfig,
   getReferralRewardConfig,
   getNftMarketplaceConfig,
+  getPortalsNftConfig,
   getNftWithdrawalConfig,
   getSupportConfig,
   updateStarPricing,
@@ -41,6 +42,7 @@ const {
   updateReferralConfig,
   updateReferralRewardConfig,
   updateNftMarketplaceConfig,
+  updatePortalsNftConfig,
   updateNftWithdrawalConfig,
   updateSupportConfig,
 } = require("../services/settings.service");
@@ -942,6 +944,7 @@ const getSettings = async (_, res) => {
     const referralConfig = await getReferralConfig();
     const referralRewardConfig = await getReferralRewardConfig();
     const nftMarketplaceConfig = await getNftMarketplaceConfig();
+    const portalsNftConfig = await getPortalsNftConfig();
     const nftWithdrawalConfig = await getNftWithdrawalConfig();
     const supportConfig = await getSupportConfig();
 
@@ -958,6 +961,7 @@ const getSettings = async (_, res) => {
       referralConfig,
       referralRewardConfig,
       nftMarketplaceConfig,
+      portalsNftConfig,
       nftWithdrawalConfig,
       supportConfig,
     });
@@ -981,6 +985,7 @@ const updateSettings = async (req, res) => {
       referralConfig,
       referralRewardConfig,
       nftMarketplaceConfig,
+      portalsNftConfig,
       nftWithdrawalConfig,
       supportConfig,
     } = req.body || {};
@@ -998,6 +1003,7 @@ const updateSettings = async (req, res) => {
       !referralConfig &&
       !referralRewardConfig &&
       !nftMarketplaceConfig &&
+      !portalsNftConfig &&
       !nftWithdrawalConfig &&
       !supportConfig
     ) {
@@ -1049,6 +1055,9 @@ const updateSettings = async (req, res) => {
       out.nftMarketplaceConfig = await updateNftMarketplaceConfig(
         nftMarketplaceConfig,
       );
+    }
+    if (portalsNftConfig) {
+      out.portalsNftConfig = await updatePortalsNftConfig(portalsNftConfig);
     }
     if (nftWithdrawalConfig) {
       out.nftWithdrawalConfig = await updateNftWithdrawalConfig(

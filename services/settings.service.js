@@ -138,6 +138,13 @@ const DEFAULT_NFT_MARKETPLACE_CONFIG = {
   feePercent: 5,
   withdrawFeeUzs: 0,
 };
+const DEFAULT_PORTALS_NFT_CONFIG = {
+  enabled: false,
+  tonRateUzs: 0,
+  markupType: "percent",
+  markupValue: 0,
+  catalogLimit: 100,
+};
 const DEFAULT_NFT_WITHDRAWAL_CONFIG = {
   enabled: true,
   feePercent: 5,
@@ -399,6 +406,38 @@ async function getNftMarketplaceConfig() {
         ? Math.round(withdrawFeeUzs)
         : DEFAULT_NFT_MARKETPLACE_CONFIG.withdrawFeeUzs,
   };
+}
+
+async function getPortalsNftConfig() {
+  const doc = await Settings.findOne({ key: "portals_nft_config" }).lean();
+  const value = doc?.value || {};
+  const markupType = value.markupType === "fixed" ? "fixed" : "percent";
+  const tonRateUzs = Number(value.tonRateUzs);
+  const markupValue = Number(value.markupValue);
+  const catalogLimit = Number(value.catalogLimit);
+  return {
+    enabled: typeof value.enabled === "boolean" ? value.enabled : DEFAULT_PORTALS_NFT_CONFIG.enabled,
+    tonRateUzs: Number.isFinite(tonRateUzs) && tonRateUzs >= 0 ? Math.round(tonRateUzs) : 0,
+    markupType,
+    markupValue: Number.isFinite(markupValue) && markupValue >= 0 ? markupValue : 0,
+    catalogLimit: Number.isFinite(catalogLimit)
+      ? Math.min(Math.max(Math.trunc(catalogLimit), 1), 100)
+      : DEFAULT_PORTALS_NFT_CONFIG.catalogLimit,
+  };
+}
+
+function calculatePortalsNftPriceUzs(priceGram, config) {
+  const providerPrice = Number(priceGram);
+  const rate = Number(config?.tonRateUzs);
+  if (!Number.isFinite(providerPrice) || providerPrice <= 0 || !Number.isFinite(rate) || rate <= 0) {
+    return 0;
+  }
+  const basePriceUzs = providerPrice * rate;
+  const markupValue = Math.max(0, Number(config?.markupValue) || 0);
+  const markupUzs = config?.markupType === "fixed"
+    ? markupValue
+    : (basePriceUzs * markupValue) / 100;
+  return Math.max(1, Math.ceil(basePriceUzs + markupUzs));
 }
 
 async function getNftWithdrawalConfig() {
@@ -774,6 +813,32 @@ async function updateNftMarketplaceConfig(payload) {
   };
 }
 
+async function updatePortalsNftConfig(payload) {
+  const current = await getPortalsNftConfig();
+  const enabled = typeof payload?.enabled === "boolean" ? payload.enabled : current.enabled;
+  const tonRateUzs = payload?.tonRateUzs === undefined ? current.tonRateUzs : Number(payload.tonRateUzs);
+  const markupType = payload?.markupType === "fixed" ? "fixed" : "percent";
+  const markupValue = payload?.markupValue === undefined ? current.markupValue : Number(payload.markupValue);
+  const catalogLimit = payload?.catalogLimit === undefined ? current.catalogLimit : Number(payload.catalogLimit);
+  if (!Number.isFinite(tonRateUzs) || tonRateUzs < 0) throw new Error("tonRateUzs noto'g'ri");
+  if (!Number.isFinite(markupValue) || markupValue < 0) throw new Error("markupValue noto'g'ri");
+  if (!Number.isFinite(catalogLimit) || catalogLimit < 1 || catalogLimit > 100) throw new Error("catalogLimit 1-100 oralig'ida bo'lishi kerak");
+  if (enabled && tonRateUzs <= 0) throw new Error("Portals yoqilganda 1 TON narxi kiritilishi kerak");
+  const value = {
+    enabled,
+    tonRateUzs: Math.round(tonRateUzs),
+    markupType,
+    markupValue,
+    catalogLimit: Math.trunc(catalogLimit),
+  };
+  const doc = await Settings.findOneAndUpdate(
+    { key: "portals_nft_config" },
+    { value },
+    { new: true, upsert: true },
+  ).lean();
+  return { ...value, ...(doc?.value || {}) };
+}
+
 async function updateNftWithdrawalConfig(payload) {
   const current = await getNftWithdrawalConfig();
   const enabled =
@@ -889,6 +954,8 @@ module.exports = {
   getReferralConfig,
   getReferralRewardConfig,
   getNftMarketplaceConfig,
+  getPortalsNftConfig,
+  calculatePortalsNftPriceUzs,
   getNftWithdrawalConfig,
   getSupportConfig,
   updateStarPricing,
@@ -903,6 +970,7 @@ module.exports = {
   updateReferralConfig,
   updateReferralRewardConfig,
   updateNftMarketplaceConfig,
+  updatePortalsNftConfig,
   updateNftWithdrawalConfig,
   updateSupportConfig,
 };

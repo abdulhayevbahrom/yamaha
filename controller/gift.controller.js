@@ -15,7 +15,14 @@ const { sendTelegramText } = require("../services/telegram-notify.service");
 const {
   getStarPricing,
   getNftMarketplaceConfig,
+  getPortalsNftConfig,
+  calculatePortalsNftPriceUzs,
 } = require("../services/settings.service");
+const {
+  searchPortalsNfts,
+  getPortalsNft,
+  buyPortalsNft,
+} = require("../services/portals-market.service");
 const {
   notifyAdminsAboutNftWithdrawalRequest,
   refundUpfrontNftWithdrawalFeeIfCharged,
@@ -298,6 +305,19 @@ function parseAdminNotifyIds() {
     .filter(Boolean);
 }
 
+function isAdminTelegramUserId(tgUserId) {
+  const normalizedId = normalizeString(tgUserId);
+  if (!normalizedId) return false;
+  const raw = normalizeString(
+    process.env.ADMIN_ALLOWED_TG_IDS || process.env.ADMIN_NOTIFY_CHAT_ID,
+  );
+  return raw
+    .split(",")
+    .map((id) => normalizeString(id))
+    .filter(Boolean)
+    .includes(normalizedId);
+}
+
 function isGiftServiceLowStarsError(error) {
   const raw = normalizeString(error?.errorMessage || error?.message).toUpperCase();
   if (!raw) return false;
@@ -402,6 +422,8 @@ function mapNftDocToClient(doc, pricePerStar) {
 
   return {
     nftId,
+    provider: normalizeString(doc?.provider) || "telegram",
+    providerNftId: normalizeString(doc?.providerNftId),
     giftId: normalizeGiftId(doc?.giftId),
     slug: normalizeString(doc?.slug),
     title,
@@ -424,7 +446,8 @@ function mapNftDocToClient(doc, pricePerStar) {
     transferLockedSeconds: Math.max(0, Math.trunc(toSafeNumber(transferLock?.secondsLeft, 0))),
     transferLockLabel: normalizeString(transferLock?.remainingLabel),
     emoji: normalizeString(doc?.emoji) || "🎁",
-    imageUrl: `/api/gifts/nft-image/${encodeURIComponent(nftId)}`,
+    imageUrl: normalizeString(doc?.providerImageUrl) || `/api/gifts/nft-image/${encodeURIComponent(nftId)}`,
+    animationUrl: normalizeString(doc?.providerAnimationUrl),
     patternImageUrl,
     patternAsset: {
       status: patternAssetStatus,
@@ -440,6 +463,107 @@ function mapNftDocToClient(doc, pricePerStar) {
     listingPriceUzs: toSafeNumber(doc?.listingPriceUzs, 0),
     listedAt: doc?.listedAt || null,
   };
+}
+
+async function buyNftFromPortals({ buyer, nftId, expectedPriceUzs, failPurchase, res }) {
+  const config = await getPortalsNftConfig();
+  if (!config.enabled || config.tonRateUzs <= 0) {
+    return failPurchase("Portals NFT savdosi vaqtincha o'chirilgan");
+  }
+
+  const providerNftId = normalizeString(nftId).replace(/^portals:/, "");
+  const providerNft = await getPortalsNft(providerNftId);
+  if (!providerNft || providerNft.status.toLowerCase() !== "listed") {
+    return failPurchase("NFT Portals marketplace'da sotuvda emas");
+  }
+  const priceUzs = calculatePortalsNftPriceUzs(providerNft.priceGram, config);
+  if (!priceUzs) return failPurchase("Portals NFT narxini hisoblab bo'lmadi");
+  if (expectedPriceUzs > 0 && Math.round(expectedPriceUzs) !== priceUzs) {
+    return failPurchase("NFT narxi o'zgardi. Ro'yxatni yangilab qayta urinib ko'ring");
+  }
+
+  const alreadyImported = await UserNft.findOne({
+    $or: [{ nftId }, { provider: "portals", providerNftId }],
+  }).lean();
+  if (alreadyImported) return failPurchase("Bu NFT allaqachon bizning marketplace'da mavjud");
+
+  const buyerAfterReserve = await User.findOneAndUpdate(
+    { tgUserId: buyer.tgUserId, balance: { $gte: priceUzs } },
+    { $inc: { balance: -priceUzs } },
+    { new: true },
+  ).lean();
+  if (!buyerAfterReserve) return failPurchase("Balans yetarli emas");
+
+  let providerPurchaseConfirmed = false;
+  try {
+    await buyPortalsNft({ providerNftId, expectedPriceGram: providerNft.priceGram });
+    providerPurchaseConfirmed = true;
+  } catch (error) {
+    const verifiedAfterError = await getPortalsNft(providerNftId).catch(() => null);
+    providerPurchaseConfirmed = Boolean(verifiedAfterError?.isOwned);
+    if (!providerPurchaseConfirmed && (error?.response || error?.definitive)) {
+      await User.updateOne({ tgUserId: buyer.tgUserId }, { $inc: { balance: priceUzs } });
+      return failPurchase(normalizeString(error?.message) || "Portals NFT xaridi bajarilmadi");
+    }
+    if (!providerPurchaseConfirmed) {
+      return response.error(res, "Portals javobi noaniq. Mablag' rezervda qoldi; qayta xarid qilmang va administratorga murojaat qiling.", {
+        code: "PORTALS_PURCHASE_OUTCOME_UNKNOWN",
+        nftId,
+      });
+    }
+  }
+
+  try {
+    const created = await UserNft.create({
+      nftId,
+      provider: "portals",
+      providerNftId,
+      providerPriceGram: providerNft.priceGram,
+      providerImageUrl: providerNft.imageUrl,
+      providerAnimationUrl: providerNft.animationUrl,
+      slug: providerNft.tgId,
+      title: providerNft.title,
+      nftNumber: providerNft.nftNumber,
+      ownerTgUserId: buyer.tgUserId,
+      ownerUsername: normalizeString(buyer.username),
+      ownerName: normalizeString(buyer.profileName || buyer.username) || "-",
+      model: providerNft.model,
+      modelRarity: providerNft.modelRarity,
+      backdrop: providerNft.backdrop,
+      backdropRarity: providerNft.backdropRarity,
+      symbol: providerNft.symbol,
+      symbolRarity: providerNft.symbolRarity,
+      isTelegramPresent: true,
+      marketStatus: "owned",
+      acquiredAt: new Date(),
+      lastSoldAt: new Date(),
+      lastSoldPriceUzs: priceUzs,
+      lastBuyerTgUserId: buyer.tgUserId,
+    });
+
+    emitUserUpdate(buyer.tgUserId, {
+      type: "nft_bought",
+      refreshBalance: true,
+      refreshNfts: true,
+      nftId,
+      priceUzs,
+    });
+    return response.success(res, "NFT Portals orqali sotib olindi", {
+      nftId,
+      title: created.title,
+      nftNumber: created.nftNumber,
+      priceUzs,
+      provider: "portals",
+      buyerBalance: toSafeNumber(buyerAfterReserve.balance, 0),
+    });
+  } catch (error) {
+    await User.updateOne({ tgUserId: buyer.tgUserId }, { $inc: { balance: priceUzs } });
+    return response.serverError(
+      res,
+      "NFT Portals'dan olindi, ammo bazaga saqlanmadi. Mablag' balansga qaytarildi; administratorga murojaat qiling.",
+      error.message,
+    );
+  }
 }
 
 function mapOfferDocToClient(doc, nftDoc = null, profileNames = {}) {
@@ -1142,7 +1266,6 @@ async function getMyGifts(req, res) {
     if (!user?.tgUserId) {
       return response.error(res, "Foydalanuvchi topilmadi");
     }
-
     const [pricing, catalog, ownedGifts] = await Promise.all([
       getStarPricing(),
       getStarGiftsCatalog({ includeSoldOut: true }),
@@ -1270,10 +1393,12 @@ async function getNftMarketplace(req, res) {
     if (!user?.tgUserId) {
       return response.error(res, "Foydalanuvchi topilmadi");
     }
+    const requesterIsAdmin = isAdminTelegramUserId(tgUser.tgUserId);
 
-    const [pricing, marketConfig] = await Promise.all([
+    const [pricing, marketConfig, portalsConfig] = await Promise.all([
       getStarPricing(),
       getNftMarketplaceConfig(),
+      getPortalsNftConfig(),
     ]);
 
     let syncInfo = {
@@ -1309,13 +1434,50 @@ async function getNftMarketplace(req, res) {
       priceUzs: toSafeNumber(doc.listingPriceUzs, 0),
     }));
 
+    let portalsItems = [];
+    let portalsError = "";
+    if (portalsConfig.enabled && portalsConfig.tonRateUzs > 0) {
+      try {
+        const portalsCatalog = await searchPortalsNfts({ limit: portalsConfig.catalogLimit });
+        const providerItems = portalsCatalog.items.filter(
+          (item) => item.status.toLowerCase() === "listed" && toSafeNumber(item.priceGram, 0) > 0,
+        );
+        const providerIds = providerItems.map((item) => item.providerNftId);
+        const tgIds = providerItems.map((item) => item.tgId).filter(Boolean);
+        const existingProviderDocs = await UserNft.find({
+          $or: [
+            { provider: "portals", providerNftId: { $in: providerIds } },
+            { slug: { $in: tgIds } },
+          ],
+        }).select({ providerNftId: 1, slug: 1 }).lean();
+        const existingProviderIds = new Set(existingProviderDocs.map((item) => normalizeString(item.providerNftId)));
+        const existingSlugs = new Set(existingProviderDocs.map((item) => normalizeString(item.slug)));
+        portalsItems = providerItems
+          .filter((item) => !existingProviderIds.has(item.providerNftId) && !existingSlugs.has(item.tgId))
+          .map((item) => ({
+            ...item,
+            priceUzs: calculatePortalsNftPriceUzs(item.priceGram, portalsConfig),
+            listingPriceUzs: calculatePortalsNftPriceUzs(item.priceGram, portalsConfig),
+            sellerTgUserId: "portals",
+            externalProvider: true,
+            adminSourceBadge: requesterIsAdmin ? "Portals" : "",
+          }))
+          .filter((item) => item.priceUzs > 0);
+      } catch (portalsFetchError) {
+        portalsError = normalizeString(portalsFetchError?.message);
+      }
+    }
+
+    const combinedItems = [...items, ...portalsItems];
+
     return response.success(res, "NFT marketplace", {
-      count: items.length,
+      count: combinedItems.length,
       pricePerStar,
       feePercent: toSafeNumber(marketConfig?.feePercent, 0),
       withdrawFeeUzs: Math.max(0, Math.round(toSafeNumber(marketConfig?.withdrawFeeUzs, 0))),
       syncInfo,
-      items,
+      portalsError,
+      items: combinedItems,
     });
   } catch (error) {
     return response.serverError(
@@ -2290,6 +2452,18 @@ async function buyNftFromMarketplace(req, res) {
     const nftId = normalizeString(req.body?.nftId);
     if (!nftId) {
       return failPurchase("nftId required");
+    }
+
+    if (nftId.startsWith("portals:")) {
+      notifyNftTitle = "Portals NFT";
+      notifyPriceUzs = Math.max(0, Math.round(toSafeNumber(req.body?.priceUzs, 0)));
+      return buyNftFromPortals({
+        buyer,
+        nftId,
+        expectedPriceUzs: notifyPriceUzs,
+        failPurchase,
+        res,
+      });
     }
 
     const listing = await UserNft.findOne({

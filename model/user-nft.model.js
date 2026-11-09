@@ -45,6 +45,33 @@ const userNftSchema = new mongoose.Schema(
       default: "🎁",
       trim: true,
     },
+    provider: {
+      type: String,
+      enum: ["telegram", "portals"],
+      default: "telegram",
+      index: true,
+    },
+    providerNftId: {
+      type: String,
+      default: "",
+      trim: true,
+      index: true,
+    },
+    providerPriceGram: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    providerImageUrl: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    providerAnimationUrl: {
+      type: String,
+      default: "",
+      trim: true,
+    },
 
     ownerTgUserId: {
       type: String,
