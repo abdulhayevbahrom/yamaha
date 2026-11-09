@@ -1009,7 +1009,7 @@ const updateSettings = async (req, res) => {
     ) {
       return response.error(
         res,
-        "starPricing yoki gameStarsPaymentConfig yoki starSellPricing yoki forceJoin yoki botStatus yoki botBroadcastConfig yoki paymentCardConfig yoki bankomatTopupConfig yoki referralConfig yoki referralRewardConfig yoki nftMarketplaceConfig yoki nftWithdrawalConfig yoki supportConfig required",
+        "starPricing yoki gameStarsPaymentConfig yoki starSellPricing yoki forceJoin yoki botStatus yoki botBroadcastConfig yoki paymentCardConfig yoki bankomatTopupConfig yoki referralConfig yoki referralRewardConfig yoki nftMarketplaceConfig yoki portalsNftConfig yoki nftWithdrawalConfig yoki supportConfig required",
       );
     }
 
