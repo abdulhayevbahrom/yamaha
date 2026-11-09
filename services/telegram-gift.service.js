@@ -908,6 +908,33 @@ function detectImageContentType(buffer) {
   return "";
 }
 
+function detectBrowserVideoContentType(buffer, documentMimeType = "") {
+  const mimeType = normalizeString(documentMimeType).toLowerCase();
+
+  if (
+    mimeType === "video/webm" &&
+    Buffer.isBuffer(buffer) &&
+    buffer.length >= 4 &&
+    buffer[0] === 0x1a &&
+    buffer[1] === 0x45 &&
+    buffer[2] === 0xdf &&
+    buffer[3] === 0xa3
+  ) {
+    return "video/webm";
+  }
+
+  if (
+    mimeType === "video/mp4" &&
+    Buffer.isBuffer(buffer) &&
+    buffer.length >= 12 &&
+    buffer.slice(4, 8).toString("ascii") === "ftyp"
+  ) {
+    return "video/mp4";
+  }
+
+  return "";
+}
+
 function readUInt24LE(buffer, offset) {
   return (
     (buffer[offset] || 0) |
@@ -1105,6 +1132,22 @@ async function downloadImageFromTelegramDocument(client, document) {
 
       if (!Buffer.isBuffer(downloaded) || !downloaded.length) {
         continue;
+      }
+
+      // Unique gift models are commonly stored as a full-resolution WebM
+      // sticker. Keep the original browser-playable media instead of falling
+      // back to Telegram's small, blurry raster thumbnail.
+      if (typeof thumb === "undefined") {
+        const videoContentType = detectBrowserVideoContentType(
+          downloaded,
+          document?.mimeType,
+        );
+        if (videoContentType) {
+          return {
+            buffer: downloaded,
+            contentType: videoContentType,
+          };
+        }
       }
 
       const contentType = detectImageContentType(downloaded);
