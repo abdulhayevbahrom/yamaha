@@ -1,6 +1,10 @@
 const axios = require("axios");
 
 const BASE_URL = "https://portal-market.com/partners";
+const CBU_USD_URL = "https://cbu.uz/uz/arkhiv-kursov-valyut/json/USD/";
+const RATE_CACHE_TTL_MS = 10 * 60 * 1000;
+let rateCache = null;
+let rateRequest = null;
 
 function normalizeString(value) {
   return String(value || "").trim();
@@ -149,10 +153,50 @@ async function buyPortalsNft({ providerNftId, expectedPriceGram }) {
   return { result: itemResult, response: result.data };
 }
 
+async function fetchPortalsGramRateUzs() {
+  const [portalsResult, cbuResult] = await Promise.all([
+    getClient().get("/market/config"),
+    axios.get(CBU_USD_URL, { timeout: 10_000, headers: { Accept: "application/json" } }),
+  ]);
+  const gramUsd = toNumber(portalsResult?.data?.usd_course, 0);
+  const cbuRows = Array.isArray(cbuResult?.data) ? cbuResult.data : [];
+  const usdRow = cbuRows.find((item) => normalizeString(item?.Ccy).toUpperCase() === "USD")
+    || cbuRows[0]
+    || null;
+  const usdUzs = toNumber(usdRow?.Rate, 0);
+  if (gramUsd <= 0 || usdUzs <= 0) {
+    throw new Error("GRAM/USD yoki USD/UZS kursi olinmadi");
+  }
+  return {
+    gramUsd,
+    usdUzs,
+    gramUzs: gramUsd * usdUzs,
+    source: "portals_usd_x_cbu_uzs",
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+async function getPortalsGramRateUzs({ force = false } = {}) {
+  if (!force && rateCache && Date.now() - rateCache.cachedAt < RATE_CACHE_TTL_MS) {
+    return rateCache.value;
+  }
+  if (rateRequest) return rateRequest;
+  rateRequest = fetchPortalsGramRateUzs()
+    .then((value) => {
+      rateCache = { value, cachedAt: Date.now() };
+      return value;
+    })
+    .finally(() => {
+      rateRequest = null;
+    });
+  return rateRequest;
+}
+
 module.exports = {
   getApiKey,
   mapPortalsNft,
   searchPortalsNfts,
   getPortalsNft,
   buyPortalsNft,
+  getPortalsGramRateUzs,
 };

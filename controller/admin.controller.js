@@ -46,6 +46,7 @@ const {
   updateNftWithdrawalConfig,
   updateSupportConfig,
 } = require("../services/settings.service");
+const { getPortalsGramRateUzs } = require("../services/portals-market.service");
 const {
   approveBalanceTopupReview,
   rejectBalanceTopupReview,
@@ -945,6 +946,19 @@ const getSettings = async (_, res) => {
     const referralRewardConfig = await getReferralRewardConfig();
     const nftMarketplaceConfig = await getNftMarketplaceConfig();
     const portalsNftConfig = await getPortalsNftConfig();
+    let portalsLiveRate = null;
+    try {
+      portalsLiveRate = await getPortalsGramRateUzs();
+    } catch (rateError) {
+      portalsLiveRate = {
+        error: normalizeString(rateError?.message) || "Kursni olib bo'lmadi",
+        gramUsd: null,
+        usdUzs: null,
+        gramUzs: null,
+        source: "unavailable",
+        updatedAt: null,
+      };
+    }
     const nftWithdrawalConfig = await getNftWithdrawalConfig();
     const supportConfig = await getSupportConfig();
 
@@ -962,6 +976,7 @@ const getSettings = async (_, res) => {
       referralRewardConfig,
       nftMarketplaceConfig,
       portalsNftConfig,
+      portalsLiveRate,
       nftWithdrawalConfig,
       supportConfig,
     });

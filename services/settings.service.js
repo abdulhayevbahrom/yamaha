@@ -823,7 +823,6 @@ async function updatePortalsNftConfig(payload) {
   if (!Number.isFinite(tonRateUzs) || tonRateUzs < 0) throw new Error("tonRateUzs noto'g'ri");
   if (!Number.isFinite(markupValue) || markupValue < 0) throw new Error("markupValue noto'g'ri");
   if (!Number.isFinite(catalogLimit) || catalogLimit < 1 || catalogLimit > 100) throw new Error("catalogLimit 1-100 oralig'ida bo'lishi kerak");
-  if (enabled && tonRateUzs <= 0) throw new Error("Portals yoqilganda 1 TON narxi kiritilishi kerak");
   const value = {
     enabled,
     tonRateUzs: Math.round(tonRateUzs),

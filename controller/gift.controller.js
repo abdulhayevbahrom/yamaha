@@ -22,6 +22,7 @@ const {
   searchPortalsNfts,
   getPortalsNft,
   buyPortalsNft,
+  getPortalsGramRateUzs,
 } = require("../services/portals-market.service");
 const {
   notifyAdminsAboutNftWithdrawalRequest,
@@ -465,10 +466,42 @@ function mapNftDocToClient(doc, pricePerStar) {
   };
 }
 
+async function resolvePortalsPricingConfig(config) {
+  try {
+    const rate = await getPortalsGramRateUzs();
+    return {
+      ...config,
+      tonRateUzs: rate.gramUzs,
+      rateSource: rate.source,
+      rateUpdatedAt: rate.updatedAt,
+      gramUsd: rate.gramUsd,
+      usdUzs: rate.usdUzs,
+    };
+  } catch (error) {
+    const fallbackRate = toSafeNumber(config?.tonRateUzs, 0);
+    if (fallbackRate > 0) {
+      return {
+        ...config,
+        tonRateUzs: fallbackRate,
+        rateSource: "admin_fallback",
+        rateUpdatedAt: null,
+        rateError: normalizeString(error?.message),
+      };
+    }
+    throw error;
+  }
+}
+
 async function buyNftFromPortals({ buyer, nftId, expectedPriceUzs, failPurchase, res }) {
-  const config = await getPortalsNftConfig();
-  if (!config.enabled || config.tonRateUzs <= 0) {
+  const storedConfig = await getPortalsNftConfig();
+  if (!storedConfig.enabled) {
     return failPurchase("Portals NFT savdosi vaqtincha o'chirilgan");
+  }
+  let config;
+  try {
+    config = await resolvePortalsPricingConfig(storedConfig);
+  } catch (_) {
+    return failPurchase("GRAM narxini aniqlab bo'lmadi. Keyinroq qayta urinib ko'ring");
   }
 
   const providerNftId = normalizeString(nftId).replace(/^portals:/, "");
@@ -1436,8 +1469,17 @@ async function getNftMarketplace(req, res) {
 
     let portalsItems = [];
     let portalsError = "";
-    if (portalsConfig.enabled && portalsConfig.tonRateUzs > 0) {
+    let portalsRate = null;
+    if (portalsConfig.enabled) {
       try {
+        const effectivePortalsConfig = await resolvePortalsPricingConfig(portalsConfig);
+        portalsRate = {
+          gramUzs: effectivePortalsConfig.tonRateUzs,
+          gramUsd: effectivePortalsConfig.gramUsd || null,
+          usdUzs: effectivePortalsConfig.usdUzs || null,
+          source: effectivePortalsConfig.rateSource,
+          updatedAt: effectivePortalsConfig.rateUpdatedAt,
+        };
         const portalsCatalog = await searchPortalsNfts({ limit: portalsConfig.catalogLimit });
         const providerItems = portalsCatalog.items.filter(
           (item) => item.status.toLowerCase() === "listed" && toSafeNumber(item.priceGram, 0) > 0,
@@ -1456,8 +1498,8 @@ async function getNftMarketplace(req, res) {
           .filter((item) => !existingProviderIds.has(item.providerNftId) && !existingSlugs.has(item.tgId))
           .map((item) => ({
             ...item,
-            priceUzs: calculatePortalsNftPriceUzs(item.priceGram, portalsConfig),
-            listingPriceUzs: calculatePortalsNftPriceUzs(item.priceGram, portalsConfig),
+            priceUzs: calculatePortalsNftPriceUzs(item.priceGram, effectivePortalsConfig),
+            listingPriceUzs: calculatePortalsNftPriceUzs(item.priceGram, effectivePortalsConfig),
             sellerTgUserId: "portals",
             externalProvider: true,
             adminSourceBadge: requesterIsAdmin ? "Portals" : "",
@@ -1477,6 +1519,7 @@ async function getNftMarketplace(req, res) {
       withdrawFeeUzs: Math.max(0, Math.round(toSafeNumber(marketConfig?.withdrawFeeUzs, 0))),
       syncInfo,
       portalsError,
+      portalsRate,
       items: combinedItems,
     });
   } catch (error) {
