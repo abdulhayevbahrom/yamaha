@@ -437,7 +437,7 @@ function calculatePortalsNftPriceUzs(priceGram, config) {
   const markupUzs = config?.markupType === "fixed"
     ? markupValue
     : (basePriceUzs * markupValue) / 100;
-  return Math.max(1, Math.ceil(basePriceUzs + markupUzs));
+  return Math.max(100, Math.ceil((basePriceUzs + markupUzs) / 100) * 100);
 }
 
 async function getNftWithdrawalConfig() {
