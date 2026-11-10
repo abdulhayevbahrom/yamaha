@@ -1663,6 +1663,14 @@ async function getNftMarketplace(req, res) {
       return response.error(res, "Foydalanuvchi topilmadi");
     }
     const requesterIsAdmin = isAdminTelegramUserId(tgUser.tgUserId);
+    const requestedPortalsOffset = Math.max(
+      0,
+      Math.trunc(toSafeNumber(req.query?.portalsOffset, 0)),
+    );
+    const requestedPortalsLimit = Math.min(
+      Math.max(Math.trunc(toSafeNumber(req.query?.portalsLimit, 50)), 1),
+      50,
+    );
 
     const [pricing, marketConfig, portalsConfig] = await Promise.all([
       getStarPricing(),
@@ -1706,7 +1714,18 @@ async function getNftMarketplace(req, res) {
     let portalsItems = [];
     let portalsError = "";
     let portalsRate = null;
-    if (portalsConfig.enabled) {
+    let portalsHasMore = false;
+    let portalsNextOffset = null;
+    const portalsCatalogLimit = Math.max(
+      0,
+      Math.trunc(toSafeNumber(portalsConfig.catalogLimit, 0)),
+    );
+    const portalsRemaining = Math.max(
+      0,
+      portalsCatalogLimit - requestedPortalsOffset,
+    );
+    const portalsPageLimit = Math.min(requestedPortalsLimit, portalsRemaining);
+    if (portalsConfig.enabled && portalsPageLimit > 0) {
       try {
         const effectivePortalsConfig = await resolvePortalsPricingConfig(portalsConfig);
         portalsRate = {
@@ -1716,7 +1735,11 @@ async function getNftMarketplace(req, res) {
           source: effectivePortalsConfig.rateSource,
           updatedAt: effectivePortalsConfig.rateUpdatedAt,
         };
-        const portalsCatalog = await searchPortalsNfts({ limit: portalsConfig.catalogLimit });
+        const portalsCatalog = await searchPortalsNfts({
+          limit: portalsPageLimit,
+          offset: requestedPortalsOffset,
+          status: "listed",
+        });
         if (portalsCatalog.stale) {
           portalsError = "Portals katalogining oxirgi saqlangan nusxasi ko'rsatildi";
         }
@@ -1745,6 +1768,12 @@ async function getNftMarketplace(req, res) {
             adminSourceBadge: requesterIsAdmin ? "Portals" : "",
           }))
           .filter((item) => item.priceUzs > 0);
+        portalsHasMore =
+          portalsCatalog.items.length >= portalsPageLimit &&
+          requestedPortalsOffset + portalsPageLimit < portalsCatalogLimit;
+        portalsNextOffset = portalsHasMore
+          ? requestedPortalsOffset + portalsPageLimit
+          : null;
       } catch (portalsFetchError) {
         portalsError = normalizeString(portalsFetchError?.message);
       }
@@ -1761,6 +1790,11 @@ async function getNftMarketplace(req, res) {
       portalsError,
       portalsEnabled: Boolean(portalsConfig.enabled),
       portalsCount: portalsItems.length,
+      portalsOffset: requestedPortalsOffset,
+      portalsLimit: portalsPageLimit,
+      portalsHasMore,
+      portalsNextOffset,
+      portalsCatalogLimit,
       portalsRate,
       items: combinedItems,
     });

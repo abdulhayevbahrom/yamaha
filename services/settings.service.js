@@ -421,7 +421,7 @@ async function getPortalsNftConfig() {
     markupType,
     markupValue: Number.isFinite(markupValue) && markupValue >= 0 ? markupValue : 0,
     catalogLimit: Number.isFinite(catalogLimit)
-      ? Math.min(Math.max(Math.trunc(catalogLimit), 1), 100)
+      ? Math.min(Math.max(Math.trunc(catalogLimit), 1), 500)
       : DEFAULT_PORTALS_NFT_CONFIG.catalogLimit,
   };
 }
@@ -822,7 +822,7 @@ async function updatePortalsNftConfig(payload) {
   const catalogLimit = payload?.catalogLimit === undefined ? current.catalogLimit : Number(payload.catalogLimit);
   if (!Number.isFinite(tonRateUzs) || tonRateUzs < 0) throw new Error("tonRateUzs noto'g'ri");
   if (!Number.isFinite(markupValue) || markupValue < 0) throw new Error("markupValue noto'g'ri");
-  if (!Number.isFinite(catalogLimit) || catalogLimit < 1 || catalogLimit > 100) throw new Error("catalogLimit 1-100 oralig'ida bo'lishi kerak");
+  if (!Number.isFinite(catalogLimit) || catalogLimit < 1 || catalogLimit > 500) throw new Error("catalogLimit 1-500 oralig'ida bo'lishi kerak");
   const value = {
     enabled,
     tonRateUzs: Math.round(tonRateUzs),

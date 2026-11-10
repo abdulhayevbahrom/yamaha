@@ -123,59 +123,118 @@ function isTransientPortalsError(error) {
   return !status || status === 408 || status >= 500;
 }
 
-async function searchPortalsNfts({ limit = 100, offset = 0, ids = [] } = {}) {
-  const safeLimit = Math.min(Math.max(Math.trunc(toNumber(limit, 100)), 1), 100);
-  const params = { limit: safeLimit, offset: Math.max(0, Math.trunc(toNumber(offset, 0))) };
-  if (Array.isArray(ids) && ids.length) params.ids = ids;
-
+async function requestPortalsSearchPage(params) {
   let lastError;
-  for (let attempt = 0; attempt <= PORTALS_SEARCH_RETRY_DELAYS_MS.length; attempt += 1) {
+  for (
+    let attempt = 0;
+    attempt <= PORTALS_SEARCH_RETRY_DELAYS_MS.length;
+    attempt += 1
+  ) {
     try {
-      const result = await getClient().get("/nfts/search", {
+      return await getClient().get("/nfts/search", {
         params,
         paramsSerializer: (values) => {
           const query = new URLSearchParams();
           Object.entries(values).forEach(([key, value]) => {
-            if (Array.isArray(value)) value.forEach((item) => query.append(key, item));
-            else query.append(key, value);
+            if (Array.isArray(value)) {
+              value.forEach((item) => query.append(key, item));
+            } else if (value !== "" && value !== undefined && value !== null) {
+              query.append(key, value);
+            }
           });
           return query.toString();
         },
       });
-      const rows = Array.isArray(result?.data?.results) ? result.data.results : [];
-      const catalog = {
-        totalCount: Math.max(
-          0,
-          Math.trunc(toNumber(result?.data?.total_count, rows.length)),
-        ),
-        items: rows.map(mapPortalsNft).filter((item) => item.providerNftId),
-        stale: false,
-      };
-      if (!params.ids?.length && params.offset === 0) {
-        lastCatalogSearch = { ...catalog, cachedAt: Date.now() };
-      }
-      return catalog;
     } catch (error) {
       lastError = error;
       if (
         attempt >= PORTALS_SEARCH_RETRY_DELAYS_MS.length ||
         !isTransientPortalsError(error)
       ) {
-        break;
+        throw error;
       }
       await wait(PORTALS_SEARCH_RETRY_DELAYS_MS[attempt]);
     }
   }
-
-  if (!params.ids?.length && params.offset === 0 && lastCatalogSearch?.items?.length) {
-    return {
-      totalCount: lastCatalogSearch.totalCount,
-      items: lastCatalogSearch.items.slice(0, safeLimit),
-      stale: true,
-      cachedAt: lastCatalogSearch.cachedAt,
-    };
-  }
   throw lastError;
+}
+
+async function searchPortalsNfts({
+  limit = 100,
+  offset = 0,
+  ids = [],
+  status = "",
+} = {}) {
+  const safeLimit = Math.min(
+    Math.max(Math.trunc(toNumber(limit, 100)), 1),
+    500,
+  );
+  const safeOffset = Math.max(0, Math.trunc(toNumber(offset, 0)));
+  const normalizedIds = Array.isArray(ids) ? ids.filter(Boolean) : [];
+  const isCatalogRequest = normalizedIds.length === 0 && safeOffset === 0;
+  const uniqueItems = new Map();
+  const pageSize = Math.min(50, safeLimit);
+  const maxPages = normalizedIds.length
+    ? 1
+    : Math.max(1, Math.ceil(safeLimit / pageSize) * 3);
+  let providerOffset = safeOffset;
+  let reportedTotal = 0;
+
+  try {
+    for (let page = 0; page < maxPages; page += 1) {
+      if (page > 0) await wait(1050);
+      const params = {
+        limit: pageSize,
+        offset: providerOffset,
+        sort_by: "listed_at desc",
+      };
+      if (normalizedIds.length) params.ids = normalizedIds;
+      if (status) params.status = status;
+
+      const result = await requestPortalsSearchPage(params);
+      const rows = Array.isArray(result?.data?.results)
+        ? result.data.results
+        : [];
+      reportedTotal = Math.max(
+        reportedTotal,
+        Math.trunc(toNumber(result?.data?.total_count, 0)),
+      );
+      rows
+        .map(mapPortalsNft)
+        .filter((item) => item.providerNftId)
+        .forEach((item) => uniqueItems.set(item.providerNftId, item));
+
+      if (
+        normalizedIds.length ||
+        rows.length < pageSize ||
+        uniqueItems.size >= safeLimit
+      ) {
+        break;
+      }
+      providerOffset += pageSize;
+    }
+
+    const items = Array.from(uniqueItems.values()).slice(0, safeLimit);
+    const catalog = {
+      totalCount: Math.max(reportedTotal, items.length),
+      items,
+      stale: false,
+    };
+    if (isCatalogRequest) {
+      lastCatalogSearch = { ...catalog, cachedAt: Date.now() };
+    }
+    return catalog;
+  } catch (error) {
+    if (isCatalogRequest && lastCatalogSearch?.items?.length) {
+      return {
+        totalCount: lastCatalogSearch.totalCount,
+        items: lastCatalogSearch.items.slice(0, safeLimit),
+        stale: true,
+        cachedAt: lastCatalogSearch.cachedAt,
+      };
+    }
+    throw error;
+  }
 }
 
 async function getPortalsNft(providerNftId) {
