@@ -53,6 +53,20 @@ function normalizeString(value) {
   return String(value || "").trim();
 }
 
+function getPortalsCustomerError(error, fallback) {
+  const status = Number(error?.response?.status || error?.status || 0);
+  const providerCode = normalizeString(
+    error?.response?.data?.code || error?.code,
+  ).toUpperCase();
+  if (status === 429 || providerCode.includes("RATE_LIMIT")) {
+    return "Portals hozir juda ko'p so'rov qabul qilmoqda. Taxminan 1 daqiqadan keyin qayta urinib ko'ring";
+  }
+  if (status >= 500) {
+    return "Portals vaqtincha javob bermayapti. Birozdan keyin qayta urinib ko'ring";
+  }
+  return normalizeString(error?.response?.data?.message) || fallback;
+}
+
 function normalizeGiftId(value) {
   const normalized = normalizeString(value);
   if (!normalized) return "";
@@ -515,7 +529,17 @@ async function buyNftFromPortals({ buyer, nftId, expectedPriceUzs, failPurchase,
   }
 
   const providerNftId = normalizeString(nftId).replace(/^portals:/, "");
-  const providerNft = await getPortalsNft(providerNftId);
+  let providerNft;
+  try {
+    providerNft = await getPortalsNft(providerNftId);
+  } catch (error) {
+    return failPurchase(
+      getPortalsCustomerError(
+        error,
+        "Portals NFT ma'lumotini olib bo'lmadi. Keyinroq qayta urinib ko'ring",
+      ),
+    );
+  }
   if (!providerNft || providerNft.status.toLowerCase() !== "listed") {
     return failPurchase("NFT Portals marketplace'da sotuvda emas");
   }
@@ -546,7 +570,9 @@ async function buyNftFromPortals({ buyer, nftId, expectedPriceUzs, failPurchase,
     providerPurchaseConfirmed = Boolean(verifiedAfterError?.isOwned);
     if (!providerPurchaseConfirmed && (error?.response || error?.definitive)) {
       await User.updateOne({ tgUserId: buyer.tgUserId }, { $inc: { balance: priceUzs } });
-      return failPurchase(normalizeString(error?.message) || "Portals NFT xaridi bajarilmadi");
+      return failPurchase(
+        getPortalsCustomerError(error, "Portals NFT xaridi bajarilmadi"),
+      );
     }
     if (!providerPurchaseConfirmed) {
       return response.error(res, "Portals javobi noaniq. Mablag' rezervda qoldi; qayta xarid qilmang va administratorga murojaat qiling.", {
