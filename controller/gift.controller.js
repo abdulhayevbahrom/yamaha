@@ -21,6 +21,7 @@ const {
 const {
   searchPortalsNfts,
   getPortalsNft,
+  getCachedPortalsNft,
   getPortalsNftMedia,
   buyPortalsNft,
   withdrawPortalsNfts,
@@ -529,9 +530,11 @@ async function buyNftFromPortals({ buyer, nftId, expectedPriceUzs, failPurchase,
   }
 
   const providerNftId = normalizeString(nftId).replace(/^portals:/, "");
-  let providerNft;
+  let providerNft = getCachedPortalsNft(providerNftId);
   try {
-    providerNft = await getPortalsNft(providerNftId);
+    if (!providerNft) {
+      providerNft = await getPortalsNft(providerNftId);
+    }
   } catch (error) {
     return failPurchase(
       getPortalsCustomerError(
@@ -1714,6 +1717,9 @@ async function getNftMarketplace(req, res) {
           updatedAt: effectivePortalsConfig.rateUpdatedAt,
         };
         const portalsCatalog = await searchPortalsNfts({ limit: portalsConfig.catalogLimit });
+        if (portalsCatalog.stale) {
+          portalsError = "Portals katalogining oxirgi saqlangan nusxasi ko'rsatildi";
+        }
         const providerItems = portalsCatalog.items.filter(
           (item) => item.status.toLowerCase() === "listed" && toSafeNumber(item.priceGram, 0) > 0,
         );
@@ -1753,6 +1759,8 @@ async function getNftMarketplace(req, res) {
       withdrawFeeUzs: Math.max(0, Math.round(toSafeNumber(marketConfig?.withdrawFeeUzs, 0))),
       syncInfo,
       portalsError,
+      portalsEnabled: Boolean(portalsConfig.enabled),
+      portalsCount: portalsItems.length,
       portalsRate,
       items: combinedItems,
     });

@@ -5,9 +5,11 @@ const CBU_USD_URL = "https://cbu.uz/uz/arkhiv-kursov-valyut/json/USD/";
 const RATE_CACHE_TTL_MS = 10 * 60 * 1000;
 const NFT_MEDIA_CACHE_TTL_MS = 60 * 60 * 1000;
 const NFT_MEDIA_CACHE_MAX = 2000;
+const PORTALS_SEARCH_RETRY_DELAYS_MS = [350, 900];
 let rateCache = null;
 let rateRequest = null;
 const nftMediaCache = new Map();
+let lastCatalogSearch = null;
 
 function normalizeString(value) {
   return String(value || "").trim();
@@ -112,27 +114,68 @@ function mapPortalsNft(raw) {
   };
 }
 
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTransientPortalsError(error) {
+  const status = Number(error?.response?.status || 0);
+  return !status || status === 408 || status >= 500;
+}
+
 async function searchPortalsNfts({ limit = 100, offset = 0, ids = [] } = {}) {
   const safeLimit = Math.min(Math.max(Math.trunc(toNumber(limit, 100)), 1), 100);
   const params = { limit: safeLimit, offset: Math.max(0, Math.trunc(toNumber(offset, 0))) };
   if (Array.isArray(ids) && ids.length) params.ids = ids;
 
-  const result = await getClient().get("/nfts/search", {
-    params,
-    paramsSerializer: (values) => {
-      const query = new URLSearchParams();
-      Object.entries(values).forEach(([key, value]) => {
-        if (Array.isArray(value)) value.forEach((item) => query.append(key, item));
-        else query.append(key, value);
+  let lastError;
+  for (let attempt = 0; attempt <= PORTALS_SEARCH_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const result = await getClient().get("/nfts/search", {
+        params,
+        paramsSerializer: (values) => {
+          const query = new URLSearchParams();
+          Object.entries(values).forEach(([key, value]) => {
+            if (Array.isArray(value)) value.forEach((item) => query.append(key, item));
+            else query.append(key, value);
+          });
+          return query.toString();
+        },
       });
-      return query.toString();
-    },
-  });
-  const rows = Array.isArray(result?.data?.results) ? result.data.results : [];
-  return {
-    totalCount: Math.max(0, Math.trunc(toNumber(result?.data?.total_count, rows.length))),
-    items: rows.map(mapPortalsNft).filter((item) => item.providerNftId),
-  };
+      const rows = Array.isArray(result?.data?.results) ? result.data.results : [];
+      const catalog = {
+        totalCount: Math.max(
+          0,
+          Math.trunc(toNumber(result?.data?.total_count, rows.length)),
+        ),
+        items: rows.map(mapPortalsNft).filter((item) => item.providerNftId),
+        stale: false,
+      };
+      if (!params.ids?.length && params.offset === 0) {
+        lastCatalogSearch = { ...catalog, cachedAt: Date.now() };
+      }
+      return catalog;
+    } catch (error) {
+      lastError = error;
+      if (
+        attempt >= PORTALS_SEARCH_RETRY_DELAYS_MS.length ||
+        !isTransientPortalsError(error)
+      ) {
+        break;
+      }
+      await wait(PORTALS_SEARCH_RETRY_DELAYS_MS[attempt]);
+    }
+  }
+
+  if (!params.ids?.length && params.offset === 0 && lastCatalogSearch?.items?.length) {
+    return {
+      totalCount: lastCatalogSearch.totalCount,
+      items: lastCatalogSearch.items.slice(0, safeLimit),
+      stale: true,
+      cachedAt: lastCatalogSearch.cachedAt,
+    };
+  }
+  throw lastError;
 }
 
 async function getPortalsNft(providerNftId) {
@@ -140,6 +183,14 @@ async function getPortalsNft(providerNftId) {
   if (!id) return null;
   const result = await searchPortalsNfts({ limit: 1, ids: [id] });
   return result.items.find((item) => item.providerNftId === id) || null;
+}
+
+function getCachedPortalsNft(providerNftId) {
+  const id = normalizeString(providerNftId).replace(/^portals:/, "");
+  if (!id || !Array.isArray(lastCatalogSearch?.items)) return null;
+  return (
+    lastCatalogSearch.items.find((item) => item.providerNftId === id) || null
+  );
 }
 
 async function getPortalsNftImageUrl(providerNftId) {
@@ -276,6 +327,7 @@ module.exports = {
   mapPortalsNft,
   searchPortalsNfts,
   getPortalsNft,
+  getCachedPortalsNft,
   getPortalsNftImageUrl,
   getPortalsNftMedia,
   buyPortalsNft,
