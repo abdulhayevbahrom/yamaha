@@ -159,6 +159,10 @@ router.post(
 router.get("/gifts/catalog", giftController.getGiftCatalog);
 router.get("/gifts/image/:giftId", giftController.getGiftImage);
 router.get("/gifts/nft-image/:nftId", giftController.getNftImage);
+router.get(
+  "/gifts/portals-image/:providerNftId",
+  giftController.getPortalsNftImage,
+);
 router.get("/gifts/nft-pattern/:nftId", giftController.getNftPattern);
 router.get("/hero-slides", publicController.getHeroSlides);
 router.get("/contest/current", contestController.getCurrentContest);

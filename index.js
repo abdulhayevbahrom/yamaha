@@ -119,6 +119,7 @@ app.use(
       "/health",
       "/gifts/image/",
       "/gifts/nft-image/",
+      "/gifts/portals-image/",
       "/gifts/nft-pattern/",
       "/hero-slides",
     ],
@@ -128,6 +129,7 @@ app.use(
     allowNoInitDataGetPrefixes: [
       "/gifts/image/",
       "/gifts/nft-image/",
+      "/gifts/portals-image/",
       "/gifts/nft-pattern/",
       "/hero-slides",
     ],

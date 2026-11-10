@@ -21,6 +21,7 @@ const {
 const {
   searchPortalsNfts,
   getPortalsNft,
+  getPortalsNftMedia,
   buyPortalsNft,
   withdrawPortalsNfts,
   getPortalsNftWithdrawalStatuses,
@@ -413,6 +414,8 @@ async function ensureCurrentUser(tgUser) {
 
 function mapNftDocToClient(doc, pricePerStar) {
   const nftId = normalizeString(doc?.nftId);
+  const provider = normalizeString(doc?.provider) || "telegram";
+  const providerNftId = normalizeString(doc?.providerNftId);
   const parsedTitle = splitNftTitleAndNumber(doc?.title);
   const nftNumberFromDoc = Math.trunc(toSafeNumber(doc?.nftNumber, 0));
   const nftNumber = nftNumberFromDoc > 0 ? nftNumberFromDoc : parsedTitle.nftNumber;
@@ -426,8 +429,8 @@ function mapNftDocToClient(doc, pricePerStar) {
 
   return {
     nftId,
-    provider: normalizeString(doc?.provider) || "telegram",
-    providerNftId: normalizeString(doc?.providerNftId),
+    provider,
+    providerNftId,
     giftId: normalizeGiftId(doc?.giftId),
     slug: normalizeString(doc?.slug),
     title,
@@ -450,7 +453,11 @@ function mapNftDocToClient(doc, pricePerStar) {
     transferLockedSeconds: Math.max(0, Math.trunc(toSafeNumber(transferLock?.secondsLeft, 0))),
     transferLockLabel: normalizeString(transferLock?.remainingLabel),
     emoji: normalizeString(doc?.emoji) || "🎁",
-    imageUrl: normalizeString(doc?.providerImageUrl) || `/api/gifts/nft-image/${encodeURIComponent(nftId)}`,
+    imageUrl:
+      provider === "portals" && providerNftId
+        ? `/api/gifts/portals-image/${encodeURIComponent(providerNftId)}`
+        : normalizeString(doc?.providerImageUrl) ||
+          `/api/gifts/nft-image/${encodeURIComponent(nftId)}`,
     animationUrl: normalizeString(doc?.providerAnimationUrl),
     patternImageUrl,
     patternAsset: {
@@ -1251,6 +1258,81 @@ async function getNftImage(req, res) {
   }
 }
 
+async function getPortalsNftImage(req, res) {
+  const providerNftId = normalizeString(req.params?.providerNftId).replace(
+    /^portals:/,
+    "",
+  );
+  if (!providerNftId) {
+    return response.notFound(res, "Portals NFT topilmadi");
+  }
+
+  try {
+    const media = await getPortalsNftMedia(providerNftId);
+    let parsedUrl = new URL(media.imageUrl);
+    const isAllowedImageHost = (hostname) =>
+      hostname === "nft.fragment.com" ||
+      hostname === "storage.googleapis.com" ||
+      hostname === "telesco.pe" ||
+      hostname.endsWith(".telesco.pe");
+    if (parsedUrl.protocol !== "https:" || !isAllowedImageHost(parsedUrl.hostname)) {
+      throw new Error("Portals rasm manzili ruxsat etilmagan");
+    }
+
+    let external = await fetch(parsedUrl, {
+      headers: { Accept: "image/avif,image/webp,image/png,image/jpeg,*/*" },
+      signal: AbortSignal.timeout(12_000),
+    });
+    let contentType = normalizeString(external.headers.get("content-type"));
+
+    if (!external.ok || !contentType.toLowerCase().startsWith("image/")) {
+      const tgId = normalizeString(media.tgId);
+      if (!/^[a-z0-9_-]+$/i.test(tgId)) {
+        throw new Error(`Portals rasmi olinmadi: ${external.status}`);
+      }
+      const telegramPage = await fetch(
+        `https://t.me/nft/${encodeURIComponent(tgId)}`,
+        { signal: AbortSignal.timeout(12_000) },
+      );
+      const html = await telegramPage.text();
+      const match = html.match(
+        /property=["']og:image["'][^>]*content=["']([^"']+)["']/i,
+      );
+      const fallbackUrl = normalizeString(match?.[1]).replace(/&amp;/g, "&");
+      parsedUrl = new URL(fallbackUrl);
+      if (
+        parsedUrl.protocol !== "https:" ||
+        !isAllowedImageHost(parsedUrl.hostname)
+      ) {
+        throw new Error("Telegram NFT rasm manzili ruxsat etilmagan");
+      }
+      external = await fetch(parsedUrl, {
+        headers: { Accept: "image/avif,image/webp,image/png,image/jpeg,*/*" },
+        signal: AbortSignal.timeout(12_000),
+      });
+      contentType = normalizeString(external.headers.get("content-type"));
+    }
+    if (!external.ok || !contentType.toLowerCase().startsWith("image/")) {
+      throw new Error("Portals rasm formati noto'g'ri");
+    }
+    const buffer = Buffer.from(await external.arrayBuffer());
+    if (!buffer.length || buffer.length > 12 * 1024 * 1024) {
+      throw new Error("Portals rasm hajmi noto'g'ri");
+    }
+
+    res.setHeader(
+      "Cache-Control",
+      "public, max-age=1800, stale-while-revalidate=86400",
+    );
+    res.setHeader("Content-Type", contentType);
+    return res.status(200).send(buffer);
+  } catch (_) {
+    res.setHeader("Cache-Control", "public, max-age=60");
+    res.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
+    return res.status(200).send(buildImageFallbackSvg());
+  }
+}
+
 async function getNftPattern(req, res) {
   const nftIdOrSlug = normalizeString(req.params?.nftId);
   if (!nftIdOrSlug) {
@@ -1623,6 +1705,7 @@ async function getNftMarketplace(req, res) {
           .filter((item) => !existingProviderIds.has(item.providerNftId) && !existingSlugs.has(item.tgId))
           .map((item) => ({
             ...item,
+            imageUrl: `/api/gifts/portals-image/${encodeURIComponent(item.providerNftId)}`,
             priceUzs: calculatePortalsNftPriceUzs(item.priceGram, effectivePortalsConfig),
             listingPriceUzs: calculatePortalsNftPriceUzs(item.priceGram, effectivePortalsConfig),
             sellerTgUserId: "portals",
@@ -3697,6 +3780,7 @@ module.exports = {
   getGiftCatalog,
   getGiftImage,
   getNftImage,
+  getPortalsNftImage,
   getNftPattern,
   getMyGifts,
   getMyNftGifts,

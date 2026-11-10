@@ -3,8 +3,11 @@ const axios = require("axios");
 const BASE_URL = "https://portal-market.com/partners";
 const CBU_USD_URL = "https://cbu.uz/uz/arkhiv-kursov-valyut/json/USD/";
 const RATE_CACHE_TTL_MS = 10 * 60 * 1000;
+const NFT_MEDIA_CACHE_TTL_MS = 60 * 60 * 1000;
+const NFT_MEDIA_CACHE_MAX = 2000;
 let rateCache = null;
 let rateRequest = null;
+const nftMediaCache = new Map();
 
 function normalizeString(value) {
   return String(value || "").trim();
@@ -70,6 +73,18 @@ function mapPortalsNft(raw) {
   const backdrop = getAttribute(raw, "backdrop");
   const symbol = getAttribute(raw, "symbol");
 
+  const imageUrl = normalizeString(raw?.photo_url);
+  if (id && imageUrl) {
+    if (nftMediaCache.size >= NFT_MEDIA_CACHE_MAX) {
+      nftMediaCache.delete(nftMediaCache.keys().next().value);
+    }
+    nftMediaCache.set(id, {
+      imageUrl,
+      tgId: normalizeString(raw?.tg_id),
+      cachedAt: Date.now(),
+    });
+  }
+
   return {
     provider: "portals",
     providerNftId: id,
@@ -81,7 +96,7 @@ function mapPortalsNft(raw) {
     collectionId: normalizeString(raw?.collection_id),
     priceGram: normalizeString(raw?.price),
     floorPriceGram: normalizeString(raw?.floor_price),
-    imageUrl: normalizeString(raw?.photo_url),
+    imageUrl,
     animationUrl: normalizeString(raw?.animation_url),
     hasAnimation: Boolean(raw?.has_animation),
     model: attributeValue(model),
@@ -125,6 +140,25 @@ async function getPortalsNft(providerNftId) {
   if (!id) return null;
   const result = await searchPortalsNfts({ limit: 1, ids: [id] });
   return result.items.find((item) => item.providerNftId === id) || null;
+}
+
+async function getPortalsNftImageUrl(providerNftId) {
+  const media = await getPortalsNftMedia(providerNftId);
+  return media.imageUrl;
+}
+
+async function getPortalsNftMedia(providerNftId) {
+  const id = normalizeString(providerNftId).replace(/^portals:/, "");
+  if (!id) return { imageUrl: "", tgId: "" };
+  const cached = nftMediaCache.get(id);
+  if (cached && Date.now() - cached.cachedAt < NFT_MEDIA_CACHE_TTL_MS) {
+    return { imageUrl: cached.imageUrl, tgId: cached.tgId };
+  }
+  const nft = await getPortalsNft(id);
+  return {
+    imageUrl: normalizeString(nft?.imageUrl),
+    tgId: normalizeString(nft?.tgId),
+  };
 }
 
 async function buyPortalsNft({ providerNftId, expectedPriceGram }) {
@@ -242,6 +276,8 @@ module.exports = {
   mapPortalsNft,
   searchPortalsNfts,
   getPortalsNft,
+  getPortalsNftImageUrl,
+  getPortalsNftMedia,
   buyPortalsNft,
   withdrawPortalsNfts,
   getPortalsNftWithdrawalStatuses,
