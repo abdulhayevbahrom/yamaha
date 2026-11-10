@@ -153,6 +153,51 @@ async function buyPortalsNft({ providerNftId, expectedPriceGram }) {
   return { result: itemResult, response: result.data };
 }
 
+async function withdrawPortalsNfts({ providerNftIds, recipientTgUserId }) {
+  const giftIds = (Array.isArray(providerNftIds) ? providerNftIds : [providerNftIds])
+    .map((id) => normalizeString(id).replace(/^portals:/, ""))
+    .filter(Boolean);
+  const recipientId = Number(recipientTgUserId);
+  if (!giftIds.length || !Number.isSafeInteger(recipientId) || recipientId <= 0) {
+    throw new Error("Portals NFT yoki Telegram foydalanuvchi IDsi noto'g'ri");
+  }
+
+  const result = await getClient().post("/nfts/withdraw", {
+    gift_ids: giftIds,
+    recipient_id: recipientId,
+    // Xaridor Portals foydalanuvchisi bo'lishi shart emas: NFT uning Telegram
+    // profiliga yuboriladi.
+    unsafe_transfer: true,
+  });
+  const withdrawalIds = Array.isArray(result?.data?.withdrawals_ids)
+    ? result.data.withdrawals_ids
+    : [];
+  if (withdrawalIds.length !== giftIds.length || withdrawalIds.some((id) => !Number.isFinite(Number(id)))) {
+    const error = new Error("Portals NFT yechib olish ID sini qaytarmadi");
+    error.definitive = true;
+    error.providerResponse = result?.data;
+    throw error;
+  }
+  return { withdrawalIds: withdrawalIds.map((id) => Number(id)), response: result.data };
+}
+
+async function getPortalsNftWithdrawalStatuses(withdrawalIds) {
+  const ids = (Array.isArray(withdrawalIds) ? withdrawalIds : [withdrawalIds])
+    .map((id) => Number(id))
+    .filter((id) => Number.isFinite(id) && id > 0);
+  if (!ids.length) return [];
+
+  const result = await getClient().get("/nfts/withdrawals/statuses", {
+    params: { ids },
+    paramsSerializer: (values) => {
+      const query = new URLSearchParams();
+      values.ids.forEach((id) => query.append("ids", id));
+      return query.toString();
+    },
+  });
+  return Array.isArray(result?.data?.statuses) ? result.data.statuses : [];
+}
+
 async function fetchPortalsGramRateUzs() {
   const [portalsResult, cbuResult] = await Promise.all([
     getClient().get("/market/config"),
@@ -198,5 +243,7 @@ module.exports = {
   searchPortalsNfts,
   getPortalsNft,
   buyPortalsNft,
+  withdrawPortalsNfts,
+  getPortalsNftWithdrawalStatuses,
   getPortalsGramRateUzs,
 };

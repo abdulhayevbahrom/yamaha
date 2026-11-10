@@ -72,6 +72,33 @@ const userNftSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    providerWithdrawalId: {
+      type: Number,
+      default: 0,
+      index: true,
+    },
+    providerWithdrawalStatus: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    providerWithdrawalDetails: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    withdrawFeeUzs: {
+      type: Number,
+      default: 0,
+    },
+    withdrawFeeChargedAt: {
+      type: Date,
+      default: null,
+    },
+    withdrawFeeRefundedAt: {
+      type: Date,
+      default: null,
+    },
 
     ownerTgUserId: {
       type: String,

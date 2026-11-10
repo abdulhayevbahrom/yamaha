@@ -22,8 +22,11 @@ const {
   searchPortalsNfts,
   getPortalsNft,
   buyPortalsNft,
+  withdrawPortalsNfts,
+  getPortalsNftWithdrawalStatuses,
   getPortalsGramRateUzs,
 } = require("../services/portals-market.service");
+const { applyBalanceDeltaOnce } = require("../services/balance-operation.service");
 const {
   notifyAdminsAboutNftWithdrawalRequest,
   refundUpfrontNftWithdrawalFeeIfCharged,
@@ -1343,6 +1346,126 @@ async function getMyGifts(req, res) {
   }
 }
 
+function isPortalsWithdrawalFailure(status) {
+  return ["errored", "recovered"].includes(normalizeString(status).toLowerCase());
+}
+
+async function refundPortalsWithdrawalFee(nft, reason) {
+  const amount = Math.max(0, Math.round(toSafeNumber(nft?.withdrawFeeUzs, 0)));
+  if (!amount) return null;
+  return applyBalanceDeltaOnce({
+    tgUserId: nft.ownerTgUserId,
+    operationKey: `portals-nft-withdraw-refund:${normalizeString(nft.transferRequestId)}`,
+    amount,
+  });
+}
+
+async function refreshPortalsNftWithdrawals(tgUserId) {
+  const pending = await UserNft.find({
+    ownerTgUserId: normalizeString(tgUserId),
+    provider: "portals",
+    transferStatus: "processing",
+    providerWithdrawalId: { $gt: 0 },
+  }).lean();
+  if (!pending.length) return { checked: 0, completed: 0, restored: 0 };
+
+  const statuses = await getPortalsNftWithdrawalStatuses(
+    pending.map((item) => item.providerWithdrawalId),
+  );
+  const byId = new Map(statuses.map((item) => [String(item?.id), item]));
+  let completed = 0;
+  let restored = 0;
+
+  for (const nft of pending) {
+    const statusRow = byId.get(String(nft.providerWithdrawalId));
+    const status = normalizeString(statusRow?.status).toLowerCase();
+    const details = normalizeString(statusRow?.details);
+    if (status === "completed") {
+      const result = await UserNft.updateOne(
+        {
+          _id: nft._id,
+          provider: "portals",
+          transferStatus: "processing",
+          providerWithdrawalId: nft.providerWithdrawalId,
+        },
+        {
+          $set: {
+            isTelegramPresent: false,
+            marketStatus: "owned",
+            transferStatus: "completed",
+            providerWithdrawalStatus: status,
+            providerWithdrawalDetails: details,
+            withdrawnAt: new Date(),
+            withdrawnTo: normalizeString(nft.ownerTgUserId),
+            transferError: "",
+          },
+        },
+      );
+      if (result.modifiedCount) {
+        await Order.updateOne(
+          { "fragmentTx.nftWithdrawal.transferRequestId": nft.transferRequestId },
+          {
+            $set: {
+              status: "completed",
+              fulfillmentStatus: "success",
+              fulfilledAt: new Date(),
+              "fragmentTx.nftWithdrawal.providerWithdrawalStatus": status,
+              "fragmentTx.nftWithdrawal.providerWithdrawalDetails": details,
+            },
+          },
+        );
+        completed += 1;
+      }
+      continue;
+    }
+    if (!isPortalsWithdrawalFailure(status)) continue;
+
+    const restoredNft = await UserNft.findOneAndUpdate(
+      {
+        _id: nft._id,
+        provider: "portals",
+        transferStatus: "processing",
+        providerWithdrawalId: nft.providerWithdrawalId,
+      },
+      {
+        $set: {
+          isTelegramPresent: true,
+          marketStatus: "owned",
+          transferStatus: "idle",
+          providerWithdrawalStatus: status,
+          providerWithdrawalDetails: details,
+          transferError: details || "Portals NFT yechib olish bajarilmadi",
+          withdrawFeeRefundedAt: new Date(),
+        },
+      },
+      { new: true },
+    ).lean();
+    if (!restoredNft) continue;
+    await refundPortalsWithdrawalFee(restoredNft, status).catch(() => {});
+    await Order.updateOne(
+      { "fragmentTx.nftWithdrawal.transferRequestId": restoredNft.transferRequestId },
+      {
+        $set: {
+          status: "failed",
+          fulfillmentStatus: "failed",
+          fulfillmentError: details || `portals_withdrawal_${status}`,
+          "fragmentTx.nftWithdrawal.providerWithdrawalStatus": status,
+          "fragmentTx.nftWithdrawal.providerWithdrawalDetails": details,
+          "fragmentTx.nftWithdrawal.withdrawFeeRefundedAt": new Date().toISOString(),
+        },
+      },
+    );
+    restored += 1;
+    emitUserUpdate(restoredNft.ownerTgUserId, {
+      type: "portals_nft_withdrawal_failed",
+      refreshBalance: true,
+      refreshNfts: true,
+      nftId: restoredNft.nftId,
+    });
+  }
+  return { checked: pending.length, completed, restored };
+}
+
 async function getMyNftGifts(req, res) {
   try {
     await ensurePendingOffersFresh();
@@ -1359,6 +1482,8 @@ async function getMyNftGifts(req, res) {
     if (!user?.tgUserId) {
       return response.error(res, "Foydalanuvchi topilmadi");
     }
+
+    await refreshPortalsNftWithdrawals(user.tgUserId).catch(() => {});
 
     const [pricing, marketConfig] = await Promise.all([
       getStarPricing(),
@@ -2701,6 +2826,191 @@ async function buyNftFromMarketplace(req, res) {
   }
 }
 
+async function withdrawPortalsNftForUser({ user, nftId, res }) {
+  const transferRequestId = crypto.randomUUID();
+  const nft = await UserNft.findOneAndUpdate(
+    {
+      nftId,
+      ownerTgUserId: user.tgUserId,
+      provider: "portals",
+      isTelegramPresent: true,
+      marketStatus: { $in: ["owned", "listed"] },
+      $or: [{ transferStatus: "idle" }, { transferStatus: { $exists: false } }],
+    },
+    {
+      $set: {
+        isTelegramPresent: false,
+        marketStatus: "owned",
+        listingPriceUzs: 0,
+        listedAt: null,
+        listedByTgUserId: "",
+        transferStatus: "processing",
+        transferRequestId,
+        transferStartedAt: new Date(),
+        transferError: "",
+        providerWithdrawalStatus: "pending",
+        providerWithdrawalDetails: "",
+      },
+    },
+    { new: false },
+  ).lean();
+
+  if (!nft) {
+    await refreshPortalsNftWithdrawals(user.tgUserId).catch(() => {});
+    return response.error(res, "Bu Portals NFT yechib olish jarayonida yoki allaqachon yechib olingan");
+  }
+
+  const restore = async (errorMessage = "") => UserNft.updateOne(
+    { _id: nft._id, transferStatus: "processing", transferRequestId },
+    {
+      $set: {
+        isTelegramPresent: true,
+        marketStatus: "owned",
+        transferStatus: "idle",
+        transferError: errorMessage,
+        providerWithdrawalStatus: errorMessage ? "errored" : "",
+      },
+    },
+  );
+
+  const marketConfig = await getNftMarketplaceConfig();
+  const withdrawFeeUzs = Math.max(0, Math.round(toSafeNumber(marketConfig?.withdrawFeeUzs, 0)));
+  const feeOperationKey = `portals-nft-withdraw-fee:${transferRequestId}`;
+  let balanceAfter = user;
+  if (withdrawFeeUzs > 0) {
+    const charge = await applyBalanceDeltaOnce({
+      tgUserId: user.tgUserId,
+      operationKey: feeOperationKey,
+      amount: -withdrawFeeUzs,
+    });
+    if (!charge.ok) {
+      await restore();
+      return response.error(res, "Balans yechib olish komissiyasi uchun yetarli emas");
+    }
+    balanceAfter = charge.user || user;
+  }
+  await UserNft.updateOne(
+    { _id: nft._id, transferStatus: "processing", transferRequestId },
+    {
+      $set: {
+        withdrawFeeUzs,
+        withdrawFeeChargedAt: withdrawFeeUzs > 0 ? new Date() : null,
+        withdrawFeeRefundedAt: null,
+      },
+    },
+  );
+
+  const { title, nftNumber } = splitNftTitleAndNumber(nft.title);
+  let order;
+  let providerRequestStarted = false;
+  try {
+    const orderId = await getNextOrderId();
+    order = await Order.create({
+      orderId,
+      product: "nft_withdrawal",
+      planCode: title || "NFT Gift",
+      customAmount: Math.max(0, Math.round(toSafeNumber(nftNumber, 0))),
+      username: normalizeString(user.username) || user.tgUserId,
+      tgUserId: user.tgUserId,
+      tgUsername: normalizeString(user.username),
+      profileName: normalizeString(user.profileName) || normalizeString(user.username) || user.tgUserId,
+      paymentMethod: "balance",
+      expectedAmount: withdrawFeeUzs,
+      paidAmount: withdrawFeeUzs,
+      paymentGrossAmount: withdrawFeeUzs,
+      paidAt: new Date(),
+      status: "paid_auto_processed",
+      fulfillmentStatus: "processing",
+      completionMode: "auto",
+      sequence: orderId,
+      fragmentTx: {
+        nftWithdrawal: {
+          nftId,
+          title: title || "NFT Gift",
+          nftNumber: Math.max(0, Math.round(toSafeNumber(nftNumber, 0))),
+          ownerTgUserId: user.tgUserId,
+          transferRequestId,
+          provider: "portals",
+          providerNftId: normalizeString(nft.providerNftId),
+          withdrawFeeUzs,
+          feeOperationKey,
+          requestedAt: new Date().toISOString(),
+        },
+      },
+    });
+
+    providerRequestStarted = true;
+    const providerResult = await withdrawPortalsNfts({
+      providerNftIds: [nft.providerNftId],
+      recipientTgUserId: user.tgUserId,
+    });
+    const providerWithdrawalId = providerResult.withdrawalIds[0];
+    await UserNft.updateOne(
+      { _id: nft._id, transferStatus: "processing", transferRequestId },
+      {
+        $set: {
+          providerWithdrawalId,
+          providerWithdrawalStatus: "pending",
+          withdrawFeeUzs,
+          withdrawFeeChargedAt: withdrawFeeUzs > 0 ? new Date() : null,
+        },
+      },
+    );
+    await Order.updateOne(
+      { _id: order._id },
+      { $set: { "fragmentTx.nftWithdrawal.providerWithdrawalId": providerWithdrawalId } },
+    );
+
+    emitUserUpdate(user.tgUserId, {
+      type: "portals_nft_withdrawal_requested",
+      refreshBalance: true,
+      refreshNfts: true,
+      refreshOrders: true,
+      nftId,
+      orderId: order._id,
+    });
+    return response.created(res, "NFT Telegram profilingizga yuborilmoqda", {
+      orderId: String(order._id),
+      nftId,
+      withdrawFeeUzs,
+      providerWithdrawalId,
+      pending: true,
+      balance: Math.max(0, Math.round(toSafeNumber(balanceAfter?.balance, 0))),
+    });
+  } catch (error) {
+    const definitive = !providerRequestStarted || Boolean(error?.response || error?.definitive);
+    if (!definitive) {
+      await UserNft.updateOne(
+        { _id: nft._id, transferStatus: "processing", transferRequestId },
+        { $set: { transferError: "Portals javobi noaniq; administrator tekshirishi kerak" } },
+      );
+      return response.error(res, "Portals javobi noaniq. NFT va mablag' holati tekshiruvda; qayta urinmang.");
+    }
+    if (order?._id) {
+      await Order.updateOne(
+        { _id: order._id },
+        { $set: { status: "failed", fulfillmentStatus: "failed", fulfillmentError: normalizeString(error?.message) } },
+      );
+    }
+    const restored = await UserNft.findOneAndUpdate(
+      { _id: nft._id, transferStatus: "processing", transferRequestId },
+      {
+        $set: {
+          isTelegramPresent: true,
+          marketStatus: "owned",
+          transferStatus: "idle",
+          transferError: normalizeString(error?.message),
+          providerWithdrawalStatus: "errored",
+          withdrawFeeRefundedAt: new Date(),
+        },
+      },
+      { new: true },
+    ).lean();
+    if (restored) await refundPortalsWithdrawalFee(restored, "request_failed").catch(() => {});
+    return response.error(res, normalizeString(error?.message) || "Portals NFT yechib olinmadi");
+  }
+}
+
 async function withdrawMyNft(req, res) {
   let createdOrder = null;
   let restoreNftState = async () => {};
@@ -2741,6 +3051,15 @@ async function withdrawMyNft(req, res) {
     });
     if (!nftId) {
       return response.error(res, "nftId required");
+    }
+
+    const isPortalsNft = await UserNft.exists({
+      nftId,
+      ownerTgUserId: user.tgUserId,
+      provider: "portals",
+    });
+    if (isPortalsNft) {
+      return withdrawPortalsNftForUser({ user, nftId, res });
     }
 
     const transferRequestId = crypto.randomUUID();
