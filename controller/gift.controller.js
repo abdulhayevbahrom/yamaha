@@ -1362,6 +1362,48 @@ async function getPortalsNftImage(req, res) {
   }
 }
 
+async function getPortalsNftAnimation(req, res) {
+  const providerNftId = normalizeString(req.params?.providerNftId).replace(
+    /^portals:/,
+    "",
+  );
+  if (!providerNftId) {
+    return response.notFound(res, "Portals NFT topilmadi");
+  }
+
+  try {
+    const media = await getPortalsNftMedia(providerNftId);
+    const parsedUrl = new URL(media.animationUrl);
+    if (
+      parsedUrl.protocol !== "https:" ||
+      parsedUrl.hostname !== "nft.fragment.com" ||
+      !parsedUrl.pathname.endsWith(".lottie.json")
+    ) {
+      throw new Error("Portals animatsiya manzili ruxsat etilmagan");
+    }
+    const external = await fetch(parsedUrl, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(12_000),
+    });
+    const contentType = normalizeString(external.headers.get("content-type"));
+    if (!external.ok || !contentType.toLowerCase().includes("json")) {
+      throw new Error("Portals animatsiyasi olinmadi");
+    }
+    const buffer = Buffer.from(await external.arrayBuffer());
+    if (!buffer.length || buffer.length > 6 * 1024 * 1024) {
+      throw new Error("Portals animatsiya hajmi noto'g'ri");
+    }
+    res.setHeader(
+      "Cache-Control",
+      "public, max-age=2592000, stale-while-revalidate=86400",
+    );
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    return res.status(200).send(buffer);
+  } catch (_) {
+    return response.notFound(res, "Portals NFT animatsiyasi topilmadi");
+  }
+}
+
 async function getNftPattern(req, res) {
   const nftIdOrSlug = normalizeString(req.params?.nftId);
   if (!nftIdOrSlug) {
@@ -1761,6 +1803,7 @@ async function getNftMarketplace(req, res) {
           .map((item) => ({
             ...item,
             imageUrl: `/api/gifts/portals-image/${encodeURIComponent(item.providerNftId)}`,
+            animationUrl: `/api/gifts/portals-animation/${encodeURIComponent(item.providerNftId)}`,
             priceUzs: calculatePortalsNftPriceUzs(item.priceGram, effectivePortalsConfig),
             listingPriceUzs: calculatePortalsNftPriceUzs(item.priceGram, effectivePortalsConfig),
             sellerTgUserId: "portals",
@@ -3849,6 +3892,7 @@ module.exports = {
   getGiftImage,
   getNftImage,
   getPortalsNftImage,
+  getPortalsNftAnimation,
   getNftPattern,
   getMyGifts,
   getMyNftGifts,

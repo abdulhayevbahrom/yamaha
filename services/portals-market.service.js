@@ -82,6 +82,7 @@ function mapPortalsNft(raw) {
     }
     nftMediaCache.set(id, {
       imageUrl,
+      animationUrl: normalizeString(raw?.animation_url),
       tgId: normalizeString(raw?.tg_id),
       cachedAt: Date.now(),
     });
@@ -262,11 +263,16 @@ async function getPortalsNftMedia(providerNftId) {
   if (!id) return { imageUrl: "", tgId: "" };
   const cached = nftMediaCache.get(id);
   if (cached && Date.now() - cached.cachedAt < NFT_MEDIA_CACHE_TTL_MS) {
-    return { imageUrl: cached.imageUrl, tgId: cached.tgId };
+    return {
+      imageUrl: cached.imageUrl,
+      animationUrl: cached.animationUrl || "",
+      tgId: cached.tgId,
+    };
   }
   const nft = await getPortalsNft(id);
   return {
     imageUrl: normalizeString(nft?.imageUrl),
+    animationUrl: normalizeString(nft?.animationUrl),
     tgId: normalizeString(nft?.tgId),
   };
 }

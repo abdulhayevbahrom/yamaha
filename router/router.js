@@ -163,6 +163,10 @@ router.get(
   "/gifts/portals-image/:providerNftId",
   giftController.getPortalsNftImage,
 );
+router.get(
+  "/gifts/portals-animation/:providerNftId",
+  giftController.getPortalsNftAnimation,
+);
 router.get("/gifts/nft-pattern/:nftId", giftController.getNftPattern);
 router.get("/hero-slides", publicController.getHeroSlides);
 router.get("/contest/current", contestController.getCurrentContest);
