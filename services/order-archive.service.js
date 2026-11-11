@@ -7,6 +7,21 @@ const ARCHIVE_CHANNEL_ID = String(
   process.env.ORDER_ARCHIVE_CHAT_ID || "@BuyStarsArxiv",
 ).trim();
 
+function getArchiveWebAppReplyMarkup() {
+  const botUsername = String(process.env.BOT_USERNAME || "")
+    .trim()
+    .replace(/^@+/, "");
+  if (!/^[a-zA-Z0-9_]{5,32}$/.test(botUsername)) return undefined;
+  return {
+    inline_keyboard: [[
+      {
+        text: "🛍 Do'konga kirish",
+        url: `https://t.me/${botUsername}?start=archive`,
+      },
+    ]],
+  };
+}
+
 const productLabels = {
   star: "Telegram Star",
   premium: "Telegram Premium",
@@ -133,8 +148,10 @@ async function sendOrderArchive(orderOrId, options = {}) {
       `📌 Holat: <b>${statusLabel}</b>`,
     ].join("\n");
 
+    const replyMarkup = getArchiveWebAppReplyMarkup();
     const sent = await sendTelegramText(ARCHIVE_CHANNEL_ID, message, {
       parse_mode: "HTML",
+      ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
     });
 
     if (!sent.ok) return sent;
@@ -147,6 +164,7 @@ async function sendOrderArchive(orderOrId, options = {}) {
 }
 
 module.exports = {
+  getArchiveWebAppReplyMarkup,
   getArchiveAmountLabel,
   sendOrderArchive,
 };
