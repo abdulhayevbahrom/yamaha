@@ -2823,6 +2823,7 @@ const uploadBroadcastMedia = async (req, res) => {
 
 const createBroadcast = async (req, res) => {
   try {
+    if (req.body?.audienceVersion !== 2) return response.error(res, "Reklama formasini yangilang va yuborish joyini qayta tanlang");
     const type = normalizeString(req.body?.type).toLowerCase();
     if (!["text", "photo", "video", "document"].includes(type)) return response.error(res, "Reklama turi noto'g'ri");
     const text = normalizeString(req.body?.text);
