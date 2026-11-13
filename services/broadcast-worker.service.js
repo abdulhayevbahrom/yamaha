@@ -1,3 +1,4 @@
+const { broadcastReplyMarkup } = require("./broadcast-audience.service");
 const Broadcast = require("../model/broadcast.model");
 const BroadcastDelivery = require("../model/broadcastDelivery.model");
 
@@ -12,16 +13,9 @@ function errorText(error) {
   ).slice(0, 500);
 }
 
-function replyMarkup(broadcast) {
-  return Array.isArray(broadcast?.buttons) && broadcast.buttons.length
-    ? { inline_keyboard: broadcast.buttons }
-    : undefined;
-}
-
 async function sendBroadcastMessage(bot, broadcast, tgUserId) {
-  const options = {
-    ...(replyMarkup(broadcast) ? { reply_markup: replyMarkup(broadcast) } : {}),
-  };
+  const markup = broadcastReplyMarkup(broadcast, tgUserId);
+  const options = markup ? { reply_markup: markup } : {};
   if (broadcast.type === "text") {
     return bot.sendMessage(tgUserId, broadcast.text, {
       ...options,

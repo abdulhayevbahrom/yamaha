@@ -1,3 +1,4 @@
+const { getBroadcastChannel, createBroadcastDeliverySnapshot } = require("../services/broadcast-audience.service");
 const crypto = require("node:crypto");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
@@ -113,23 +114,6 @@ function buildAdminBroadcastButton(button) {
   } catch (_) {
     return null;
   }
-}
-
-async function createAdminBroadcastDeliverySnapshot(broadcastId) {
-  const users = await User.find({ tgUserId: { $exists: true, $ne: "" } })
-    .select({ tgUserId: 1 })
-    .lean();
-  const operations = users.map((user) => ({
-    updateOne: {
-      filter: { broadcastId, tgUserId: String(user.tgUserId) },
-      update: { $setOnInsert: { broadcastId, tgUserId: String(user.tgUserId), status: "pending" } },
-      upsert: true,
-    },
-  }));
-  for (let index = 0; index < operations.length; index += 1000) {
-    await BroadcastDelivery.bulkWrite(operations.slice(index, index + 1000), { ordered: false });
-  }
-  return users.length;
 }
 
 async function callTelegramBot(method, body) {
@@ -2855,6 +2839,11 @@ const createBroadcast = async (req, res) => {
       if (!button) return response.error(res, "Reklama tugmasi noto'g'ri");
       buttons = [[button]];
     }
+    const sendToBot = req.body?.sendToBot === undefined || req.body.sendToBot === true;
+    const sendToChannel = req.body?.sendToChannel === true;
+    if (!sendToBot && !sendToChannel) return response.error(res, "Yuborish joyini tanlang");
+    const channel = sendToChannel ? getBroadcastChannel() : "";
+    if (sendToChannel && !channel) return response.error(res, "Reklama kanali sozlanmagan");
     const broadcast = await Broadcast.create({
       adminChatId: "admin-panel",
       type,
@@ -2866,7 +2855,7 @@ const createBroadcast = async (req, res) => {
       draftStage: "",
       scheduledAt,
     });
-    const totalCount = await createAdminBroadcastDeliverySnapshot(broadcast._id);
+    const totalCount = await createBroadcastDeliverySnapshot(broadcast._id, { sendToBot, channel });
     const queued = await Broadcast.findByIdAndUpdate(
       broadcast._id,
       { $set: { status: "scheduled", totalCount, sentCount: 0, failedCount: 0 } },

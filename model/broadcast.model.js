@@ -31,9 +31,11 @@ const broadcastSchema = new mongoose.Schema(
     },
     draftStage: {
       type: String,
-      enum: ["content", "buttons", "button_name", "button_target", "external_url", "schedule", ""],
+      enum: ["content", "buttons", "button_name", "button_target", "external_url", "audience", "schedule", ""],
       default: "content",
     },
+    sendToBot: { type: Boolean, default: true },
+    sendToChannel: { type: Boolean, default: false },
     draftButtonText: { type: String, default: "" },
     scheduledAt: { type: Date, default: null, index: true },
     startedAt: { type: Date, default: null },

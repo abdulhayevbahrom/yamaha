@@ -1,3 +1,5 @@
+const { getBroadcastChannel, createBroadcastDeliverySnapshot, broadcastReplyMarkup } =
+  require("../services/broadcast-audience.service");
 require("dotenv").config();
 const path = require("node:path");
 const TelegramBot = require("node-telegram-bot-api");
@@ -589,33 +591,20 @@ async function startBot({ strict = false } = {}) {
     });
   };
 
-  const getAllUsers = async () => {
-    const users = await User.find({ tgUserId: { $exists: true, $ne: "" } })
-      .select({ tgUserId: 1 })
-      .lean();
-    return users.map((u) => String(u.tgUserId));
-  };
-
   const getAdminDraft = (chatId) =>
     Broadcast.findOne({ adminChatId: String(chatId), status: "draft" })
       .sort({ updatedAt: -1 });
 
-  const createDeliverySnapshot = async (broadcastId) => {
-    const users = await getAllUsers();
-    const operations = users.map((tgUserId) => ({
-      updateOne: {
-        filter: { broadcastId, tgUserId },
-        update: { $setOnInsert: { broadcastId, tgUserId, status: "pending" } },
-        upsert: true,
-      },
-    }));
-    for (let index = 0; index < operations.length; index += 1000) {
-      await BroadcastDelivery.bulkWrite(operations.slice(index, index + 1000), {
-        ordered: false,
-      });
-    }
-    return users.length;
-  };
+  const audienceKeyboard = (draft) => [
+    [{ text: `${draft.sendToBot ? "☑️" : "⬜"} Bot foydalanuvchilari`, callback_data: `AD_AUD:bot:${draft._id}` }],
+    [{ text: `${draft.sendToChannel ? "☑️" : "⬜"} Telegram kanal`, callback_data: `AD_AUD:channel:${draft._id}` }],
+    [{ text: "Davom etish", callback_data: `AD_AUD:next:${draft._id}` }],
+  ];
+
+  const askBroadcastAudience = (chatId, draft) =>
+    bot.sendMessage(chatId, "Reklama qayerga yuborilishini tanlang.", {
+      reply_markup: { inline_keyboard: audienceKeyboard(draft) },
+    });
 
   const sendStartFlow = async (chatId) => {
     await bot.sendPhoto(
@@ -1080,6 +1069,60 @@ async function startBot({ strict = false } = {}) {
       await bot.sendMessage(chatId, `🆔 PUBG ID: ${order.username}`);
     }
 
+    if (query.data?.startsWith("AD_AUD:")) {
+      const [, action, broadcastId] = query.data.split(":");
+      if (!isAdmin(chatId) || !/^[a-f0-9]{24}$/.test(broadcastId || "")) {
+        await bot.answerCallbackQuery(query.id, { text: "Ruxsat yo'q", show_alert: true });
+        return;
+      }
+
+      const filter = { _id: broadcastId, adminChatId: String(chatId), status: "draft", draftStage: "audience" };
+      const draft = await Broadcast.findOne(filter);
+      if (!draft) {
+        await bot.answerCallbackQuery(query.id, { text: "Tanlov muddati tugagan", show_alert: true });
+        return;
+      }
+
+      if (action === "next") {
+        if (!draft.sendToBot && !draft.sendToChannel) {
+          await bot.answerCallbackQuery(query.id, { text: "Yuborish joyini tanlang", show_alert: true });
+          return;
+        }
+        if (draft.sendToChannel && !getBroadcastChannel()) {
+          await bot.answerCallbackQuery(query.id, { text: "Reklama kanali sozlanmagan", show_alert: true });
+          return;
+        }
+        const updated = await Broadcast.updateOne(
+          { ...filter, sendToBot: draft.sendToBot, sendToChannel: draft.sendToChannel },
+          { $set: { draftStage: "schedule" } },
+        );
+        await bot.answerCallbackQuery(query.id);
+        if (updated.modifiedCount) {
+          await bot.sendMessage(chatId, "Yuborish vaqtini kiriting. Darhol yuborish uchun «hozir», rejalash uchun YYYY-MM-DD HH:mm formatida Toshkent vaqtini yozing.");
+        }
+        return;
+      }
+
+      const field = { bot: "sendToBot", channel: "sendToChannel" }[action];
+      if (!["bot", "channel"].includes(action)) {
+        await bot.answerCallbackQuery(query.id);
+        return;
+      }
+      const updated = await Broadcast.findOneAndUpdate(
+        { ...filter, [field]: draft[field] },
+        { $set: { [field]: !draft[field] } },
+        { new: true },
+      );
+      await bot.answerCallbackQuery(query.id);
+      if (updated) {
+        await bot.editMessageReplyMarkup({ inline_keyboard: audienceKeyboard(updated) }, {
+          chat_id: chatId,
+          message_id: query.message.message_id,
+        });
+      }
+      return;
+    }
+
     if (query.data?.startsWith("AD_BUTTONS:")) {
       if (!isAdmin(chatId)) {
         await bot.answerCallbackQuery(query.id, { text: "Ruxsat yo'q", show_alert: true });
@@ -1099,9 +1142,9 @@ async function startBot({ strict = false } = {}) {
       await bot.answerCallbackQuery(query.id);
       if (choice === "NO") {
         await Broadcast.findByIdAndUpdate(draft._id, {
-          $set: { buttons: [], draftStage: "schedule", draftButtonText: "" },
+          $set: { buttons: [], draftStage: "audience", draftButtonText: "" },
         });
-        await bot.sendMessage(chatId, "Yuborish vaqtini kiriting:\n• hozir\n• 2026-11-02 21:30\n\nVaqt Toshkent vaqti (UTC+5) bo'yicha.");
+        await askBroadcastAudience(chatId, draft);
         return;
       }
       await Broadcast.findByIdAndUpdate(draft._id, {
@@ -1136,10 +1179,10 @@ async function startBot({ strict = false } = {}) {
         return;
       }
       await Broadcast.findByIdAndUpdate(draft._id, {
-        $set: { buttons: parsed.buttons, draftStage: "schedule" },
+        $set: { buttons: parsed.buttons, draftStage: "audience" },
       });
       await bot.answerCallbackQuery(query.id, { text: "Bo'lim tanlandi" });
-      await bot.sendMessage(chatId, "Yuborish vaqtini kiriting:\n• hozir\n• 2026-11-02 21:30\n\nVaqt Toshkent vaqti (UTC+5) bo'yicha.");
+      await askBroadcastAudience(chatId, draft);
       return;
     }
 
@@ -1347,6 +1390,7 @@ async function startBot({ strict = false } = {}) {
         let editFailed = 0;
         for (const delivery of deliveries) {
           try {
+            const markup = broadcastReplyMarkup(broadcast, delivery.tgUserId);
             if (broadcast.type !== "text") {
               await bot.editMessageCaption(newText, {
                 chat_id: delivery.tgUserId,
@@ -1354,14 +1398,14 @@ async function startBot({ strict = false } = {}) {
                 ...(newEntities.length
                   ? { caption_entities: newEntities }
                   : {}),
-                ...(broadcast.buttons?.length ? { reply_markup: { inline_keyboard: broadcast.buttons } } : {}),
+                ...(markup ? { reply_markup: markup } : {}),
               });
             } else {
               await bot.editMessageText(newText, {
                 chat_id: delivery.tgUserId,
                 message_id: delivery.messageId,
                 ...(newEntities.length ? { entities: newEntities } : {}),
-                ...(broadcast.buttons?.length ? { reply_markup: { inline_keyboard: broadcast.buttons } } : {}),
+                ...(markup ? { reply_markup: markup } : {}),
               });
             }
             edited += 1;
@@ -1463,9 +1507,9 @@ async function startBot({ strict = false } = {}) {
           return;
         }
         await Broadcast.findByIdAndUpdate(pending._id, {
-          $set: { buttons: parsed.buttons, draftStage: "schedule" },
+          $set: { buttons: parsed.buttons, draftStage: "audience" },
         });
-        await bot.sendMessage(chatId, "Yuborish vaqtini kiriting:\n• hozir\n• 2026-11-02 21:30\n\nVaqt Toshkent vaqti (UTC+5) bo'yicha.");
+        await askBroadcastAudience(chatId, pending);
         return;
       }
 
@@ -1475,9 +1519,17 @@ async function startBot({ strict = false } = {}) {
           await bot.sendMessage(chatId, "❗ Vaqt noto'g'ri yoki o'tib ketgan. Masalan: 2026-11-02 21:30 yoki hozir");
           return;
         }
-        const totalCount = await createDeliverySnapshot(pending._id);
-        const queued = await Broadcast.findByIdAndUpdate(
-          pending._id,
+        const channel = pending.sendToChannel ? getBroadcastChannel() : "";
+        if (pending.sendToChannel && !channel) {
+          await bot.sendMessage(chatId, "Reklama kanali sozlanmagan. Sozlangandan keyin yuborish vaqtini qayta kiriting.");
+          return;
+        }
+        const totalCount = await createBroadcastDeliverySnapshot(pending._id, {
+          sendToBot: pending.sendToBot,
+          channel,
+        });
+        const queued = await Broadcast.findOneAndUpdate(
+          { _id: pending._id, status: "draft", draftStage: "schedule" },
           {
             $set: {
               status: "scheduled",
@@ -1490,6 +1542,7 @@ async function startBot({ strict = false } = {}) {
           },
           { new: true },
         ).lean();
+        if (!queued) return;
         await bot.sendMessage(
           chatId,
           [
