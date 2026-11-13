@@ -2839,7 +2839,7 @@ const createBroadcast = async (req, res) => {
       if (!button) return response.error(res, "Reklama tugmasi noto'g'ri");
       buttons = [[button]];
     }
-    const sendToBot = req.body?.sendToBot === undefined || req.body.sendToBot === true;
+    const sendToBot = req.body?.sendToBot === true;
     const sendToChannel = req.body?.sendToChannel === true;
     if (!sendToBot && !sendToChannel) return response.error(res, "Yuborish joyini tanlang");
     const channel = sendToChannel ? getBroadcastChannel() : "";
@@ -2851,6 +2851,8 @@ const createBroadcast = async (req, res) => {
       fileId,
       fileName: normalizeString(req.body?.fileName),
       buttons,
+      sendToBot,
+      sendToChannel,
       status: "draft",
       draftStage: "",
       scheduledAt,
