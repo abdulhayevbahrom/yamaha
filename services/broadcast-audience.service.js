@@ -28,11 +28,23 @@ async function createBroadcastDeliverySnapshot(broadcastId, { sendToBot, channel
   return recipients.size;
 }
 
+function getChannelMiniAppUrl(webAppUrl) {
+  const username = String(process.env.BOT_USERNAME || "").trim().replace(/^@/, "");
+  if (!/^[a-zA-Z][a-zA-Z0-9_]{4,31}$/.test(username)) return "";
+  try {
+    const route = new URL(webAppUrl).hash.match(/^#\/(home|orders|gifts|profile|referral|contest|balance|star-sell|games\/(?:stars|premium|pubg|freefire|mlbb|hok|roblox|bloodstrike|deltaforce))$/)?.[1];
+    if (!route) return "";
+    return `https://t.me/${username}?startapp=${route.replace("/", "__")}`;
+  } catch (_) {
+    return "";
+  }
+}
+
 function broadcastReplyMarkup(broadcast, recipient) {
   if (!broadcast.buttons?.length) return undefined;
   const inlineKeyboard = String(recipient).startsWith("@")
     ? broadcast.buttons.map((row) => row.map((button) =>
-      button.web_app?.url ? { text: button.text, url: button.web_app.url } : button,
+      button.web_app?.url ? { text: button.text, url: getChannelMiniAppUrl(button.web_app.url) || button.web_app.url } : button,
     ))
     : broadcast.buttons;
   return { inline_keyboard: inlineKeyboard };
