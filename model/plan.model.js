@@ -53,6 +53,15 @@ const planSchema = new mongoose.Schema(
       type: Number,
       default: 0
     },
+    // Null represents an explicitly set fixed price. Existing fixed plans may omit the field.
+    markupPercent: {
+      type: Number,
+      min: 0,
+      validate: {
+        validator: (value) => value == null || Number.isFinite(value),
+        message: "Ustama foizi chekli son bo'lishi kerak"
+      }
+    },
     providerAvailable: {
       type: Boolean,
       default: true

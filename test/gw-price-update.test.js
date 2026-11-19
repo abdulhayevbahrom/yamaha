@@ -118,3 +118,24 @@ test("GW alert formatter returns admin-friendly summary", () => {
   assert.match(message, /Oldingi API narx: \$88.70/);
   assert.match(message.replace(/\u00a0/g, " "), /Bizdagi oldingi narx: 1 250 000 so'm/);
 });
+
+test("GW alert shows both computed prices for a percentage-priced plan", () => {
+  const update = { direction: "increased", previousUsd: 1, nextUsd: 1.1 };
+  const plan = { basePrice: 15_000, markupPercent: 10 };
+  const message = formatGwAlertMessage({
+    update,
+    plan,
+    customerPrices: { previous: 13_200, next: 14_600 },
+  }).replace(/\u00a0/g, " ");
+
+  assert.match(message, /Bizdagi oldingi narx: 13 200 so'm/);
+  assert.match(message, /Bizdagi yangi narx: 14 600 so'm/);
+
+  const unavailable = formatGwAlertMessage({
+    update,
+    plan,
+    customerPrices: { previous: null, next: null },
+  });
+  assert.match(unavailable, /Yangi API narx: \$1\.10/);
+  assert.match(unavailable, /Bizdagi yangi narx: hisoblab bo'lmadi/);
+});

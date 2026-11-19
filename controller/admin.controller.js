@@ -71,6 +71,7 @@ const {
   markReferralPromoCodeUsed: markReferralPromoCodeUsedService,
 } = require("../services/referral-promo-code.service");
 const { syncGwPubgCatalog, syncGwMlbbCatalog, syncGwHokCatalog, syncGwFreeFireCatalog, syncGwRobloxCatalog, syncGwBloodStrikeCatalog, syncGwDeltaForceCatalog } = require("../services/gw-catalog.service");
+const { getPlanPrice, getPlanPricingRate, hasGwMarkup } = require("../services/plan-pricing.service");
 
 const PURCHASE_PRODUCTS = ["star", "premium", "uc", "freefire", "mlbb", "hok", "roblox", "bloodstrike", "deltaforce"];
 const PAID_STATUSES = ["paid_auto_processed", "completed"];
@@ -650,10 +651,20 @@ const login = async (req, res) => {
   });
 };
 
+function formatAdminPlan(plan, usdUzsRate) {
+  if (plan.provider !== "gw") return plan;
+  return { ...plan, fixedPrice: plan.basePrice, basePrice: getPlanPrice(plan, usdUzsRate) };
+}
+
+async function formatAdminPlans(plans) {
+  const usdUzsRate = await getPlanPricingRate(plans);
+  return plans.map((plan) => formatAdminPlan(plan, usdUzsRate));
+}
+
 const getPlans = async (_, res) => {
   try {
     const plans = await Plan.find().sort({ category: 1, amount: 1 }).lean();
-    return response.success(res, "Plans", plans);
+    return response.success(res, "Plans", await formatAdminPlans(plans));
   } catch (error) {
     return response.serverError(
       res,
@@ -684,35 +695,65 @@ const createPlan = async (req, res) => {
 const updatePlan = async (req, res) => {
   try {
     const { id } = req.params;
-    const payload = req.validated;
+    const payload = { ...req.validated };
 
     const existing = await Plan.findById(id).lean();
     if (!existing) return response.notFound(res, "Plan topilmadi");
+    const isGwPlan = existing.provider === "gw";
     if (
-      existing.provider === "gw" &&
+      isGwPlan &&
       typeof payload.amount === "number" &&
       Number(payload.amount) !== Number(existing.amount)
     ) {
       return response.error(res, "GW paket miqdorini qo'lda o'zgartirib bo'lmaydi");
     }
-    const nextActive =
-      typeof payload.isActive === "boolean" ? payload.isActive : existing.isActive;
-    const nextPrice =
-      typeof payload.basePrice === "number" ? payload.basePrice : existing.basePrice;
-    if (nextActive && (!Number.isFinite(nextPrice) || nextPrice <= 0)) {
-      return response.error(
-        res,
-        "Paketni faollashtirishdan oldin mijoz narxini 0 dan katta kiriting",
-      );
+    if (!isGwPlan && payload.markupPercent !== undefined) {
+      return response.error(res, "Ustama foizi GW paketlari uchun qo'llanadi");
     }
 
-    const updated = await Plan.findByIdAndUpdate(id, payload, {
+    if (isGwPlan && (payload.basePrice !== undefined || payload.markupPercent === null)) {
+      const requestedMarkup = payload.markupPercent === undefined
+        ? existing.markupPercent
+        : payload.markupPercent;
+      if (requestedMarkup != null) {
+        return response.error(res, "Qat'iy narxni kiritish uchun qat'iy narx rejimini tanlang");
+      }
+      if (!Number.isSafeInteger(payload.basePrice) || payload.basePrice <= 0) {
+        return response.error(res, "Qat'iy narxni butun so'mda, 0 dan katta kiriting");
+      }
+      if (payload.basePrice !== existing.basePrice) payload.markupPercent = null;
+    }
+
+    const nextPlan = { ...existing, ...payload };
+    const activating = nextPlan.isActive && !existing.isActive;
+    const changingMarkup = nextPlan.markupPercent !== existing.markupPercent;
+    const usesGwMarkup = hasGwMarkup(nextPlan);
+    const usdUzsRate = await getPlanPricingRate([nextPlan]);
+    const shouldValidatePrice = !usesGwMarkup || activating || changingMarkup;
+    if (nextPlan.isActive && shouldValidatePrice) {
+      const nextPrice = getPlanPrice(nextPlan, usdUzsRate);
+      if (!Number.isFinite(nextPrice) || nextPrice <= 0) {
+        const message = usesGwMarkup
+          ? "Paket narxini hisoblab bo'lmadi. GW narxi va dollar kursini tekshiring"
+          : "Paketni faollashtirishdan oldin mijoz narxini 0 dan katta kiriting";
+        return response.error(res, message);
+      }
+    }
+
+    const filter = { _id: id, provider: isGwPlan ? "gw" : { $ne: "gw" } };
+    const updatesPricing = payload.basePrice !== undefined || payload.markupPercent !== undefined;
+    if (isGwPlan && (updatesPricing || payload.isActive === true)) {
+      filter.markupPercent = existing.markupPercent ?? null;
+      filter.basePrice = existing.basePrice ?? null;
+      filter.isActive = existing.isActive ? true : { $ne: true };
+    }
+    const updated = await Plan.findOneAndUpdate(filter, payload, {
       new: true,
       runValidators: true,
     }).lean();
 
-    if (!updated) return response.notFound(res, "Plan topilmadi");
-    return response.success(res, "Plan yangilandi", updated);
+    if (!updated) return response.notFound(res, "Paket o'zgargan yoki topilmadi");
+    return response.success(res, "Plan yangilandi", formatAdminPlan(updated, usdUzsRate));
   } catch (error) {
     return response.serverError(res, "Plan yangilashda xatolik", error.message);
   }
@@ -740,7 +781,7 @@ const deletePlan = async (req, res) => {
 const syncGwPubgPlans = async (_, res) => {
   try {
     const plans = await syncGwPubgCatalog();
-    return response.success(res, "GW PUBG katalogi yangilandi", plans);
+    return response.success(res, "GW PUBG katalogi yangilandi", await formatAdminPlans(plans));
   } catch (error) {
     const status = Number(error?.response?.status || 0);
     const payload = error?.response?.data;
@@ -785,7 +826,7 @@ const syncGwMlbbPlans = async (_, res) => {
   const traceId = `admin-mlbb-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
   try {
     const plans = await syncGwMlbbCatalog({ traceId });
-    return response.success(res, "GW MLBB katalogi yangilandi", plans);
+    return response.success(res, "GW MLBB katalogi yangilandi", await formatAdminPlans(plans));
   } catch (error) {
     const status = Number(error?.response?.status || 0);
     const payload = error?.response?.data;
@@ -809,7 +850,7 @@ const syncGwMlbbPlans = async (_, res) => {
 const syncGwHokPlans = async (_, res) => {
   try {
     const plans = await syncGwHokCatalog();
-    return response.success(res, "GW Honor of Kings katalogi yangilandi", plans);
+    return response.success(res, "GW Honor of Kings katalogi yangilandi", await formatAdminPlans(plans));
   } catch (error) {
     const status = Number(error?.response?.status || 0);
     const payload = error?.response?.data;
@@ -830,7 +871,7 @@ const syncGwHokPlans = async (_, res) => {
 const syncGwFreeFirePlans = async (_, res) => {
   try {
     const plans = await syncGwFreeFireCatalog();
-    return response.success(res, "GW Free Fire katalogi yangilandi", plans);
+    return response.success(res, "GW Free Fire katalogi yangilandi", await formatAdminPlans(plans));
   } catch (error) {
     const status = Number(error?.response?.status || 0);
     const payload = error?.response?.data;
@@ -852,7 +893,7 @@ const syncGwFreeFirePlans = async (_, res) => {
 const syncGwRobloxPlans = async (_, res) => {
   try {
     const plans = await syncGwRobloxCatalog();
-    return response.success(res, "GW Roblox katalogi yangilandi", plans);
+    return response.success(res, "GW Roblox katalogi yangilandi", await formatAdminPlans(plans));
   } catch (error) {
     const status = Number(error?.response?.status || 0);
     const payload = error?.response?.data;
@@ -874,7 +915,7 @@ const syncGwRobloxPlans = async (_, res) => {
 const syncGwBloodStrikePlans = async (_, res) => {
   try {
     const plans = await syncGwBloodStrikeCatalog();
-    return response.success(res, "GW Blood Strike katalogi yangilandi", plans);
+    return response.success(res, "GW Blood Strike katalogi yangilandi", await formatAdminPlans(plans));
   } catch (error) {
     const status = Number(error?.response?.status || 0);
     const payload = error?.response?.data;
@@ -896,7 +937,7 @@ const syncGwBloodStrikePlans = async (_, res) => {
 const syncGwDeltaForcePlans = async (_, res) => {
   try {
     const plans = await syncGwDeltaForceCatalog();
-    return response.success(res, "GW Delta Force katalogi yangilandi", plans);
+    return response.success(res, "GW Delta Force katalogi yangilandi", await formatAdminPlans(plans));
   } catch (error) {
     const status = Number(error?.response?.status || 0);
     const payload = error?.response?.data;

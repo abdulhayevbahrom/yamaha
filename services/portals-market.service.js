@@ -1,7 +1,7 @@
 const axios = require("axios");
+const { getUsdUzsRate } = require("./usd-exchange-rate.service");
 
 const BASE_URL = "https://portal-market.com/partners";
-const CBU_USD_URL = "https://cbu.uz/uz/arkhiv-kursov-valyut/json/USD/";
 const RATE_CACHE_TTL_MS = 10 * 60 * 1000;
 const NFT_MEDIA_CACHE_TTL_MS = 60 * 60 * 1000;
 const NFT_MEDIA_CACHE_MAX = 2000;
@@ -348,19 +348,14 @@ async function getPortalsNftWithdrawalStatuses(withdrawalIds) {
   return Array.isArray(result?.data?.statuses) ? result.data.statuses : [];
 }
 
-async function fetchPortalsGramRateUzs() {
-  const [portalsResult, cbuResult] = await Promise.all([
+async function fetchPortalsGramRateUzs({ force }) {
+  const [portalsResult, usdUzs] = await Promise.all([
     getClient().get("/market/config"),
-    axios.get(CBU_USD_URL, { timeout: 10_000, headers: { Accept: "application/json" } }),
+    getUsdUzsRate({ force }),
   ]);
   const gramUsd = toNumber(portalsResult?.data?.usd_course, 0);
-  const cbuRows = Array.isArray(cbuResult?.data) ? cbuResult.data : [];
-  const usdRow = cbuRows.find((item) => normalizeString(item?.Ccy).toUpperCase() === "USD")
-    || cbuRows[0]
-    || null;
-  const usdUzs = toNumber(usdRow?.Rate, 0);
-  if (gramUsd <= 0 || usdUzs <= 0) {
-    throw new Error("GRAM/USD yoki USD/UZS kursi olinmadi");
+  if (gramUsd <= 0) {
+    throw new Error("GRAM/USD kursi olinmadi");
   }
   return {
     gramUsd,
@@ -376,7 +371,7 @@ async function getPortalsGramRateUzs({ force = false } = {}) {
     return rateCache.value;
   }
   if (rateRequest) return rateRequest;
-  rateRequest = fetchPortalsGramRateUzs()
+  rateRequest = fetchPortalsGramRateUzs({ force })
     .then((value) => {
       rateCache = { value, cachedAt: Date.now() };
       return value;

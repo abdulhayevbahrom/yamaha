@@ -15,6 +15,10 @@ const {
   getNftWithdrawalConfig,
   getSupportConfig,
 } = require("../services/settings.service");
+const {
+  getPlanPricingRate,
+  getPlanPrice,
+} = require("../services/plan-pricing.service");
 const { checkForceJoinMembership } = require("../services/force-join.service");
 const {
   checkTelegramPremium,
@@ -213,7 +217,7 @@ async function fetchProfileLookup(username) {
   }
 }
 
-function mapCatalog(plans) {
+function mapCatalog(plans, usdUzsRate) {
   const grouped = {
     star: { name: categoryNames.star, plans: [] },
     premium: { name: categoryNames.premium, plans: [] },
@@ -229,11 +233,14 @@ function mapCatalog(plans) {
 
   plans.forEach((plan) => {
     if (!grouped[plan.category]) return;
+    const basePrice = getPlanPrice(plan, usdUzsRate);
+    if (basePrice === null) return;
     grouped[plan.category].plans.push({
       code: plan.code,
       label: plan.label,
       amount: plan.amount,
-      basePrice: plan.basePrice,
+      basePrice,
+      requiresPriceConfirmation: plan.provider === "gw",
       currency: plan.currency,
       region: ["mlbb", "hok"].includes(plan.category)
         ? String(plan.providerRegion || "global")
@@ -360,7 +367,8 @@ const health = async (_, res) => {
 const getCatalog = async (_, res) => {
   try {
     const plans = await Plan.find({ isActive: true }).lean();
-    return response.success(res, "Catalog", mapCatalog(plans));
+    const usdUzsRate = await getPlanPricingRate(plans);
+    return response.success(res, "Catalog", mapCatalog(plans, usdUzsRate));
   } catch (error) {
     return response.serverError(res, "Catalog olishda xatolik", error.message);
   }

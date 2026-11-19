@@ -208,12 +208,19 @@ function pickMatchingPlan(update, plans) {
   return fuzzy || null;
 }
 
-function formatGwAlertMessage({ update, plan }) {
+function formatLocalPrice(value, unavailableLabel) {
+  const price = Number(value || 0);
+  return price > 0 ? `${price.toLocaleString("uz-UZ")} so'm` : unavailableLabel;
+}
+
+function formatGwAlertMessage({ update, plan, customerPrices }) {
   const directionLabel = update?.direction === "increased" ? "oshdi" : "tushdi";
-  const localPrice = Number(plan?.basePrice || 0);
-  const localPriceLabel = localPrice > 0
-    ? `${localPrice.toLocaleString("uz-UZ")} so'm`
-    : "qo'yilmagan";
+  const localPriceLines = customerPrices
+    ? [
+      `Bizdagi oldingi narx: ${formatLocalPrice(customerPrices.previous, "hisoblab bo'lmadi")}`,
+      `Bizdagi yangi narx: ${formatLocalPrice(customerPrices.next, "hisoblab bo'lmadi")}`,
+    ]
+    : [`Bizdagi oldingi narx: ${formatLocalPrice(plan?.basePrice, "qo'yilmagan")}`];
 
   return [
     "💰 Narx yangilandi",
@@ -222,7 +229,7 @@ function formatGwAlertMessage({ update, plan }) {
     `Holat: narx ${directionLabel}`,
     `Oldingi API narx: $${Number(update?.previousUsd || 0).toFixed(2)}`,
     `Yangi API narx: $${Number(update?.nextUsd || 0).toFixed(2)}`,
-    `Bizdagi oldingi narx: ${localPriceLabel}`,
+    ...localPriceLines,
   ].join("\n");
 }
 

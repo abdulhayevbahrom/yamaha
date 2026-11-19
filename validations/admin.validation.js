@@ -164,12 +164,18 @@ const createPlanValidation = (req) => {
 };
 
 const updatePlanValidation = (req) => {
-  const { label, amount, basePrice, isActive } = req.body || {};
+  const { label, amount, basePrice, markupPercent, isActive } = req.body || {};
   const payload = {};
 
   if (typeof label !== "undefined") payload.label = requireText(label, "label");
   if (typeof amount !== "undefined") payload.amount = requireNumber(amount, "amount");
   if (typeof basePrice !== "undefined") payload.basePrice = requireNumber(basePrice, "basePrice");
+  if (typeof markupPercent !== "undefined") {
+    if (markupPercent !== null && (!Number.isFinite(markupPercent) || markupPercent < 0)) {
+      throw new Error("Ustama foizi 0 yoki undan katta son bo'lishi kerak");
+    }
+    payload.markupPercent = markupPercent;
+  }
   if (typeof isActive !== "undefined") payload.isActive = Boolean(isActive);
 
   if (Object.keys(payload).length === 0) {

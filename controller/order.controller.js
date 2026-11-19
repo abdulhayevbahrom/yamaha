@@ -68,6 +68,10 @@ const {
   getGameStarsPaymentConfig,
   getStarSellPricing,
 } = require("../services/settings.service");
+const {
+  getPlanPricingRate,
+  getPlanPrice,
+} = require("../services/plan-pricing.service");
 const { getTelegramUserFromRequest } = require("../utils/tg-user");
 const {
   releasePaymentCardAllocation,
@@ -360,15 +364,10 @@ const calculatePrice = async (req, res) => {
           return response.error(res, "Tanlangan miqdor noto'g'ri");
         }
         const basePrice = qty * Number(pricing.pricePerStar || 0);
-        const amount = await getUniquePendingAmount({
-          product,
-          planCode: "custom",
-          basePrice,
-        });
         return response.success(res, "Narx hisoblandi", {
           product,
           planCode: "custom",
-          amount,
+          amount: Math.round(basePrice),
           baseAmount: basePrice,
           expiresInSeconds: 600,
           currency: "UZS",
@@ -383,16 +382,15 @@ const calculatePrice = async (req, res) => {
     }).lean();
     if (!plan) return response.error(res, "Tanlangan paket topilmadi");
 
-    const amount = await getUniquePendingAmount({
-      product,
-      planCode,
-      basePrice: plan.basePrice,
-    });
+    const basePrice = Number(getPlanPrice(plan, await getPlanPricingRate([plan])));
+    if (!Number.isFinite(basePrice) || basePrice <= 0) {
+      return response.error(res, "Tanlangan paket narxi sozlanmagan");
+    }
     return response.success(res, "Narx hisoblandi", {
       product,
       planCode,
-      amount,
-      baseAmount: plan.basePrice,
+      amount: Math.round(basePrice),
+      baseAmount: basePrice,
       expiresInSeconds: 600,
       currency: plan.currency || "UZS",
     });
@@ -427,6 +425,7 @@ const createOrder = async (req, res) => {
       zoneId = "",
       profileName = "",
       customAmount,
+      quotedAmount,
       paymentMethod = "balance",
     } = requestBody;
     const normalizedPaymentMethod = String(paymentMethod || "balance")
@@ -600,7 +599,8 @@ const createOrder = async (req, res) => {
         isActive: true,
       }).lean();
       if (!plan) return response.error(res, "Tanlangan paket topilmadi");
-      if (!Number.isFinite(Number(plan.basePrice)) || Number(plan.basePrice) <= 0) {
+      resolvedBasePrice = Number(getPlanPrice(plan, await getPlanPricingRate([plan])));
+      if (!Number.isFinite(resolvedBasePrice) || resolvedBasePrice <= 0) {
         return response.error(res, "Tanlangan paket narxi sozlanmagan");
       }
       if (
@@ -644,11 +644,22 @@ const createOrder = async (req, res) => {
         }
       }
       resolvedAmount = plan.amount;
-      resolvedBasePrice = plan.basePrice;
+    }
+
+    let expected = Math.round(Number(resolvedBasePrice || 0));
+    // Edited GW prices explicitly store null for fixed or a number for percentage pricing.
+    if (
+      plan?.provider === "gw" &&
+      (plan.markupPercent !== undefined || quotedAmount !== undefined) &&
+      quotedAmount !== expected
+    ) {
+      return response.error(res, "Paket narxi o'zgardi. Yangi summani tasdiqlang.", {
+        code: "PRICE_CHANGED",
+        amount: expected,
+      });
     }
 
     let paid = 0;
-    let expected = 0;
     let expiresAt = null;
     let finalStatus = "pending_payment";
     let paidAt = null;
@@ -656,13 +667,11 @@ const createOrder = async (req, res) => {
     let paymentCardSnapshot = null;
 
     if (normalizedPaymentMethod === "balance") {
-      expected = Math.round(Number(resolvedBasePrice || 0));
       paid = expected;
       paidAt = new Date();
       finalStatus = "paid_auto_processed";
       expiresAt = null;
     } else {
-      expected = Math.round(Number(resolvedBasePrice || 0));
       expiresAt = new Date(Date.now() + PENDING_TTL_MS);
     }
 

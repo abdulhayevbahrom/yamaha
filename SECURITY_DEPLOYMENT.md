@@ -102,8 +102,11 @@ GW integratsiyasini birdaniga yoqmaslik kerak. Deploy tartibi:
 3. Yangi GW API kalitini faqat backend `.env` fayliga yozing.
 4. Backendni restart qilib, admin paneldagi “GW katalogini yangilash” amalini bajaring.
 5. Har bir PID, UC miqdori, GW USD narxi va mavjudlik holatini tekshiring.
-6. Har bir faol paketga mijoz uchun UZS narxini kiriting. Provider USD narxi
-   mijoz narxi sifatida ishlatilmaydi.
+6. Har bir faol GW paketi uchun admin panelda narx usulini tanlang. Qat'iy
+   usulda sotuv narxini so'mda kiriting. Foizli usulda GW USD narxi Markaziy
+   bank kursida so'mga o'tkaziladi, belgilangan ustama qo'shiladi va summa
+   100 so'mga karrali qiymatgacha yuqoriga yaxlitlanadi. Paketni tahrirlashda
+   ikkala usul o'rtasida o'tish mumkin.
 7. `NODE_ENV=production npm run preflight` muvaffaqiyatli tugaganini tekshiring.
 8. Faqat shundan keyin `GW_PUBG_AUTOBUY_ENABLED=true` qilib backendni restart qiling.
 9. Bitta kichik ichki PUBG buyurtmasini tekshiring; `completed`, provider order ID,
@@ -123,7 +126,9 @@ GW_PUBG_CATALOG_MAX_AGE_MS=1800000
 ```
 
 Katalog belgilangan maksimal yoshdan eskirsa yoki paket providerda mavjud bo'lmasa,
-yangi buyurtma qabul qilinmaydi. Submit natijasi timeout sabab noma'lum bo'lsa,
-bir xil idempotent `trxid` bilan recovery bajariladi. Recovery ham aniq natija
+yangi buyurtma qabul qilinmaydi. Davriy katalog sinxronlash GW narxini yangilaganda,
+foizli paketning sotuv narxi avtomatik qayta hisoblanadi.
+Submit natijasi timeout sabab noma'lum bo'lsa, bir xil idempotent `trxid` bilan
+recovery bajariladi. Recovery ham aniq natija
 bermasa order `needs_review` holatiga o'tadi; bu holatda avtomatik refund yoki
 yangi `trxid` bilan qayta xarid qilish taqiqlanadi.

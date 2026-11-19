@@ -1,5 +1,6 @@
 const TelegramBot = require("node-telegram-bot-api");
 const Plan = require("../model/plan.model");
+const { getPlanPricingRate, getPlanPrice, hasGwMarkup } = require("./plan-pricing.service");
 const {
   parseGwPriceUpdateMessage,
   isGwPriceAlertText,
@@ -30,7 +31,7 @@ async function getActiveGwPlans() {
       $in: ["uc", "redeem", "freefire", "mlbb", "hok", "roblox", "bloodstrike", "deltaforce"],
     },
   })
-    .select("category label amount basePrice providerProductId providerRegion")
+    .select("category label amount basePrice provider providerProductId providerRegion markupPercent")
     .lean();
 }
 
@@ -79,6 +80,7 @@ async function processGwPriceAlertMessage(text) {
   let matched = 0;
   const unmatched = [];
   const sendFailures = [];
+  let rate;
 
   for (const update of updates) {
     const plan = pickMatchingPlan(update, plans);
@@ -94,7 +96,15 @@ async function processGwPriceAlertMessage(text) {
 
     matched += 1;
     try {
-      await bot.sendMessage(targetChatId, formatGwAlertMessage({ update, plan }));
+      let customerPrices;
+      if (hasGwMarkup(plan)) {
+        if (rate === undefined) rate = await getPlanPricingRate([plan]);
+        customerPrices = {
+          previous: getPlanPrice({ ...plan, providerPriceUsd: update.previousUsd }, rate),
+          next: getPlanPrice({ ...plan, providerPriceUsd: update.nextUsd }, rate),
+        };
+      }
+      await bot.sendMessage(targetChatId, formatGwAlertMessage({ update, plan, customerPrices }));
       sent += 1;
     } catch (error) {
       sendFailures.push({
