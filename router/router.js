@@ -3,6 +3,7 @@ const router = express.Router();
 const publicController = require("../controller/public.controller");
 const orderController = require("../controller/order.controller");
 const adminController = require("../controller/admin.controller");
+const { uploadImage, MAX_IMAGE_BYTES } = require("../controller/image-upload.controller");
 const contestController = require("../controller/contest.controller");
 const userController = require("../controller/user.controller");
 const giftController = require("../controller/gift.controller");
@@ -44,6 +45,13 @@ const adminLoginRateLimit = createRateLimit({
   windowMs: Number(process.env.RATE_LIMIT_ADMIN_LOGIN_WINDOW_MS || 60_000),
   max: Number(process.env.RATE_LIMIT_ADMIN_LOGIN_MAX || 12),
 });
+const adminImageUploadRateLimit = createRateLimit({
+  keyPrefix: "admin-image-upload",
+  windowMs: 60_000,
+  max: 20,
+  keyGenerator: (req) => String(req.admin.tgUserId),
+});
+const imageBodyParser = express.raw({ type: () => true, limit: MAX_IMAGE_BYTES });
 router.get("/health", publicController.health);
 router.get("/catalog", publicController.getCatalog);
 router.get("/settings", publicController.getSettings);
@@ -286,6 +294,24 @@ router.post(
   adminController.login,
 );
 router.get("/admin/plans", authMiddleware, adminController.getPlans);
+router.post(
+  "/admin/images/upload",
+  authMiddleware,
+  adminImageUploadRateLimit,
+  (req, res, next) => {
+    imageBodyParser(req, res, (error) => {
+      if (!error) return next();
+      return res.status(error.type === "entity.too.large" ? 413 : 400).json({
+        state: false,
+        message: error.type === "entity.too.large"
+          ? "Rasm hajmi 5 MB dan oshmasligi kerak"
+          : "Rasm faylini o'qib bo'lmadi",
+        innerData: null,
+      });
+    });
+  },
+  uploadImage,
+);
 router.post(
   "/admin/providers/gw/pubg/sync",
   authMiddleware,

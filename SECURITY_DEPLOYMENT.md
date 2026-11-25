@@ -18,6 +18,22 @@ Production muhitida quyidagi sozlamalarni kiritish shart.
   qiymati ishlatilsa, origin server internetdan bevosita ochiq bo‘lmasligi
   kerak.
 
+## ImgBB rasm yuklash
+
+Banner va gift rasmlari faqat admin sessiyasi tekshiriladigan
+`POST /api/admin/images/upload` orqali yuklanadi. Backend `.env` fayliga
+`IMGBB_API_KEY` yozing. Frontend muhitidan `VITE_IMGBB_API_KEY` ni o'chiring:
+frontendga berilgan kalit build ichida hammaga ko'rinadi.
+
+Oldin frontendda ishlatilgan kalitni ImgBB kabinetida bekor qilib, yangi
+kalitni faqat backendga kiriting. Backendni restart qiling va frontendni
+qayta build/deploy qiling; eski frontend assetlari va CDN keshini ham
+tozalang. Git tarixidagi eski build ham oshkor bo'lgan kalitni saqlashi
+mumkin, shuning uchun kalitni almashtirish zarur.
+
+PNG, JPEG, GIF va WebP fayllar qabul qilinadi, maksimal hajm 5 MB.
+Har bir admin bir daqiqada 20 ta rasm yuklashi mumkin.
+
 ## Cloudflare Turnstile
 
 Turnstile buyurtma yaratish, balans to‘ldirish, Gift/NFT amallari va admin

@@ -390,6 +390,7 @@ async function markFulfillmentFailure(order, error) {
           ? "order_cancelled_refund"
           : "order_fulfillment_failed",
       refreshBalance: Boolean(refundSentAt),
+      refundedToBalance: Boolean(refundSentAt),
       refreshOrders: true,
       orderId: order._id,
       status: nextStatus,
