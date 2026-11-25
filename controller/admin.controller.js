@@ -3,6 +3,7 @@ const crypto = require("node:crypto");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const response = require("../utils/response");
+const { sanitizeFragmentTx } = require("../utils/public-payload");
 const Plan = require("../model/plan.model");
 const PaymentCard = require("../model/payment-card.model");
 const StaticGift = require("../model/static-gift.model");
@@ -1676,15 +1677,31 @@ const getUserOrders = async (req, res) => {
     const page = Math.max(1, Math.floor(Number(req.query?.page || 1)));
     const limit = Math.min(50, Math.max(1, Math.floor(Number(req.query?.limit || 20))));
     const query = { tgUserId };
-    if (filter === "completed") query.status = { $in: ["completed", "paid_auto_processed"] };
-    if (filter === "cancelled") query.status = "cancelled";
+    if (filter === "completed") {
+      query.$or = [{ status: "completed" }, { fulfillmentStatus: "success" }];
+      query["fragmentTx.refundedToBalanceAt"] = null;
+    }
+    if (filter === "cancelled") {
+      query.status = "cancelled";
+      query.fulfillmentStatus = { $ne: "success" };
+      query["fragmentTx.refundedToBalanceAt"] = null;
+    }
+    if (filter === "refunded") {
+      query["fragmentTx.refundedToBalanceAt"] = { $exists: true, $ne: null };
+    }
+    if (filter === "failed") {
+      query.$or = [{ status: "failed" }, { fulfillmentStatus: "failed" }];
+      query.status = { $nin: ["completed", "cancelled"] };
+      query.fulfillmentStatus = { $ne: "success" };
+      query["fragmentTx.refundedToBalanceAt"] = null;
+    }
 
     const [orders, totalItems] = await Promise.all([
       Order.find(query)
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
-        .select({ orderId: 1, product: 1, planCode: 1, expectedAmount: 1, paidAmount: 1, paymentMethod: 1, status: 1, createdAt: 1, paidAt: 1 })
+        .select({ orderId: 1, product: 1, planCode: 1, expectedAmount: 1, paidAmount: 1, paymentMethod: 1, status: 1, fulfillmentStatus: 1, fulfillmentError: 1, "fragmentTx.refundedToBalanceAt": 1, "fragmentTx.refundReason": 1, "fragmentTx.refundTarget": 1, createdAt: 1, paidAt: 1 })
         .lean(),
       Order.countDocuments(query),
     ]);
@@ -1698,10 +1715,13 @@ const getUserOrders = async (req, res) => {
         amount: Number(order.paidAmount || order.expectedAmount || 0),
         paymentMethod: normalizeString(order.paymentMethod),
         status: normalizeString(order.status),
+        fulfillmentStatus: normalizeString(order.fulfillmentStatus),
+        fulfillmentError: normalizeString(order.fulfillmentError),
+        fragmentTx: sanitizeFragmentTx(order.fragmentTx),
         createdAt: order.createdAt || null,
         paidAt: order.paidAt || null,
       })),
-      filter: ["completed", "cancelled"].includes(filter) ? filter : "all",
+      filter: ["completed", "cancelled", "refunded", "failed"].includes(filter) ? filter : "all",
       page,
       limit,
       totalItems,

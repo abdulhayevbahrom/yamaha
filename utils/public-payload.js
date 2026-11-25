@@ -81,4 +81,5 @@ function sanitizePublicOrder(order) {
 module.exports = {
   sanitizePublicOrder,
   sanitizePaymentCardSnapshot,
+  sanitizeFragmentTx,
 };
