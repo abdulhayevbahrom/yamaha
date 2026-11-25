@@ -60,7 +60,13 @@ test("video broadcast preserves caption, entities and buttons", async () => {
   assert.equal(call[2].reply_markup.inline_keyboard[0][0].text, "Ochish");
 });
 
-test("channel photo uses URL buttons and preserves the private-chat button", async () => {
+test("channel photo links to the bot Mini App and preserves the private-chat button", async (t) => {
+  const previousUsername = process.env.BOT_USERNAME;
+  process.env.BOT_USERNAME = "TestShopBot";
+  t.after(() => {
+    if (previousUsername === undefined) delete process.env.BOT_USERNAME;
+    else process.env.BOT_USERNAME = previousUsername;
+  });
   const button = { text: "Do'kon", web_app: { url: "https://example.com/#/games/pubg" } };
   const broadcast = { type: "photo", fileId: "photo-file", text: "Reklama", buttons: [[button]] };
   const bot = { sendPhoto: async (...args) => args };
@@ -69,9 +75,29 @@ test("channel photo uses URL buttons and preserves the private-chat button", asy
   assert.deepEqual(channelCall, [
     "@public_channel",
     "photo-file",
-    { caption: "Reklama", reply_markup: { inline_keyboard: [[{ text: button.text, url: button.web_app.url }]] } },
+    { caption: "Reklama", reply_markup: { inline_keyboard: [[{ text: button.text, url: "https://t.me/TestShopBot?startapp=games__pubg" }]] } },
   ]);
 
   const privateCall = await sendBroadcastMessage(bot, broadcast, "1001");
   assert.deepEqual(privateCall[2].reply_markup.inline_keyboard, [[button]]);
+});
+
+test("channel photo falls back to the original URL without a valid bot username", async (t) => {
+  const previousUsername = process.env.BOT_USERNAME;
+  t.after(() => {
+    if (previousUsername === undefined) delete process.env.BOT_USERNAME;
+    else process.env.BOT_USERNAME = previousUsername;
+  });
+  const button = { text: "Do'kon", web_app: { url: "https://example.com/#/games/pubg" } };
+  const broadcast = { type: "photo", fileId: "photo-file", text: "Reklama", buttons: [[button]] };
+  const bot = { sendPhoto: async (...args) => args };
+
+  for (const username of [undefined, "invalid!username"]) {
+    if (username === undefined) delete process.env.BOT_USERNAME;
+    else process.env.BOT_USERNAME = username;
+    const channelCall = await sendBroadcastMessage(bot, broadcast, "@public_channel");
+    assert.deepEqual(channelCall[2].reply_markup.inline_keyboard, [[{ text: button.text, url: button.web_app.url }]]);
+    const privateCall = await sendBroadcastMessage(bot, broadcast, "1001");
+    assert.deepEqual(privateCall[2].reply_markup.inline_keyboard, [[button]]);
+  }
 });
